@@ -1,0 +1,35 @@
+# Core ML frameworks
+torch>=2.0.0
+torchaudio
+torchvision
+
+# Hugging Face ecosystem
+transformers>=4.35.0
+datasets>=2.14.0
+accelerate>=0.24.0
+evaluate>=0.4.0
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Utilities
+numpy<2.0.0
+pandas
+tqdm
+packaging
+filelock
+
+# Optional for development
+ipython
+jupyter
+
+# For GGML export (optional)
+# ctranslate2
+
+# Note: For Apple Silicon (MPS) support, ensure you install:
+# - PyTorch 2.0+ with MPS support (included above)
+# - Python 3.8+ ARM64 native (not x86_64/Rosetta)
+# 
+# Verify with:
+# python -c "import torch; print(torch.backends.mps.is_available())"
