@@ -8,6 +8,7 @@ transformers>=4.35.0
 datasets>=2.14.0
 accelerate>=0.24.0
 evaluate>=0.4.0
+peft>=0.7.0
 
 # Audio processing
 librosa>=0.10.0
@@ -19,6 +20,7 @@ pandas
 tqdm
 packaging
 filelock
+tabulate
 
 # Optional for development
 ipython
