@@ -6,7 +6,8 @@ A comprehensive framework for fine-tuning OpenAI's Whisper models with native Ap
 
 - 🚀 **Native Apple Silicon Support**: Optimized for M1/M2/M3 chips using MPS
 - 🔄 **Cross-Platform**: Also supports NVIDIA GPUs (CUDA) and CPU
-- 🎯 **Multiple Model Support**: Whisper (small, medium, large-v2) and Distil-Whisper
+- 🎯 **Multiple Training Methods**: Standard fine-tuning, Knowledge Distillation, and LoRA (Parameter-Efficient Fine-Tuning)
+- ⚡ **LoRA Support**: Memory-efficient training with 95%+ parameter reduction and 10-50MB checkpoints
 - 🧠 **Knowledge Distillation**: Create smaller, faster models via teacher-student training
 - 📊 **Comprehensive Evaluation**: WER/CER metrics with detailed analysis
 - 🔍 **Outlier Detection**: Automatic blacklisting of problematic samples
@@ -26,6 +27,49 @@ The base Whisper models come in several sizes, each with a specific number of en
 | Large | 32 | 32 | 1.55B |
 
 **Note on Distillation:** The knowledge distillation process in this repository often uses a "student" model with fewer *decoder* layers than the "teacher" to significantly improve inference speed. For example, a common strategy is to pair a large encoder (like the one from `large-v2`) with a much smaller decoder (e.g., from the `small` or `base` model). This retains the powerful audio understanding of the large encoder while making the text generation part much faster and more efficient.
+
+## Training Methods
+
+Choose the right method for your use case:
+
+| Method | Memory Usage | Training Speed | Output Size | Best For |
+|--------|--------------|----------------|-------------|----------|
+| **LoRA ⭐** | Low (4-8GB) | Fast | ~10-50MB | **Recommended for most users** |
+| Standard | High (16-24GB) | Moderate | ~1GB | Maximum performance needs |
+| Distillation | Very High | Slow | ~1GB | Production model compression |
+
+### 1. LoRA (Low-Rank Adaptation) ⭐ **Recommended**
+- **Description**: Freezes base model, trains small adapter layers
+- **Memory**: Low (4-8GB for small model vs 16-24GB standard)
+- **Training Time**: Fast (2-3x faster than standard fine-tuning)
+- **Output**: Lightweight adapters (~10-50MB vs ~1GB full model)
+- **Trainable Parameters**: 0.2-3% of original model (99.8% reduction)
+- **Use Case**: Domain adaptation, limited compute, iterative experimentation
+
+**Why LoRA is Recommended:**
+- **Memory Efficient**: Train large models on consumer hardware
+- **Storage Efficient**: Multiple domain adapters take minimal space
+- **Modular**: Swap adapters for different domains without retraining
+- **Risk-Free**: Original model remains unchanged
+- **Apple Silicon Optimized**: Designed for MPS efficiency
+
+📖 **[Complete LoRA Guide →](documentation/README_LORA.md)**
+
+### 2. Standard Fine-Tuning
+- **Description**: Updates all model parameters during training
+- **Memory**: High (16-24GB for small model)
+- **Training Time**: Moderate
+- **Output**: Full model checkpoint (~1GB)
+- **Use Case**: Maximum performance when compute resources are abundant
+
+### 3. Knowledge Distillation
+- **Description**: Train a smaller "student" model to mimic a larger "teacher"
+- **Memory**: Very High (both models loaded simultaneously)
+- **Training Time**: Long (custom training loop required)
+- **Output**: Compressed student model
+- **Use Case**: Production deployment requiring smaller model size
+
+📖 **[Complete Distillation Guide →](documentation/README_DISTILLATION.md)**
 
 ## System Requirements
 
@@ -59,8 +103,12 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 ### 3. Install dependencies
 ```bash
+# Core dependencies
 pip install transformers datasets evaluate librosa soundfile accelerate
-pip install packaging filelock
+pip install packaging filelock tabulate
+
+# For LoRA training (parameter-efficient fine-tuning)
+pip install peft
 ```
 
 ### 4. Verify MPS setup
@@ -96,6 +144,42 @@ python main.py --profile medium-data3
 python scripts/evaluate.py --model_name_or_path output/run-001-medium-data3 --dataset data3
 ```
 
+## LoRA Quick Start
+
+**For most users, LoRA is the recommended starting point.** It's faster, uses less memory, and produces smaller checkpoints while maintaining excellent performance.
+
+### 1. Choose a LoRA profile and run training
+```bash
+# Start with small model (recommended for testing)
+python main.py --profile small-lora-data3
+
+# Scale up to medium for better performance
+python main.py --profile medium-lora-data3
+
+# For Apple Silicon - enable fallback initially
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+```
+
+### 2. Training produces lightweight adapters
+```
+output/run-001-small-lora-data3/
+├── adapter_model/          # LoRA weights (~10-50MB)
+├── training_args.bin      # Training configuration  
+└── trainer_state.json     # Training metrics
+```
+
+### 3. Evaluate your LoRA model
+```bash
+python scripts/evaluate.py --model_name_or_path output/run-001-small-lora-data3 --dataset data3
+```
+
+**Need more control?** See the **[Complete LoRA Guide](documentation/README_LORA.md)** for:
+- Parameter tuning strategies
+- 8-bit quantization setup
+- Multiple adapter management
+- Apple Silicon optimization
+- Advanced troubleshooting
+
 ## Apple Silicon Optimization
 
 ### Environment Variables
@@ -108,11 +192,20 @@ export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 ```
 
 ### Recommended Batch Sizes
+
+#### Standard Fine-Tuning
 | Model | M1/M2 (16-24GB) | M1/M2 Max (32-64GB) | M1/M2 Ultra (64-192GB) |
 |-------|-----------------|---------------------|------------------------|
 | Small | 16 | 24 | 32+ |
 | Medium | 8 | 16 | 24+ |
 | Large-v2 | 4 | 8 | 16+ |
+
+#### LoRA Fine-Tuning (Higher batch sizes possible due to lower memory usage)
+| Model | M1/M2 (16-24GB) | M1/M2 Max (32-64GB) | M1/M2 Ultra (64-192GB) |
+|-------|-----------------|---------------------|------------------------|
+| Small | 24 | 32+ | 48+ |
+| Medium | 16 | 24+ | 32+ |
+| Large-v2 | 8 | 16+ | 24+ |
 
 ### Performance Tips
 1. **Start small**: Use conservative batch sizes initially
@@ -124,8 +217,9 @@ export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 ```
 whisper-fine-tuner-macos/
 ├── models/
-│   ├── whisper/         # Standard Whisper models
-│   └── distil-whisper/  # Distilled Whisper models
+│   ├── whisper/         # Standard Whisper fine-tuning
+│   ├── distil-whisper/  # Knowledge distillation training
+│   └── whisper-lora/    # LoRA (Parameter-Efficient Fine-Tuning)
 ├── scripts/
 │   ├── system_check.py  # Verify GPU/MPS setup
 │   ├── evaluate.py      # Model evaluation
