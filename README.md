@@ -302,7 +302,7 @@ This technique is perfect for targeting highly resource-constrained environments
 
 1. **Configure distillation parameters** (already set in `config.ini`):
 ```ini
-[finetuning.distil-whisper]
+[finetuning.distil_whisper]
 temperature = 2.0      # Temperature scaling for probability smoothing
 kl_weight = 0.5        # Weight balancing KL divergence vs cross-entropy loss
 ```
