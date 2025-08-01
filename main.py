@@ -66,9 +66,18 @@ import os
 from datetime import datetime
 from scripts.utils import update_metadata
 import json
-import torch
 import traceback
 from filelock import FileLock
+
+# Early MPS memory configuration - MUST happen before PyTorch import
+# MPS environment variables need to be set before PyTorch initialization
+import platform
+if platform.system() == "Darwin" and platform.machine() == "arm64":
+    # Set MPS memory limit for Apple Silicon before PyTorch import
+    os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.8")
+
+import torch
+import logging
 from utils.device import get_device, set_memory_fraction
 from constants import MemoryLimits
 
@@ -82,9 +91,10 @@ if device.type == "cuda":
     # Provides 10-20% training speedup with fixed input dimensions
     torch.backends.cudnn.benchmark = True
 elif device.type == "mps":
-    # Configure MPS memory pressure management for Apple Silicon
-    # Use constants.py value to prevent system-wide memory swapping while maximizing GPU utilization
-    set_memory_fraction(MemoryLimits.MPS_DEFAULT_FRACTION)
+    # MPS memory configuration already set before PyTorch import (line 77)
+    # Log confirmation that MPS is configured
+    logger = logging.getLogger(__name__)
+    logger.info(f"MPS device detected with memory ratio: {os.environ.get('PYTORCH_MPS_HIGH_WATERMARK_RATIO', 'not set')}")
 
 def get_next_run_id(output_dir):
     """
@@ -568,9 +578,18 @@ def main():
             mark_run_as_completed(run_dir)
             update_run_metadata(run_dir, status="completed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+        except ImportError as e:
+            logger.error(f"Module import error during finetuning: {e}")
+            update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=f"ImportError: {str(e)}")
+            raise
+        except ValueError as e:
+            logger.error(f"Configuration error during finetuning: {e}")
+            update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=f"ValueError: {str(e)}")
+            raise
         except Exception as e:
-            print(f"Error during finetuning: {e}")
+            logger.error(f"Unexpected error during finetuning: {e}", exc_info=True)
             update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=str(e))
+            raise
 
     elif args.operation == "evaluate":
         if not args.profile_or_model_dataset:
@@ -632,9 +651,18 @@ def main():
             mark_run_as_completed(run_dir)
             update_run_metadata(run_dir, status="completed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+        except FileNotFoundError as e:
+            logger.error(f"Model or dataset not found during evaluation: {e}")
+            update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=f"FileNotFoundError: {str(e)}")
+            raise
+        except ValueError as e:
+            logger.error(f"Configuration error during evaluation: {e}")
+            update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=f"ValueError: {str(e)}")
+            raise
         except Exception as e:
-            print(f"Error during evaluation: {e}")
+            logger.error(f"Unexpected error during evaluation: {e}", exc_info=True)
             update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=str(e))
+            raise
 
     elif args.operation == "export":
         from scripts.export import export_ggml
@@ -657,13 +685,11 @@ def main():
         system_check_main()
 
     elif args.operation == "blacklist":
-
-        finetuning_run_dir = find_finetuning_run_dir(output_dir, args.profile_or_model_dataset)
-        run_dir = os.path.join(finetuning_run_dir, "blacklist")
-
         profile_name = args.profile_or_model_dataset
         run_id = get_next_run_id(output_dir)
         run_dir = create_run_directory(output_dir, profile_name, run_id, "blacklist")
+        
+        finetuning_run_dir = find_finetuning_run_dir(output_dir, args.profile_or_model_dataset)
 
         try:
             profile_config = load_profile_config(config, profile_name)
@@ -682,9 +708,15 @@ def main():
 
             print(f"Blacklist created at: {blacklist_path}")
 
+        except FileNotFoundError as e:
+            logger.error(f"Fine-tuning run not found for blacklist creation: {e}")
+            raise
+        except ValueError as e:
+            logger.error(f"Configuration error during blacklist creation: {e}")
+            raise
         except Exception as e:
-            print(f"Error during blacklist creation: {e}")
-            traceback.print_exc()
+            logger.error(f"Unexpected error during blacklist creation: {e}", exc_info=True)
+            raise
 
     else:
         print(f"Invalid operation: {args.operation}")
