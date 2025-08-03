@@ -13,6 +13,7 @@ A comprehensive framework for fine-tuning OpenAI's Whisper models with native Ap
 - 🔍 **Outlier Detection**: Automatic blacklisting of problematic samples
 - 🏷️ **Pseudo-Labeling**: Generate labels for unlabeled data
 - 📦 **Export to GGML**: Convert models for whisper.cpp
+- ☁️ **Cloud Storage Streaming**: Train on massive datasets without local storage
 
 ## Model Architectures
 
@@ -116,13 +117,57 @@ pip install peft
 python scripts/system_check.py
 ```
 
+## Cloud Storage Streaming (New!)
+
+Train on massive datasets without downloading them locally. The framework now supports streaming audio files directly from Google Cloud Storage during training.
+
+### Benefits
+- **No disk space required**: Audio files stream directly from GCS
+- **Massive scalability**: Train on datasets of any size
+- **Cost efficient**: No need for large local storage
+- **Seamless integration**: Works with all training methods (standard, LoRA, distillation)
+
+### Setup
+1. Store your audio files in Google Cloud Storage
+2. Set up GCS authentication (via `gcloud auth` or service account)
+3. Use GCS URIs (`gs://bucket/path/file.wav`) in your dataset CSV
+4. Add `--no-download` flag when preparing data
+
+### Example Workflow
+```bash
+# Your CSV contains GCS URIs like:
+# audio_url,text_perfect,note_id
+# gs://my-bucket/audio/file1.wav,"Hello world",1
+# gs://my-bucket/audio/file2.wav,"Training example",2
+
+# Prepare dataset without downloading
+python scripts/prepare_data.py your_dataset --no-download
+
+# Train as normal - audio streams automatically
+python main.py --profile medium-lora-data3
+```
+
+The system automatically detects GCS paths and streams audio on-demand during training.
+
 ## Quick Start
 
 ### 1. Prepare your dataset
 Create a CSV file with columns:
-- `audio_path`: Path to audio files
+- `audio_url`: URL or path to audio files (supports GCS URLs like `gs://bucket/file.wav`)
 - `text_perfect`: Target transcription
 - `note_id`: Unique identifier
+
+**Standard Mode** (downloads all audio files locally):
+```bash
+python scripts/prepare_data.py your_dataset
+```
+
+**Streaming Mode** (for large datasets - no local download):
+```bash
+python scripts/prepare_data.py your_dataset --no-download
+```
+
+With `--no-download`, audio files are streamed from Google Cloud Storage during training, eliminating disk space requirements for massive datasets.
 
 ### 2. Configure training
 Edit `config.ini` to set:
