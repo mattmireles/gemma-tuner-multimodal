@@ -26,6 +26,9 @@ tabulate
 ipython
 jupyter
 
+# Cloud storage support
+google-cloud-storage>=2.10.0
+
 # For GGML export (optional)
 # ctranslate2
 
