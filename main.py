@@ -84,6 +84,9 @@ import logging
 from utils.device import get_device, set_memory_fraction
 from constants import MemoryLimits
 
+# Initialize logger before any usage
+logger = logging.getLogger(__name__)
+
 # Device Detection and Platform Optimization Setup
 # This must happen early before any model loading or tensor operations
 device = get_device()
@@ -94,9 +97,8 @@ if device.type == "cuda":
     # Provides 10-20% training speedup with fixed input dimensions
     torch.backends.cudnn.benchmark = True
 elif device.type == "mps":
-    # MPS memory configuration already set before PyTorch import (line 77)
+    # MPS memory configuration already set before PyTorch import (line 10)
     # Log confirmation that MPS is configured
-    logger = logging.getLogger(__name__)
     logger.info(f"MPS device detected with memory ratio: {os.environ.get('PYTORCH_MPS_HIGH_WATERMARK_RATIO', 'not set')}")
 
 def get_next_run_id(output_dir):

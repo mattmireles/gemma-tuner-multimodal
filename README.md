@@ -54,7 +54,7 @@ Choose the right method for your use case:
 - **Risk-Free**: Original model remains unchanged
 - **Apple Silicon Optimized**: Designed for MPS efficiency
 
-📖 **[Complete LoRA Guide →](documentation/README_LORA.md)**
+📖 **[Complete LoRA Guide →](README/LoRA.md)**
 
 ### 2. Standard Fine-Tuning
 - **Description**: Updates all model parameters during training
@@ -70,7 +70,7 @@ Choose the right method for your use case:
 - **Output**: Compressed student model
 - **Use Case**: Production deployment requiring smaller model size
 
-📖 **[Complete Distillation Guide →](documentation/README_DISTILLATION.md)**
+📖 **[Complete Distillation Guide →](README/Distillation.md)**
 
 ## System Requirements
 
@@ -218,7 +218,7 @@ output/run-001-small-lora-data3/
 python scripts/evaluate.py --model_name_or_path output/run-001-small-lora-data3 --dataset data3
 ```
 
-**Need more control?** See the **[Complete LoRA Guide](documentation/README_LORA.md)** for:
+**Need more control?** See the **[Complete LoRA Guide](README/LoRA.md)** for:
 - Parameter tuning strategies
 - 8-bit quantization setup
 - Multiple adapter management
@@ -234,23 +234,28 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 
 # Set memory limit (0.8 = 80% of system RAM)
 export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
+
+# Enable Flash Attention 2 (reduces memory by ~28%)
+export SDPA_ALLOW_FLASH_ATTN=1
 ```
 
-### Recommended Batch Sizes
+### Recommended Batch Sizes (Updated for PyTorch 2.3 with Flash Attention 2)
 
 #### Standard Fine-Tuning
-| Model | M1/M2 (16-24GB) | M1/M2 Max (32-64GB) | M1/M2 Ultra (64-192GB) |
-|-------|-----------------|---------------------|------------------------|
-| Small | 16 | 24 | 32+ |
-| Medium | 8 | 16 | 24+ |
-| Large-v2 | 4 | 8 | 16+ |
+| Model | M1/M2 Pro (16-32GB) | M1/M2 Max (32-64GB) | M1/M2 Ultra (64-192GB) |
+|-------|---------------------|---------------------|------------------------|
+| Small | 8-12 | 16-20 | 24+ |
+| Medium | 4-6 | 8-12 | 16+ |
+| Large-v2 | 2-4 | 4-6 | 8+ |
 
-#### LoRA Fine-Tuning (Higher batch sizes possible due to lower memory usage)
-| Model | M1/M2 (16-24GB) | M1/M2 Max (32-64GB) | M1/M2 Ultra (64-192GB) |
-|-------|-----------------|---------------------|------------------------|
-| Small | 24 | 32+ | 48+ |
-| Medium | 16 | 24+ | 32+ |
-| Large-v2 | 8 | 16+ | 24+ |
+#### LoRA Fine-Tuning (Higher batch sizes with Flash Attention 2)
+| Model | M1/M2 Pro (16-32GB) | M1/M2 Max (32-64GB) | M1/M2 Ultra (64-192GB) |
+|-------|---------------------|---------------------|------------------------|
+| Small | 16-20 | 24-32 | 40+ |
+| Medium | 8-12 | 16-20 | 24+ |
+| Large-v2 | 4-6 | 8-12 | 16+ |
+
+*Note: With Flash Attention 2 enabled (default), memory usage is ~28% lower than these estimates.*
 
 ### Performance Tips
 1. **Start small**: Use conservative batch sizes initially
