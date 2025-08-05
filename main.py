@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+
+# CRITICAL: MPS memory configuration MUST happen before ANY imports
+# This includes standard library imports, as they may trigger other imports
+# that could initialize PyTorch or its dependencies
+import os
+import platform
+if platform.system() == "Darwin" and platform.machine() == "arm64":
+    # Set MPS memory limit for Apple Silicon before ANY other imports
+    os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.8")
+
 """
 Whisper Fine-Tuner Main Entry Point
 
@@ -62,19 +72,12 @@ Apple Silicon optimizations:
 import argparse
 import configparser
 import importlib
-import os
+# os and platform already imported above for MPS configuration
 from datetime import datetime
 from scripts.utils import update_metadata
 import json
 import traceback
 from filelock import FileLock
-
-# Early MPS memory configuration - MUST happen before PyTorch import
-# MPS environment variables need to be set before PyTorch initialization
-import platform
-if platform.system() == "Darwin" and platform.machine() == "arm64":
-    # Set MPS memory limit for Apple Silicon before PyTorch import
-    os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.8")
 
 import torch
 import logging
@@ -357,7 +360,13 @@ def create_run_directory(output_dir, profile_name, run_id, run_type, model_name=
     if run_type == "evaluation" and profile_name:
         finetuning_run_dir = find_latest_finetuning_run(output_dir, profile_name)
         if finetuning_run_dir:
-            finetuning_run_id = os.path.basename(finetuning_run_dir).split("-")[0]
+            # Safely extract run ID from directory name (format: "{run_id}-{profile_name}")
+            dir_basename = os.path.basename(finetuning_run_dir)
+            if "-" in dir_basename:
+                finetuning_run_id = dir_basename.split("-")[0]
+            else:
+                # Fallback: use the entire basename if no hyphen found
+                finetuning_run_id = dir_basename
             metadata["finetuning_run_id"] = finetuning_run_id
 
     with open(os.path.join(run_dir, "metadata.json"), "w") as f:

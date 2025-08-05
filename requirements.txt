@@ -1,33 +1,33 @@
 # Core ML frameworks
-torch>=2.0.0
-torchaudio
-torchvision
+torch>=2.0.0,<2.2.0
+torchaudio>=2.0.0,<2.2.0
+torchvision>=0.15.0,<0.17.0
 
 # Hugging Face ecosystem
-transformers>=4.35.0
-datasets>=2.14.0
-accelerate>=0.24.0
-evaluate>=0.4.0
-peft>=0.7.0
+transformers>=4.35.0,<4.40.0
+datasets>=2.14.0,<2.18.0
+accelerate>=0.24.0,<0.28.0
+evaluate>=0.4.0,<0.5.0
+peft>=0.7.0,<0.9.0
 
 # Audio processing
-librosa>=0.10.0
-soundfile>=0.12.0
+librosa>=0.10.0,<0.11.0
+soundfile>=0.12.0,<0.13.0
 
 # Utilities
-numpy<2.0.0
-pandas
-tqdm
-packaging
-filelock
-tabulate
+numpy>=1.21.0,<2.0.0
+pandas>=1.3.0,<2.2.0
+tqdm>=4.65.0,<4.67.0
+packaging>=21.0,<24.0
+filelock>=3.9.0,<3.14.0
+tabulate>=0.9.0,<0.10.0
 
 # Optional for development
-ipython
-jupyter
+ipython>=8.10.0,<8.20.0
+jupyter>=1.0.0,<1.1.0
 
 # Cloud storage support
-google-cloud-storage>=2.10.0
+google-cloud-storage>=2.10.0,<2.15.0
 
 # For GGML export (optional)
 # ctranslate2
