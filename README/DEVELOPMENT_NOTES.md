@@ -9,8 +9,9 @@ rm -rf ~/.cache/huggingface/datasets/*
 ```
 
 ### bfloat16 Training
-- Works reliably with `accelerate launch`
-- Now supported on Apple Silicon MPS
+- Works reliably with `accelerate launch` on CUDA
+- NOT recommended for Apple Silicon MPS - bfloat16 is emulated and slower
+- Use float16 instead for native MPS performance
 - Be careful with config booleans being read as strings
 
 ## Dataset Implementation

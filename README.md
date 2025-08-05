@@ -144,7 +144,7 @@ Train on massive datasets without downloading them locally. The framework now su
 python scripts/prepare_data.py your_dataset --no-download
 
 # Train as normal - audio streams automatically
-python main.py --profile medium-lora-data3
+python main.py finetune medium-lora-data3
 ```
 
 The system automatically detects GCS paths and streams audio on-demand during training.
@@ -181,7 +181,7 @@ Edit `config.ini` to set:
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
 # Run training
-python main.py --profile medium-data3
+python main.py finetune medium-data3
 ```
 
 ### 4. Evaluate model
@@ -196,10 +196,10 @@ python scripts/evaluate.py --model_name_or_path output/run-001-medium-data3 --da
 ### 1. Choose a LoRA profile and run training
 ```bash
 # Start with small model (recommended for testing)
-python main.py --profile small-lora-data3
+python main.py finetune small-lora-data3
 
 # Scale up to medium for better performance
-python main.py --profile medium-lora-data3
+python main.py finetune medium-lora-data3
 
 # For Apple Silicon - enable fallback initially
 export PYTORCH_ENABLE_MPS_FALLBACK=1
@@ -360,10 +360,10 @@ kl_weight = 0.5        # Weight balancing KL divergence vs cross-entropy loss
 2. **Run distillation training using profiles**:
 ```bash
 # Create a distilled whisper-small from whisper-large-v2 teacher
-python main.py --profile distil-small-from-large
+python main.py finetune distil-small-from-large
 
 # Or create a distilled whisper-medium from whisper-large-v2 teacher  
-python main.py --profile distil-medium-from-large
+python main.py finetune distil-medium-from-large
 ```
 
 Alternatively, run distillation directly:
