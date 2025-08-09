@@ -28,20 +28,14 @@ from core.runs import (
     find_latest_completed_finetuning_run,
 )
 from core import ops
-from utils.device import get_device
+from utils.device import get_device, apply_device_defaults, get_env_info
 
 
 app = typer.Typer(help="Whisper Fine-Tuner (Typer): prepare, finetune, evaluate, export, blacklist")
 
 
 def _normalize_device_defaults(profile_config: dict) -> None:
-    device = get_device()
-    if device.type == "mps":
-        profile_config["dtype"] = "float32"
-        profile_config["attn_implementation"] = "eager"
-    elif device.type == "cpu":
-        profile_config.setdefault("dtype", "float32")
-        profile_config.setdefault("attn_implementation", "eager")
+    apply_device_defaults(profile_config)
 
 
 @app.command()
@@ -95,7 +89,13 @@ def finetune(
         if max_samples is not None:
             profile_config["max_samples"] = max_samples
         _normalize_device_defaults(profile_config)
-        update_run_metadata(run_dir, config=profile_config, model=profile_config["model"], dataset=profile_config["dataset"])
+        update_run_metadata(
+            run_dir,
+            config=profile_config,
+            model=profile_config["model"],
+            dataset=profile_config["dataset"],
+            env=get_env_info(),
+        )
         ops.finetune(profile_config, run_dir)
         _maybe_merge_train_metrics(run_dir)
         mark_run_as_completed(run_dir)
@@ -158,7 +158,7 @@ def evaluate(
         profile_config["model_name_or_path"] = latest
 
     add_file_handler(log_file or os.path.join(run_dir, "run.log"), json_format=json_logging)
-    update_run_metadata(run_dir, config=profile_config)
+    update_run_metadata(run_dir, config=profile_config, env=get_env_info())
     profile_config["force_languages"] = profile_config.get("force_languages", False)
     profile_config["languages"] = profile_config.get("languages", "all")
     profile_config["dataset"] = dataset_name
