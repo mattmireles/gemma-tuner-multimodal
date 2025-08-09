@@ -8,14 +8,14 @@ to keep CI green. To run it manually, set environment variable RUN_LEGACY_DATASE
 
 import os
 import sys
+import pytest
 import configparser
 import datasets
 from utils.dataset_utils import load_dataset_split
 
 # Gate behind env var to avoid failing CI by default
 if os.environ.get("RUN_LEGACY_DATASET_TEST") != "1":
-    print("Skipping legacy dataset test (set RUN_LEGACY_DATASET_TEST=1 to enable)")
-    raise SystemExit(0)
+    pytest.skip("Skipping legacy dataset test (set RUN_LEGACY_DATASET_TEST=1 to enable)", allow_module_level=True)
 
 # === DATASET CONFIGURATION LOADING ===
 # Load and parse system configuration for dataset testing

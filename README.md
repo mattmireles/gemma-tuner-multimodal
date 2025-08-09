@@ -12,7 +12,7 @@ A comprehensive framework for fine-tuning OpenAI's Whisper models with native Ap
 - 📊 **Comprehensive Evaluation**: WER/CER metrics with detailed analysis
 - 🔍 **Outlier Detection**: Automatic blacklisting of problematic samples
 - 🏷️ **Pseudo-Labeling**: Generate labels for unlabeled data
-- 📦 **Export to GGML**: Convert models for whisper.cpp
+- 📦 **Export**: Export trained checkpoints to portable HF/SafeTensors directories
 - ☁️ **Cloud Storage Streaming**: Train on massive datasets without local storage
 
 ## Architecture Overview
@@ -355,7 +355,7 @@ python main.py finetune medium-lora-data3
 
 The system automatically detects GCS paths and streams audio on-demand during training.
 
-## Quick Start
+## Quick Start (Typer CLI)
 
 ### 1. Prepare your dataset
 Create a CSV file with columns:
@@ -386,12 +386,20 @@ Edit `config.ini` to set:
 # For Apple Silicon - enable fallback for initial testing
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
-# Run training
+# Recommended: Typer CLI
+python cli_typer.py finetune medium-data3 --json-logging
+
+# Or legacy entrypoint kept for compatibility
 python main.py finetune medium-data3
 ```
 
 ### 4. Evaluate model
 ```bash
+# Typer CLI (profile or direct model+dataset)
+python cli_typer.py evaluate medium-data3
+python cli_typer.py evaluate whisper-tiny+test_streaming
+
+# Legacy script (still supported)
 python scripts/evaluate.py --model_name_or_path output/run-001-medium-data3 --dataset data3
 ```
 
@@ -506,14 +514,26 @@ A macOS CI workflow performs smoke import tests, prepares a tiny streaming datas
 
 - Optional mini-train smoke: set repository variable `RUN_MINI_TRAIN=1` to enable a tiny guarded train step using `openai/whisper-tiny` (kept off by default to preserve CI time).
 
-## Optional Typer CLI
+## Typer CLI (Recommended)
 
-For a friendlier CLI experience (shell completion, nicer help), you can use the optional Typer interface without changing existing workflows:
+Use the Typer CLI for a friendlier interface that delegates to the same core modules:
 
 ```bash
+# Prepare data
+python cli_typer.py prepare data3
+
+# Train
 python cli_typer.py finetune medium-data3 --json-logging
-python cli_typer.py evaluate whisper-tiny+test_streaming --config config.ini
+
+# Evaluate
+python cli_typer.py evaluate medium-data3
+python cli_typer.py evaluate whisper-tiny+test_streaming
+
+# Export (HF/SafeTensors model dir)
+python cli_typer.py export output/run-001-medium-data3
 ```
+
+The legacy `main.py` and scripts remain supported.
 
 ## Visualizer Controls
 
@@ -539,7 +559,10 @@ whisper-fine-tuner-macos/
 ├── utils/
 │   └── device.py        # Device selection (MPS/CUDA/CPU)
 ├── config.ini           # Training configurations
-└── main.py             # Main entry point
+├── core/
+│   ├── inference.py    # Unified inference utilities (evaluate/blacklist)
+│   └── ...
+└── main.py             # Legacy entry point (still supported)
 ```
 
 ## Common Issues
@@ -553,6 +576,12 @@ whisper-fine-tuner-macos/
 1. **Import errors**: Check all dependencies are installed
 2. **OOM errors**: Reduce batch size or enable gradient checkpointing
 3. **Data loading**: Ensure audio files are accessible and valid
+
+## For Contributors
+
+- Canonical CLI: Prefer `cli_typer.py` for new workflows; `main.py` remains for backward compatibility.
+- Unified inference: Use `core/inference.py` from evaluation/blacklist paths to avoid duplication.
+- Shared preprocessing: `utils/dataset_prep.py` will centralize dataset feature prep and label encoding in Phase 1b; wire new code to it once added.
 
 ### Distillation-Specific Issues
 1. **Out of memory with dual models**: Reduce batch sizes significantly - distillation requires ~2x memory
