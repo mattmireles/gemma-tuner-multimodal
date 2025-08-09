@@ -10,81 +10,36 @@ if platform.system() == "Darwin" and platform.machine() == "arm64":
     os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.8")
 
 """
-Whisper Fine-Tuner Main Entry Point
+Whisper Fine-Tuner CLI
 
-This is the central orchestration script for the Whisper fine-tuning system on Apple Silicon.
-It provides a unified command-line interface for data preparation, model fine-tuning, evaluation,
-and export operations across different Whisper model variants (whisper, distil-whisper).
-
-Key responsibilities:
-- Command-line argument parsing and operation routing
-- Device detection and platform-specific optimization setup
-- Run directory management and metadata tracking
-- Profile configuration loading and validation
-- Error handling and run status management
-
-Supported operations:
-- prepare: Dataset preprocessing and preparation
-- finetune: Model fine-tuning with profile-based configuration
-- evaluate: Model evaluation with metrics calculation
-- export: Model export to GGML format
-- pseudo_label: Pseudo-labeling for semi-supervised learning
-- gather: Prediction gathering and aggregation
-- validate_data: Dataset validation and integrity checking
-- system_check: System compatibility and setup verification
-- blacklist: Training sample blacklisting for data quality
-
-Called by:
-- Command-line invocation for all training workflows
-- CI/CD pipelines for automated training and evaluation
-- Batch processing scripts for multiple experiments
-
-Calls to:
-- scripts/prepare_data.py for dataset preparation
-- scripts/finetune.py for model training coordination
-- scripts/evaluate.py for model evaluation
-- scripts/export.py for model format conversion
-- utils/device.py for device detection and optimization
-- All model-specific training modules via dynamic import
-
-Profile system:
-Configurations are managed through config.ini with hierarchical inheritance:
-- DEFAULT: Base configuration settings
-- dataset_defaults: Common dataset processing settings  
-- group:*: Model group settings (e.g., whisper, distil-whisper)
-- model:*: Specific model configurations
-- dataset:*: Dataset-specific processing parameters
-- profile:*: Complete training profiles combining model+dataset+hyperparameters
-
-Run management:
-- Each operation creates a unique run directory with metadata tracking
-- Run IDs are generated sequentially with file-based locking
-- Run status is tracked through metadata.json and completion markers
-- Failed runs are preserved for debugging with error information
-
-Apple Silicon optimizations:
-- MPS device detection and memory fraction configuration (0.8 default)
-- Unified memory architecture considerations
-- CUDA fallback for non-Apple Silicon systems
-- Device-specific backend optimizations (cuDNN benchmark, MPS settings)
+Thin orchestration layer that delegates to core modules:
+- core.config: configuration/profile resolution
+- core.runs: run directories and metadata
+- core.ops: operation dispatch to scripts/*
+- core.logging: consistent logging init
 """
 
 import argparse
 import configparser
-import importlib
-# os and platform already imported above for MPS configuration
 from datetime import datetime
-from scripts.utils import update_metadata
-import json
-import traceback
-from filelock import FileLock
-
-import torch
+import time
 import logging
-from utils.device import get_device, set_memory_fraction
-from constants import MemoryLimits
+import signal
+import torch
 
-# Initialize logger before any usage
+from core.logging import init_logging, add_file_handler
+from core.config import load_profile_config, load_model_dataset_config
+from core.runs import (
+    get_next_run_id,
+    create_run_directory,
+    update_run_metadata,
+    mark_run_as_completed,
+    find_latest_finetuning_run,
+    find_latest_completed_finetuning_run,
+)
+from core import ops
+from utils.device import get_device
+
 logger = logging.getLogger(__name__)
 
 # Device Detection and Platform Optimization Setup
@@ -101,280 +56,19 @@ elif device.type == "mps":
     # Log confirmation that MPS is configured
     logger.info(f"MPS device detected with memory ratio: {os.environ.get('PYTORCH_MPS_HIGH_WATERMARK_RATIO', 'not set')}")
 
-def get_next_run_id(output_dir):
-    """
-    Generates the next sequential run ID with thread-safe file locking.
-    
-    Run IDs provide unique identification for each training/evaluation session,
-    enabling organized experiment tracking and preventing conflicts in concurrent
-    execution scenarios.
-    
-    Called by:
-    - main() for finetune operations to create unique run directories
-    - main() for evaluate operations to track evaluation runs  
-    - main() for blacklist operations to organize blacklist generation
-    
-    Thread safety:
-    Uses FileLock to prevent race conditions when multiple processes
-    simultaneously request run IDs. This is essential for:
-    - Parallel experiment execution
-    - CI/CD pipeline concurrent runs
-    - Multiple users on shared systems
-    
-    Run ID persistence:
-    - Stored in {output_dir}/next_run_id.txt
-    - Automatically creates file with ID 1 if none exists
-    - Increments atomically within lock context
-    - Lock file: {output_dir}/next_run_id.txt.lock
-    
-    Args:
-        output_dir (str): Base output directory for run storage
-        
-    Returns:
-        int: Next available run ID (starting from 1)
-        
-    Example:
-        run_id = get_next_run_id("output")  # Returns 1, 2, 3, ...
-        run_dir = f"output/{run_id}-{profile_name}"
-    """
-    lock_file = os.path.join(output_dir, "next_run_id.txt.lock")
-    lock = FileLock(lock_file)
-
-    with lock:
-        try:
-            with open(os.path.join(output_dir, "next_run_id.txt"), "r") as f:
-                next_id = int(f.read())
-        except FileNotFoundError:
-            next_id = 1
-
-        with open(os.path.join(output_dir, "next_run_id.txt"), "w") as f:
-            f.write(str(next_id + 1))
-
-    return next_id
-
 def find_finetuning_run_dir(output_dir, profile_name):
-    """
-    Locates the most recent completed fine-tuning run directory for a profile.
-    
-    This function is essential for evaluation and blacklist operations that need
-    to reference previously trained models. It only considers completed runs to
-    ensure model artifacts are fully available.
-    
-    Called by:
-    - main() blacklist operation to find the fine-tuned model for blacklist generation
-    - Evaluation workflows requiring the latest trained model checkpoint
-    
-    Calls to:
-    - os.listdir() to enumerate output directory contents
-    - os.path.isdir() to filter directory entries
-    - os.path.exists() to verify completion marker
-    - os.path.getmtime() for temporal sorting
-    
-    Directory structure expected:
-    output/
-    ├── 1-profile_name/          # Run ID 1 for profile_name
-    │   ├── completed            # Completion marker file
-    │   ├── metadata.json        # Run metadata
-    │   └── model_checkpoints/   # Model artifacts
-    ├── 2-profile_name/          # Run ID 2 for profile_name
-    └── 3-other_profile/         # Different profile
-    
-    Completion requirement:
-    Only returns directories containing a 'completed' file, ensuring:
-    - Training finished successfully
-    - Model checkpoints are fully written
-    - Metadata is finalized
-    - Safe for downstream evaluation/blacklisting
-    
-    Temporal sorting:
-    Uses filesystem modification time (mtime) to determine the "latest" run,
-    handling cases where run IDs might not be perfectly chronological.
-    
-    Args:
-        output_dir (str): Base directory containing all runs
-        profile_name (str): Profile name to match (exact match required)
-        
-    Returns:
-        str | None: Path to latest completed run directory, or None if no
-                   completed runs exist for the profile
-                   
-    Example:
-        latest_run = find_finetuning_run_dir("output", "whisper-base-en")
-        if latest_run:
-            model_path = os.path.join(latest_run, "final_model")
-    """
-    finetuning_runs = [
-        d for d in os.listdir(output_dir)
-        if os.path.isdir(os.path.join(output_dir, d)) and f"-{profile_name}" in d and os.path.exists(os.path.join(output_dir, d, "completed"))
-    ]
-    if not finetuning_runs:
+    # Keep an alias for existing behavior used by blacklist op
+    from core.runs import find_latest_finetuning_run as _find
+    latest = _find(output_dir, profile_name)
+    if not latest:
         return None
-    finetuning_runs.sort(key=lambda d: os.path.getmtime(os.path.join(output_dir, d)), reverse=True)
-    return os.path.join(output_dir, finetuning_runs[0])
+    # require completed marker
+    return latest if os.path.exists(os.path.join(latest, "completed")) else None
 
 
-def mark_run_as_completed(run_dir):
-    """
-    Creates a completion marker file to indicate successful run termination.
-    
-    The completion marker is a simple file-based semaphore that signals
-    downstream processes that a run has finished successfully and all
-    artifacts are available for use.
-    
-    Called by:
-    - main() after successful finetune operations (line 194)
-    - main() after successful evaluate operations (line 258)
-    - Any operation that needs to signal completion to dependent workflows
-    
-    Completion marker significance:
-    - Enables find_finetuning_run_dir() to locate usable trained models
-    - Prevents evaluation of incomplete or failed training runs
-    - Provides atomic completion signaling (file creation is atomic)
-    - Used by run management and cleanup utilities
-    
-    File contents:
-    The completion file contains the simple string "completed" for
-    debugging and verification purposes, though only file existence matters.
-    
-    Args:
-        run_dir (str): Path to the run directory requiring completion marking
-        
-    Creates:
-        {run_dir}/completed: Empty marker file indicating successful completion
-        
-    Example workflow:
-        try:
-            # Perform training operations
-            train_model(config)
-            mark_run_as_completed(run_dir)
-        except Exception as e:
-            # Run remains unmarked as completed
-            log_error(e)
-    """
-    with open(os.path.join(run_dir, "completed"), "w") as f:
-        f.write("completed")
+# mark_run_as_completed imported from core.runs
 
-def create_run_directory(output_dir, profile_name, run_id, run_type, model_name=None, dataset_name=None):
-    """
-    Creates a structured run directory with initialized metadata for experiment tracking.
-    
-    This function establishes the foundational directory structure and metadata
-    for each training, evaluation, or blacklisting operation. The directory
-    structure and metadata schema enable systematic experiment management.
-    
-    Called by:
-    - main() for finetune operations to create training run directories
-    - main() for evaluate operations to create evaluation run directories
-    - main() for blacklist operations to create blacklist generation directories
-    
-    Calls to:
-    - os.makedirs() to create directory structure
-    - find_latest_finetuning_run() to link evaluation runs to training runs
-    - json.dump() to initialize metadata tracking
-    
-    Directory naming conventions:
-    
-    Finetuning runs:
-    - Format: {run_id}-{profile_name}
-    - Example: "1-whisper-base-en", "2-whisper-large-multilingual"
-    
-    Profile-based evaluation:
-    - Format: {finetuning_run_dir}/eval
-    - Example: "1-whisper-base-en/eval"
-    
-    Profile+dataset evaluation:
-    - Format: {finetuning_run_dir}/eval-{dataset_name}
-    - Example: "1-whisper-base-en/eval-librispeech"
-    
-    Model+dataset evaluation:
-    - Format: {model_name}+{dataset_name}/eval
-    - Example: "whisper-base+librispeech/eval"
-    
-    Metadata initialization:
-    Creates metadata.json with comprehensive tracking information:
-    - run_id: Unique identifier for this run
-    - run_type: "finetuning", "evaluation", or "blacklist"
-    - status: "running" (updated to "completed" or "failed" later)
-    - timestamps: start_time and end_time (ISO format)
-    - configuration: profile_name, model, dataset details
-    - metrics: Empty dict populated during execution
-    - finetuning_run_id: Links evaluation runs to their training runs
-    
-    Args:
-        output_dir (str): Base directory for all runs
-        profile_name (str | None): Profile name for profile-based operations
-        run_id (str | int): Unique identifier for this run
-        run_type (str): Type of operation ("finetuning", "evaluation", "blacklist")
-        model_name (str | None): Model name for model+dataset evaluations
-        dataset_name (str | None): Dataset name for dataset-specific operations
-        
-    Returns:
-        str: Path to the created run directory
-        
-    Raises:
-        ValueError: For invalid run_type or parameter combinations
-        
-    Example:
-        run_dir = create_run_directory(
-            output_dir="output",
-            profile_name="whisper-base-en", 
-            run_id=1,
-            run_type="finetuning"
-        )
-        # Creates: output/1-whisper-base-en/ with metadata.json
-    """
-    if run_type == "finetuning":
-        run_dir = os.path.join(output_dir, f"{run_id}-{profile_name}")
-    elif run_type == "evaluation" or run_type == "blacklist":
-        if profile_name and not dataset_name:
-            # Profile-based evaluation
-            finetuning_run_dir = find_latest_finetuning_run(output_dir, profile_name)
-            run_dir = os.path.join(finetuning_run_dir, "eval")
-        elif model_name and dataset_name:
-            # Model+dataset-based evaluation
-            run_id = f"{model_name}+{dataset_name}"  # Set run_id to model+dataset
-            run_dir = os.path.join(output_dir, run_id, "eval")
-        elif profile_name and dataset_name:
-            # profile + dataset evaluation
-            finetuning_run_dir = find_latest_finetuning_run(output_dir, profile_name)
-            run_dir = os.path.join(finetuning_run_dir, f"eval-{dataset_name}")
-        else:
-            raise ValueError("Invalid run type of evaluation parameters")
-    else:
-        raise ValueError(f"Invalid run type: {run_type}")
-
-    os.makedirs(run_dir, exist_ok=True)
-
-    metadata = {
-        "run_id": run_id,
-        "run_type": run_type,
-        "status": "running",
-        "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "end_time": None,
-        "profile": profile_name,
-        "model": model_name,
-        "dataset": dataset_name,
-        "config": {},
-        "metrics": {},
-        "finetuning_run_id": None
-    }
-
-    if run_type == "evaluation" and profile_name:
-        finetuning_run_dir = find_latest_finetuning_run(output_dir, profile_name)
-        if finetuning_run_dir:
-            # Safely extract run ID from directory name (format: "{run_id}-{profile_name}")
-            dir_basename = os.path.basename(finetuning_run_dir)
-            if "-" in dir_basename:
-                finetuning_run_id = dir_basename.split("-")[0]
-            else:
-                # Fallback: use the entire basename if no hyphen found
-                finetuning_run_id = dir_basename
-            metadata["finetuning_run_id"] = finetuning_run_id
-
-    with open(os.path.join(run_dir, "metadata.json"), "w") as f:
-        json.dump(metadata, f, indent=4)
-
-    return run_dir
+"""create_run_directory is imported from core.runs"""
 
 def find_latest_finetuning_run(output_dir, profile_name):
     """
@@ -420,61 +114,7 @@ def find_latest_finetuning_run(output_dir, profile_name):
     finetuning_runs.sort(key=lambda d: os.path.getmtime(os.path.join(output_dir, d)), reverse=True)
     return os.path.join(output_dir, finetuning_runs[0])
 
-def update_run_metadata(run_dir, **kwargs):
-    """
-    Updates the metadata.json file with new information during run execution.
-    
-    This function provides atomic updates to run metadata, enabling real-time
-    tracking of experiment progress, configuration changes, and results.
-    
-    Called by:
-    - main() to update configuration after profile loading (lines 186, 238)
-    - main() to update status and timestamps on completion/failure (lines 195, 259)
-    - main() to update metrics after evaluation completion (line 256)
-    - Training scripts to update intermediate metrics and checkpoints
-    
-    Atomic update process:
-    1. Read current metadata.json content
-    2. Update with provided keyword arguments
-    3. Write back to file (atomic file replacement)
-    
-    Common update patterns:
-    
-    Configuration updates:
-    - After profile loading: config=profile_config, model=model_name, dataset=dataset_name
-    
-    Status updates:
-    - On completion: status="completed", end_time=timestamp
-    - On failure: status="failed", end_time=timestamp, error_message=str(exception)
-    
-    Metric updates:
-    - After evaluation: metrics={"wer": 0.123, "bleu": 45.6}
-    
-    Thread safety:
-    File operations are atomic at the OS level, but concurrent updates
-    from multiple processes could result in race conditions. Consider
-    file locking for high-concurrency scenarios.
-    
-    Args:
-        run_dir (str): Path to run directory containing metadata.json
-        **kwargs: Key-value pairs to update in metadata
-        
-    Example:
-        update_run_metadata(
-            run_dir,
-            status="completed",
-            end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            metrics={"wer": 0.089}
-        )
-    """
-    metadata_file = os.path.join(run_dir, "metadata.json")
-    with open(metadata_file, "r") as f:
-        metadata = json.load(f)
-
-    metadata.update(kwargs)
-
-    with open(metadata_file, "w") as f:
-        json.dump(metadata, f, indent=4)
+"""update_run_metadata is imported from core.runs"""
 
 def main():
     """
@@ -531,17 +171,40 @@ def main():
     - Batch processing scripts for automated experiments
     - CI/CD pipelines for continuous training/evaluation
     """
+    # Logging options via environment for simplicity
+    log_json = os.environ.get("LOG_JSON", "0") == "1"
+    init_logging("INFO", json_format=log_json)
     parser = argparse.ArgumentParser(
-        description="Main entry point for Whisper fine-tuning: data preparation, model training, evaluation, and export."
+        description="Whisper Fine-Tuner: prepare data, finetune models, evaluate, export, and more.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("operation", choices=["prepare", "finetune", "evaluate", "export", "pseudo_label", "gather", "validate_data", "system_check", "blacklist"], help="Operation to perform")
+    parser.add_argument(
+        "operation",
+        choices=[
+            "prepare",
+            "finetune",
+            "evaluate",
+            "export",
+            "pseudo_label",
+            "gather",
+            "validate_data",
+            "system_check",
+            "blacklist",
+        ],
+        help="Subcommand to run",
+    )
     parser.add_argument("profile_or_model_dataset", nargs="?", help="Name of the profile to use (from config.ini) or model+dataset combination")
     parser.add_argument("--config", default="config.ini", help="Path to the configuration file.")
     parser.add_argument("--max_samples", type=int, default=None, help="Maximum number of training or evaluation samples to use.")
+    parser.add_argument("--json_logging", action="store_true", help="Enable JSON logs (overrides LOG_JSON env)")
+    parser.add_argument("--log_file", type=str, default=None, help="Optional path to also write logs to a file")
     parser.add_argument("--dataset", type=str, default=None, help="Dataset to use for evaluation (overrides profile dataset).")
     parser.add_argument("--split", type=str, default=None, help="Dataset split to use for evaluation/blacklisting (overrides profile split).")
 
     args = parser.parse_args()
+
+    if args.json_logging:
+        init_logging("INFO", json_format=True)
 
     config = configparser.ConfigParser()
     config.read(args.config)
@@ -553,8 +216,11 @@ def main():
             args.profiles = [p.strip() for p in args.profile_or_model_dataset.split(',')]
 
     if args.operation == "prepare":
-        from scripts.prepare_data import prepare_data
-        prepare_data(args.config)
+        if not args.profile_or_model_dataset:
+            parser.error("The 'prepare' operation requires a dataset name (as defined in config.ini).")
+        # Build a minimal config dict mirroring profile_config expectation for prepare()
+        profile_config = {"dataset": args.profile_or_model_dataset}
+        ops.prepare(profile_config)
 
     elif args.operation == "finetune":
         if not args.profile_or_model_dataset:
@@ -566,16 +232,35 @@ def main():
         run_id = get_next_run_id(output_dir)
         run_dir = create_run_directory(output_dir, profile_name, run_id, "finetuning")
 
+        # Attach file logging inside the run directory if requested
+        if args.log_file:
+            add_file_handler(args.log_file, json_format=args.json_logging)
+        else:
+            add_file_handler(os.path.join(run_dir, "run.log"), json_format=args.json_logging)
+
+        # Register signal handlers to mark run as cancelled on interruption
+        def _register_signal_handlers(current_run_dir: str):
+            def _handle_signal(signum, frame):
+                logger.warning(f"Received signal {signum}. Marking run as cancelled and exiting...")
+                try:
+                    update_run_metadata(
+                        current_run_dir,
+                        status="cancelled",
+                        end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+                finally:
+                    raise SystemExit(130)
+            signal.signal(signal.SIGINT, _handle_signal)
+            signal.signal(signal.SIGTERM, _handle_signal)
+
+        _register_signal_handlers(run_dir)
+
         try:
-            # Load profile settings
             profile_config = load_profile_config(config, profile_name)
 
             # Add max_samples to profile_config if provided
             if args.max_samples is not None:
                 profile_config["max_samples"] = args.max_samples
-
-            # Dynamically import the finetune module
-            finetune_module = importlib.import_module("scripts.finetune")
 
             # Update metadata with config
             update_run_metadata(run_dir, config=profile_config, model=profile_config["model"], dataset=profile_config["dataset"])
@@ -584,8 +269,34 @@ def main():
             profile_config["force_languages"] = profile_config.get("force_languages", False)
             profile_config["languages"] = profile_config.get("languages", "all")
 
-            # Call the main function of the finetune module, passing the profile config as a string
-            finetune_module.main(profile_config, run_dir)
+            # Device-safe config normalization for MPS and CPU defaults
+            if device.type == "mps":
+                if profile_config.get("dtype") != "float32":
+                    logger.warning("Overriding dtype to float32 for MPS compatibility")
+                profile_config["dtype"] = "float32"
+                if profile_config.get("attn_implementation") != "eager":
+                    logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility")
+                profile_config["attn_implementation"] = "eager"
+            elif device.type == "cpu":
+                # Prefer float32/eager by default on CPU unless explicitly set
+                profile_config.setdefault("dtype", "float32")
+                profile_config.setdefault("attn_implementation", "eager")
+
+            # Dispatch to fine-tuning orchestrator
+            _t0 = time.time()
+            ops.finetune(profile_config, run_dir)
+            # Try to capture and persist training metrics
+            try:
+                results_path = os.path.join(run_dir, "train_results.json")
+                if os.path.exists(results_path):
+                    import json as _json
+                    with open(results_path, "r") as rf:
+                        train_metrics = _json.load(rf)
+                    from core.runs import write_metrics
+                    train_metrics["duration_sec"] = round(time.time() - _t0, 3)
+                    write_metrics(run_dir, {"train": train_metrics})
+            except Exception:
+                pass
             mark_run_as_completed(run_dir)
             update_run_metadata(run_dir, status="completed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -630,34 +341,50 @@ def main():
                 run_dir = create_run_directory(output_dir, profile_name, run_id, "evaluation")
 
             # Find latest finetuning run for the profile
-            latest_run_dir = find_latest_finetuning_run(output_dir, profile_name)
+            # Prefer completed run via metadata; fall back to latest any
+            latest_run_dir = find_latest_completed_finetuning_run(output_dir, profile_name) or find_latest_finetuning_run(output_dir, profile_name)
             if latest_run_dir:
                 profile_config["model_name_or_path"] = latest_run_dir
             else:
-                print(f"Error: No finetuning runs found for profile: {profile_name}")
-                return
+                raise FileNotFoundError(f"No fine-tuning runs found for profile '{profile_name}'. Train a model before evaluating.")
 
         try:
             # Update metadata with config
             update_run_metadata(run_dir, config=profile_config)
 
-            from scripts.evaluate import run_evaluation
             profile_config["force_languages"] = profile_config.get("force_languages", False)
             profile_config["languages"] = profile_config.get("languages", "all")
             profile_config["dataset"] = dataset_name
 
             if 'language_mode' not in profile_config:
-                print("Warning: Defaulting to 'strict' language mode")
+                logger.warning("Defaulting to 'strict' language mode")
                 profile_config['language_mode'] = 'strict'
 
             # Add max_samples to profile_config if provided
             if args.max_samples is not None:
                 profile_config["max_samples"] = args.max_samples
 
-            metrics = run_evaluation(profile_config, run_dir)
+            # Device-safe config normalization for MPS and CPU defaults
+            if device.type == "mps":
+                if profile_config.get("dtype") != "float32":
+                    logger.warning("Overriding dtype to float32 for MPS compatibility")
+                profile_config["dtype"] = "float32"
+                if profile_config.get("attn_implementation") != "eager":
+                    logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility")
+                profile_config["attn_implementation"] = "eager"
+            elif device.type == "cpu":
+                profile_config.setdefault("dtype", "float32")
+                profile_config.setdefault("attn_implementation", "eager")
+
+            metrics = ops.evaluate(profile_config, run_dir)
 
             if metrics:
                 update_run_metadata(run_dir, metrics=metrics)
+                try:
+                    from core.runs import write_metrics
+                    write_metrics(run_dir, metrics)
+                except Exception:
+                    pass
 
             mark_run_as_completed(run_dir)
             update_run_metadata(run_dir, status="completed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -676,8 +403,9 @@ def main():
             raise
 
     elif args.operation == "export":
-        from scripts.export import export_ggml
-        export_ggml(config, args.profile_or_model_dataset)
+        if not args.profile_or_model_dataset:
+            parser.error("The 'export' operation requires a model path or HF id.")
+        ops.export(args.profile_or_model_dataset)
 
     elif args.operation == "pseudo_label":
         from scripts.pseudo_label import main as pseudo_label_main
@@ -699,6 +427,23 @@ def main():
         profile_name = args.profile_or_model_dataset
         run_id = get_next_run_id(output_dir)
         run_dir = create_run_directory(output_dir, profile_name, run_id, "blacklist")
+
+        # Register signal handlers to mark run as cancelled on interruption
+        def _register_signal_handlers(current_run_dir: str):
+            def _handle_signal(signum, frame):
+                logger.warning(f"Received signal {signum}. Marking run as cancelled and exiting...")
+                try:
+                    update_run_metadata(
+                        current_run_dir,
+                        status="cancelled",
+                        end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+                finally:
+                    raise SystemExit(130)
+            signal.signal(signal.SIGINT, _handle_signal)
+            signal.signal(signal.SIGTERM, _handle_signal)
+
+        _register_signal_handlers(run_dir)
         
         finetuning_run_dir = find_finetuning_run_dir(output_dir, args.profile_or_model_dataset)
 
@@ -708,6 +453,8 @@ def main():
             # Use the specified split or fallback to the profile's train split
             split = args.split if args.split else profile_config["train_split"]
             profile_config["split"] = split
+            if not finetuning_run_dir:
+                raise FileNotFoundError(f"No completed fine-tuning run found for profile '{profile_name}'.")
             profile_config['model_name_or_path'] = finetuning_run_dir
 
             # Add max_samples to profile_config if provided
@@ -715,9 +462,21 @@ def main():
                 profile_config["max_samples"] = args.max_samples
 
             from scripts.blacklist import create_blacklist
+            # Device-safe config normalization for MPS and CPU defaults
+            if device.type == "mps":
+                if profile_config.get("dtype") != "float32":
+                    logger.warning("Overriding dtype to float32 for MPS compatibility")
+                profile_config["dtype"] = "float32"
+                if profile_config.get("attn_implementation") != "eager":
+                    logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility")
+                profile_config["attn_implementation"] = "eager"
+            elif device.type == "cpu":
+                profile_config.setdefault("dtype", "float32")
+                profile_config.setdefault("attn_implementation", "eager")
+
             blacklist_path = create_blacklist(profile_config, run_dir)
 
-            print(f"Blacklist created at: {blacklist_path}")
+            logger.info(f"Blacklist created at: {blacklist_path}")
 
         except FileNotFoundError as e:
             logger.error(f"Fine-tuning run not found for blacklist creation: {e}")
@@ -730,7 +489,7 @@ def main():
             raise
 
     else:
-        print(f"Invalid operation: {args.operation}")
+        logger.error(f"Invalid operation: {args.operation}")
 
 def get_latest_run_directory(base_dir):
     """Finds the latest run directory based on timestamps in the directory names."""
@@ -828,8 +587,9 @@ def load_profile_config(config, profile_name):
     profile_config = {}
 
     # Load defaults
-    if config.has_section("DEFAULT"):
-        profile_config.update(config["DEFAULT"])
+    # The "DEFAULT" section is a special mapping always present in ConfigParser
+    # and not returned by has_section(). Merge it unconditionally.
+    profile_config.update(config["DEFAULT"])
     if config.has_section("dataset_defaults"):
         profile_config.update(config["dataset_defaults"])
 
@@ -910,8 +670,8 @@ def load_model_dataset_config(config, model_name, dataset_name):
     config_dict = {}
 
     # Load defaults
-    if config.has_section("DEFAULT"):
-        config_dict.update(config["DEFAULT"])
+    # Always merge DEFAULT pseudo-section (present even if has_section returns False)
+    config_dict.update(config["DEFAULT"])
     if config.has_section("dataset_defaults"):
         config_dict.update(config["dataset_defaults"])
 

@@ -7,9 +7,19 @@
 
 // Global state
 let socket = null;
+let reconnectDelay = 1000; // Start with 1s
+let reconnectTimer = null;
 let isPaused = false;
 let soundEnabled = false;
 let animationFrameId = null;
+
+// Feature flags (URL params)
+const urlParams = new URLSearchParams(window.location.search);
+const lightMode = urlParams.get('viz') === 'light';
+let enable3D = urlParams.get('show3D') !== '0' && !lightMode;
+let enableAttention = urlParams.get('showAttention') !== '0' && !lightMode;
+let enableTokens = urlParams.get('showTokens') !== '0' && !lightMode;
+let enableSpectrogram = urlParams.get('showSpectrogram') !== '0' && !lightMode;
 
 // Three.js objects
 let scene, camera, renderer;
@@ -47,7 +57,12 @@ window.addEventListener('DOMContentLoaded', () => {
     
     initSocket();
     initBackgroundParticles();
-    init3DNeuralNetwork();
+    if (enable3D) {
+        init3DNeuralNetwork();
+    } else {
+        const panel = document.getElementById('neural-network-3d');
+        if (panel && panel.parentElement) panel.parentElement.style.display = 'none';
+    }
     initCharts();
     initEventListeners();
     
@@ -58,13 +73,37 @@ window.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         document.getElementById('loading').style.display = 'none';
     }, 1000);
+
+    // Wire feature toggle buttons
+    const toggle = (id, stateVarName, onToggle) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('click', () => {
+            window[stateVarName] = !window[stateVarName];
+            el.classList.toggle('active', window[stateVarName]);
+            if (typeof onToggle === 'function') onToggle(window[stateVarName]);
+        });
+    };
+
+    toggle('toggle-3d', 'enable3D', (on) => {
+        const panel = document.getElementById('neural-network-3d').parentElement;
+        panel.style.display = on ? '' : 'none';
+        if (on && !renderer) init3DNeuralNetwork();
+    });
+    toggle('toggle-attn', 'enableAttention');
+    toggle('toggle-tokens', 'enableTokens');
+    toggle('toggle-spec', 'enableSpectrogram');
 });
 
 /**
  * Initialize WebSocket connection
  */
 function initSocket() {
-    socket = io();
+    socket = io({
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 5000,
+    });
     
     socket.on('connect', () => {
         console.log('✅ Connected to training server');
@@ -73,6 +112,10 @@ function initSocket() {
     
     socket.on('disconnect', () => {
         console.log('❌ Disconnected from training server');
+    });
+
+    socket.on('connect_error', (err) => {
+        console.log('⚠️ Connection error:', err.message);
     });
     
     socket.on('initial_state', (data) => {
@@ -478,17 +521,17 @@ function handleTrainingUpdate(data) {
     }
     
     // Update attention heatmap
-    if (data.attention) {
+    if (enableAttention && data.attention) {
         updateAttentionHeatmap(data.attention);
     }
     
     // Update token probabilities
-    if (data.token_probs) {
+    if (enableTokens && data.token_probs) {
         updateTokenCloud(data.token_probs);
     }
     
     // Update spectrogram
-    if (data.mel_spectrogram) {
+    if (enableSpectrogram && data.mel_spectrogram) {
         updateSpectrogram(data.mel_spectrogram);
     }
     
@@ -605,7 +648,7 @@ function updateAttentionHeatmap(attentionData) {
     const canvas = document.getElementById('attention-canvas');
     const ctx = canvas.getContext('2d');
     
-    if (!attentionData || !attentionData.length) return;
+    if (!enableAttention || !attentionData || !attentionData.length) return;
     
     const size = attentionData.length;
     const container = canvas.parentElement;
@@ -637,7 +680,7 @@ function updateTokenCloud(tokenProbs) {
     const container = document.getElementById('token-cloud');
     container.innerHTML = '';
     
-    if (!tokenProbs || !tokenProbs.indices) return;
+    if (!enableTokens || !tokenProbs || !tokenProbs.indices) return;
     
     tokenProbs.indices.forEach((tokenId, i) => {
         const prob = tokenProbs.values[i];
@@ -657,7 +700,7 @@ function updateSpectrogram(spectrogramData) {
     const canvas = document.getElementById('spectrogram-canvas');
     const ctx = canvas.getContext('2d');
     
-    if (!spectrogramData || !spectrogramData.length) return;
+    if (!enableSpectrogram || !spectrogramData || !spectrogramData.length) return;
     
     const height = spectrogramData.length;
     const width = spectrogramData[0].length;

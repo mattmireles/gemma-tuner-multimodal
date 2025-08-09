@@ -29,6 +29,7 @@ import os
 import json
 import time
 import threading
+import logging
 import webbrowser
 from collections import deque
 from typing import Dict, Any, Optional, List
@@ -46,6 +47,7 @@ app = Flask(__name__,
            template_folder='templates')
 app.config['SECRET_KEY'] = 'whisper-training-viz-2024'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+logger = logging.getLogger(__name__)
 
 class TrainingVisualizer:
     """
@@ -251,7 +253,7 @@ class TrainingVisualizer:
         try:
             self.socketio.emit('training_update', data)
         except Exception as e:
-            print(f"Error emitting update: {e}")
+            logger.debug(f"Visualizer emit failed: {e}")
     
     def update_epoch(self, epoch: int):
         """Update current epoch number."""
@@ -313,7 +315,7 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection."""
-    print('Client disconnected')
+    logger.info('Visualizer client disconnected')
 
 @socketio.on('request_history')
 def handle_history_request():
@@ -326,7 +328,17 @@ def handle_history_request():
             'memory_history': list(visualizer.memory_history)
         })
 
-def start_visualization_server(host='127.0.0.1', port=8080, open_browser=True):
+def _find_free_port(preferred_port: int) -> int:
+    import socket as _socket
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", preferred_port))
+            return preferred_port
+        except OSError:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
+def start_visualization_server(host='127.0.0.1', port=8080, open_browser=False):
     """
     Start the visualization server in a separate thread.
     
@@ -335,8 +347,19 @@ def start_visualization_server(host='127.0.0.1', port=8080, open_browser=True):
         port: Port to bind to
         open_browser: Whether to automatically open the browser
     """
+    port = _find_free_port(port)
+
     def run_server():
-        socketio.run(app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+        # Allow unsafe werkzeug only if explicitly in dev mode
+        allow_unsafe = os.environ.get("VIZ_ALLOW_UNSAFE_WERKZEUG", "0") == "1"
+        socketio.run(
+            app,
+            host=host,
+            port=port,
+            debug=False,
+            use_reloader=False,
+            allow_unsafe_werkzeug=allow_unsafe,
+        )
     
     # Start server in background thread
     server_thread = threading.Thread(target=run_server, daemon=True)
