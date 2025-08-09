@@ -38,7 +38,7 @@ from core.runs import (
     find_latest_completed_finetuning_run,
 )
 from core import ops
-from utils.device import get_device
+from utils.device import get_device, apply_device_defaults, get_env_info
 
 logger = logging.getLogger(__name__)
 
@@ -55,64 +55,6 @@ elif device.type == "mps":
     # MPS memory configuration already set before PyTorch import (line 10)
     # Log confirmation that MPS is configured
     logger.info(f"MPS device detected with memory ratio: {os.environ.get('PYTORCH_MPS_HIGH_WATERMARK_RATIO', 'not set')}")
-
-def find_finetuning_run_dir(output_dir, profile_name):
-    # Keep an alias for existing behavior used by blacklist op
-    from core.runs import find_latest_finetuning_run as _find
-    latest = _find(output_dir, profile_name)
-    if not latest:
-        return None
-    # require completed marker
-    return latest if os.path.exists(os.path.join(latest, "completed")) else None
-
-
-# mark_run_as_completed imported from core.runs
-
-"""create_run_directory is imported from core.runs"""
-
-def find_latest_finetuning_run(output_dir, profile_name):
-    """
-    Locates the most recent fine-tuning run directory for a profile (completed or not).
-    
-    This function differs from find_finetuning_run_dir() by not requiring the
-    'completed' marker, making it suitable for linking evaluation runs to their
-    corresponding training runs even if training is still in progress.
-    
-    Called by:
-    - create_run_directory() to establish finetuning_run_id links for evaluations
-    - main() evaluate operations to find model checkpoints for evaluation
-    
-    Directory matching:
-    - Matches directories with pattern: "{run_id}-{profile_name}"
-    - Uses substring matching on profile_name (exact match recommended)
-    - Sorts by filesystem modification time (most recent first)
-    
-    Use cases:
-    - Evaluation runs need to reference their training run for metadata tracking
-    - Progress monitoring of ongoing training experiments
-    - Recovery and resume operations for interrupted training
-    
-    Args:
-        output_dir (str): Base directory containing run directories
-        profile_name (str): Profile name to match
-        
-    Returns:
-        str | None: Path to latest finetuning run directory, or None if not found
-        
-    Example:
-        latest_run = find_latest_finetuning_run("output", "whisper-base-en")
-        if latest_run:
-            model_checkpoint = os.path.join(latest_run, "checkpoint-best")
-    """
-    finetuning_runs = [
-        d for d in os.listdir(output_dir)
-        if os.path.isdir(os.path.join(output_dir, d)) and f"-{profile_name}" in d
-    ]
-    if not finetuning_runs:
-        return None
-
-    finetuning_runs.sort(key=lambda d: os.path.getmtime(os.path.join(output_dir, d)), reverse=True)
-    return os.path.join(output_dir, finetuning_runs[0])
 
 """update_run_metadata is imported from core.runs"""
 
@@ -269,18 +211,8 @@ def main():
             profile_config["force_languages"] = profile_config.get("force_languages", False)
             profile_config["languages"] = profile_config.get("languages", "all")
 
-            # Device-safe config normalization for MPS and CPU defaults
-            if device.type == "mps":
-                if profile_config.get("dtype") != "float32":
-                    logger.warning("Overriding dtype to float32 for MPS compatibility")
-                profile_config["dtype"] = "float32"
-                if profile_config.get("attn_implementation") != "eager":
-                    logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility")
-                profile_config["attn_implementation"] = "eager"
-            elif device.type == "cpu":
-                # Prefer float32/eager by default on CPU unless explicitly set
-                profile_config.setdefault("dtype", "float32")
-                profile_config.setdefault("attn_implementation", "eager")
+            # Device-safe config normalization
+            apply_device_defaults(profile_config)
 
             # Dispatch to fine-tuning orchestrator
             _t0 = time.time()
@@ -348,9 +280,15 @@ def main():
             else:
                 raise FileNotFoundError(f"No fine-tuning runs found for profile '{profile_name}'. Train a model before evaluating.")
 
+        # Attach file logging inside the run directory
+        if args.log_file:
+            add_file_handler(args.log_file, json_format=args.json_logging)
+        else:
+            add_file_handler(os.path.join(run_dir, "evaluation.log"), json_format=args.json_logging)
+
         try:
-            # Update metadata with config
-            update_run_metadata(run_dir, config=profile_config)
+            # Update metadata with config and environment info
+            update_run_metadata(run_dir, config=profile_config, env=get_env_info())
 
             profile_config["force_languages"] = profile_config.get("force_languages", False)
             profile_config["languages"] = profile_config.get("languages", "all")
@@ -365,16 +303,7 @@ def main():
                 profile_config["max_samples"] = args.max_samples
 
             # Device-safe config normalization for MPS and CPU defaults
-            if device.type == "mps":
-                if profile_config.get("dtype") != "float32":
-                    logger.warning("Overriding dtype to float32 for MPS compatibility")
-                profile_config["dtype"] = "float32"
-                if profile_config.get("attn_implementation") != "eager":
-                    logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility")
-                profile_config["attn_implementation"] = "eager"
-            elif device.type == "cpu":
-                profile_config.setdefault("dtype", "float32")
-                profile_config.setdefault("attn_implementation", "eager")
+            apply_device_defaults(profile_config)
 
             metrics = ops.evaluate(profile_config, run_dir)
 
@@ -444,8 +373,14 @@ def main():
             signal.signal(signal.SIGTERM, _handle_signal)
 
         _register_signal_handlers(run_dir)
-        
-        finetuning_run_dir = find_finetuning_run_dir(output_dir, args.profile_or_model_dataset)
+
+        # Attach file logging inside the run directory
+        if args.log_file:
+            add_file_handler(args.log_file, json_format=args.json_logging)
+        else:
+            add_file_handler(os.path.join(run_dir, "blacklist.log"), json_format=args.json_logging)
+
+        finetuning_run_dir = find_latest_completed_finetuning_run(output_dir, args.profile_or_model_dataset)
 
         try:
             profile_config = load_profile_config(config, profile_name)
@@ -498,194 +433,6 @@ def get_latest_run_directory(base_dir):
         return None
     run_dirs.sort(reverse=True)
     return os.path.join(base_dir, run_dirs[0])
-
-def load_profile_config(config, profile_name):
-    """
-    Loads and merges hierarchical configuration for a training profile.
-    
-    The configuration system uses inheritance to enable flexible experiment
-    configuration while maintaining consistency. Configuration sections are
-    merged in priority order (lowest to highest precedence).
-    
-    Called by:
-    - main() for finetune operations to load training configuration (line 176)
-    - main() for evaluate operations to load evaluation configuration (line 217)
-    - main() for blacklist operations to load blacklist configuration (line 295)
-    
-    Configuration inheritance hierarchy (lowest to highest precedence):
-    
-    1. DEFAULT section:
-       - Base settings for output directories, logging, etc.
-       - Applied to all profiles universally
-    
-    2. dataset_defaults section:
-       - Common dataset processing parameters
-       - Shared across all dataset types
-    
-    3. group:* sections:
-       - Model family settings (e.g., group:whisper, group:distil-whisper)
-       - Defines architecture-specific defaults
-    
-    4. model:* sections:
-       - Specific model configurations (e.g., model:whisper-base)
-       - Inherits from group but can override specific parameters
-    
-    5. dataset:* sections:
-       - Dataset-specific processing parameters
-       - Audio preprocessing, tokenization settings
-    
-    6. profile:* sections:
-       - Complete training profiles combining model+dataset+hyperparameters
-       - Highest precedence, overrides all other settings
-    
-    Configuration resolution example:
-    For profile:whisper-base-librispeech:
-    - Starts with DEFAULT settings
-    - Applies dataset_defaults
-    - Applies group:whisper settings
-    - Applies model:whisper-base settings  
-    - Applies dataset:librispeech settings
-    - Finally applies profile:whisper-base-librispeech settings
-    
-    Args:
-        config (configparser.ConfigParser): Loaded configuration object
-        profile_name (str): Name of the profile to load
-        
-    Returns:
-        dict: Merged configuration dictionary with all inheritance applied
-        
-    Raises:
-        ValueError: If profile section doesn't exist in config.ini
-        
-    Example config.ini structure:
-        [DEFAULT]
-        output_dir = output
-        
-        [dataset_defaults]
-        max_duration = 30.0
-        
-        [group:whisper]
-        model_family = whisper
-        
-        [model:whisper-base]
-        group = whisper
-        base_model = openai/whisper-base
-        
-        [dataset:librispeech]
-        name = librispeech
-        train_split = train.clean.100
-        
-        [profile:whisper-base-librispeech]
-        model = whisper-base
-        dataset = librispeech
-        learning_rate = 1e-5
-    """
-    profile_section = f"profile:{profile_name}"
-    if not config.has_section(profile_section):
-        raise ValueError(f"Profile '{profile_name}' not found in config.ini.")
-
-    profile_config = {}
-
-    # Load defaults
-    # The "DEFAULT" section is a special mapping always present in ConfigParser
-    # and not returned by has_section(). Merge it unconditionally.
-    profile_config.update(config["DEFAULT"])
-    if config.has_section("dataset_defaults"):
-        profile_config.update(config["dataset_defaults"])
-
-    # Load model group and model defaults
-    model_name = config.get(profile_section, "model")
-    model_section = f"model:{model_name}"
-    if config.has_section(model_section):
-        group_name = config.get(model_section, "group")
-        group_section = f"group:{group_name}"
-        if config.has_section(group_section):
-            profile_config.update(config[group_section])
-        profile_config.update(config[model_section])
-
-    # Load dataset defaults
-    dataset_name = config.get(profile_section, "dataset")
-    dataset_section = f"dataset:{dataset_name}"
-    if config.has_section(dataset_section):
-        profile_config.update(config[dataset_section])
-
-    # Load profile settings (overrides defaults)
-    profile_config.update(config[profile_section])
-
-    return profile_config
-
-def load_model_dataset_config(config, model_name, dataset_name):
-    """
-    Loads configuration for direct model+dataset evaluation without profiles.
-    
-    This function supports evaluation scenarios where users specify model and
-    dataset directly rather than using predefined profiles. It merges relevant
-    configuration sections while bypassing profile-specific settings.
-    
-    Called by:
-    - main() for evaluate operations with model+dataset format (line 210)
-    - Direct evaluation workflows bypassing the profile system
-    
-    Configuration merging (lowest to highest precedence):
-    1. DEFAULT section: Base system settings
-    2. dataset_defaults section: Common dataset processing
-    3. group:* section: Model family defaults (derived from model section)
-    4. model:* section: Specific model configuration
-    5. dataset:* section: Dataset-specific settings
-    
-    Key differences from load_profile_config():
-    - No profile:* section inheritance
-    - Direct model and dataset specification
-    - Suitable for ad-hoc evaluation scenarios
-    - Bypasses profile-specific hyperparameter settings
-    
-    Use cases:
-    - Evaluating pre-trained models on different datasets
-    - Comparative evaluation across model variants
-    - Research experiments with custom model+dataset combinations
-    
-    Args:
-        config (configparser.ConfigParser): Loaded configuration object
-        model_name (str): Name of the model (must exist as model:* section)
-        dataset_name (str): Name of the dataset (must exist as dataset:* section)
-        
-    Returns:
-        dict: Merged configuration dictionary for the model+dataset combination
-        
-    Raises:
-        ValueError: If model or dataset sections don't exist in config.ini
-        
-    Example usage:
-        python main.py evaluate whisper-base+librispeech
-        # Loads model:whisper-base and dataset:librispeech configurations
-    """
-    model_section = f"model:{model_name}"
-    dataset_section = f"dataset:{dataset_name}"
-
-    if not config.has_section(model_section):
-        raise ValueError(f"Model '{model_name}' not found in config.ini.")
-    if not config.has_section(dataset_section):
-        raise ValueError(f"Dataset '{dataset_name}' not found in config.ini.")
-
-    config_dict = {}
-
-    # Load defaults
-    # Always merge DEFAULT pseudo-section (present even if has_section returns False)
-    config_dict.update(config["DEFAULT"])
-    if config.has_section("dataset_defaults"):
-        config_dict.update(config["dataset_defaults"])
-
-    # Load model group defaults
-    group_name = config.get(model_section, "group")
-    group_section = f"group:{group_name}"
-    if config.has_section(group_section):
-        config_dict.update(config[group_section])
-
-    # Load model and dataset settings
-    config_dict.update(config[model_section])
-    config_dict.update(config[dataset_section])
-
-    return config_dict
 
 if __name__ == "__main__":
     # Entry point for command-line execution

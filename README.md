@@ -31,7 +31,9 @@ The Whisper Fine-Tuner framework is built on a modular, platform-agnostic archit
 
 #### 1. Training Orchestration System
 
-**Main Entry Point** (`main.py`):
+**Canonical CLI** (`cli_typer.py`):
+- Prefer Typer-based commands for all workflows; it delegates to the same core modules.
+- `main.py` remains as a legacy entry point for backward compatibility.
 - **Profile-Based Configuration**: Hierarchical configuration system with inheritance (DEFAULT → group → model → dataset → profile)
 - **Run Management**: Sequential run ID generation with metadata tracking and failure recovery
 - **Operation Routing**: Unified CLI for data preparation, training, evaluation, and export operations
@@ -355,7 +357,7 @@ python main.py finetune medium-lora-data3
 
 The system automatically detects GCS paths and streams audio on-demand during training.
 
-## Quick Start (Typer CLI)
+## Quick Start (Recommended: Typer CLI)
 
 ### 1. Prepare your dataset
 Create a CSV file with columns:
@@ -386,20 +388,20 @@ Edit `config.ini` to set:
 # For Apple Silicon - enable fallback for initial testing
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
-# Recommended: Typer CLI
+# Train (Typer CLI)
 python cli_typer.py finetune medium-data3 --json-logging
 
-# Or legacy entrypoint kept for compatibility
+# Legacy (still supported)
 python main.py finetune medium-data3
 ```
 
 ### 4. Evaluate model
 ```bash
-# Typer CLI (profile or direct model+dataset)
+# Evaluate (Typer CLI)
 python cli_typer.py evaluate medium-data3
 python cli_typer.py evaluate whisper-tiny+test_streaming
 
-# Legacy entrypoint and script (still supported)
+# Legacy (still supported)
 python main.py evaluate medium-data3
 python scripts/evaluate.py --model_name_or_path output/{id}-medium-data3 --dataset data3
 ```
@@ -411,10 +413,10 @@ python scripts/evaluate.py --model_name_or_path output/{id}-medium-data3 --datas
 ### 1. Choose a LoRA profile and run training
 ```bash
 # Start with small model (recommended for testing)
-python main.py finetune small-lora-data3
+python cli_typer.py finetune small-lora-data3
 
 # Scale up to medium for better performance
-python main.py finetune medium-lora-data3
+python cli_typer.py finetune medium-lora-data3
 
 # For Apple Silicon - enable fallback initially
 export PYTORCH_ENABLE_MPS_FALLBACK=1
@@ -449,8 +451,8 @@ For datasets too large to fit in memory, enable streaming mode:
 [profile:large-dataset-streaming]
 streaming_enabled = true
 
-# Or via command line:
-python main.py finetune large-dataset-streaming
+# Or via command line (Typer):
+python cli_typer.py finetune large-dataset-streaming
 ```
 
 **Streaming Mode Features:**
@@ -651,10 +653,10 @@ kl_weight = 0.5        # Weight balancing KL divergence vs cross-entropy loss
 2. **Run distillation training using profiles**:
 ```bash
 # Create a distilled whisper-small from whisper-large-v2 teacher
-python main.py finetune distil-small-from-large
+python cli_typer.py finetune distil-small-from-large
 
 # Or create a distilled whisper-medium from whisper-large-v2 teacher  
-python main.py finetune distil-medium-from-large
+python cli_typer.py finetune distil-medium-from-large
 ```
 
 Alternatively, run distillation directly:
@@ -710,7 +712,7 @@ Distillation requires loading both teacher and student models simultaneously:
 
 ### Multi-GPU Training (CUDA only)
 ```bash
-torchrun --nproc_per_node=2 main.py --profile large-v2-data3
+torchrun --nproc_per_node=2 cli_typer.py finetune large-v2-data3
 ```
 
 ### Custom Configurations
