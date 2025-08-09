@@ -32,11 +32,11 @@ Goal: A-grade reliability with simpler architecture, no feature loss.
   - `scripts/blacklist.py`
 
 ## Phase 2 — Config + logging hardening
-- [ ] `core/config._validate_profile_config`:
+- [x] `core/config._validate_profile_config`:
   - Default `language_mode` to `'strict'` if missing
   - Coerce ints/floats/bools centrally (no scattered `int(...)`/`float(...)`)
   - Validate LoRA params types if present
-- [ ] Replace remaining ad-hoc prints in:
+- [x] Replace remaining ad-hoc prints in:
   - `utils/dataset_utils.py`, `scripts/gather.py`, `manage.py` (debug paths) → logger
 
 ## Phase 3 — Cleanup redundancy
