@@ -1,18 +1,18 @@
 # Core ML frameworks
-torch>=2.7.0,<2.8.0
-torchaudio>=2.7.0,<2.8.0
-torchvision>=0.20.0,<0.21.0
+# IMPORTANT: Install PyTorch separately per your platform (MPS/CUDA/CPU).
+# See README for the correct pip command. Do not pin torch in this file.
 
-# Hugging Face ecosystem
-transformers>=4.53.0,<4.55.0
-datasets>=4.0.0,<4.1.0
-accelerate>=0.24.0,<0.28.0
-evaluate>=0.4.0,<0.5.0
-peft>=0.7.0,<0.9.0
+# Hugging Face ecosystem (pin to a tested, compatible set)
+transformers==4.53.3
+datasets==2.18.0
+accelerate==0.27.2
+evaluate==0.4.1
+peft==0.9.0
 
 # Audio processing
 librosa>=0.10.0,<0.11.0
 soundfile>=0.12.0,<0.13.0
+scikit-learn>=1.2.0,<1.6.0
 
 # Utilities
 numpy>=1.21.0,<2.0.0

@@ -15,6 +15,199 @@ A comprehensive framework for fine-tuning OpenAI's Whisper models with native Ap
 - 📦 **Export to GGML**: Convert models for whisper.cpp
 - ☁️ **Cloud Storage Streaming**: Train on massive datasets without local storage
 
+## Architecture Overview
+
+The Whisper Fine-Tuner framework is built on a modular, platform-agnostic architecture that seamlessly adapts to Apple Silicon, NVIDIA CUDA, and CPU environments while providing sophisticated data quality management and multiple training paradigms.
+
+### Design Principles
+
+- **Platform Abstraction**: Unified device management layer abstracts hardware differences between MPS, CUDA, and CPU
+- **Modular Training Methods**: Clean separation between standard, LoRA, and distillation training approaches
+- **Data Quality First**: Hierarchical patch system for data corrections, blacklisting, and protection
+- **Progressive Disclosure**: Interactive wizard for beginners, full configuration control for experts
+- **Memory Efficiency**: Architecture optimized for Apple Silicon's unified memory and consumer hardware constraints
+
+### Core Components
+
+#### 1. Training Orchestration System
+
+**Main Entry Point** (`main.py`):
+- **Profile-Based Configuration**: Hierarchical configuration system with inheritance (DEFAULT → group → model → dataset → profile)
+- **Run Management**: Sequential run ID generation with metadata tracking and failure recovery
+- **Operation Routing**: Unified CLI for data preparation, training, evaluation, and export operations
+- **Platform Optimization**: Early MPS memory configuration and device-specific backend setup
+
+**Configuration System** (`config.ini`):
+- **Hierarchical Profiles**: Compose training configurations from reusable components
+- **Method Detection**: Automatic training method selection based on profile keys (lora_*, distil_*)
+- **Override Support**: Command-line arguments override configuration values
+- **Dataset Inheritance**: Share common preprocessing settings across datasets
+
+**Run Management**:
+```
+output/
+├── run-001-{profile}/
+│   ├── metadata.json       # Run configuration and status
+│   ├── checkpoint-*/        # Training checkpoints
+│   ├── adapter_model/       # LoRA adapters (if applicable)
+│   └── trainer_state.json   # Training metrics
+```
+
+#### 2. Device Management Layer
+
+**Unified Device Abstraction** (`utils/device.py`):
+- **Platform Detection**: Automatic selection following MPS → CUDA → CPU hierarchy
+- **Memory Management**: Platform-specific strategies for unified (MPS) vs discrete (CUDA) memory
+- **Synchronization**: Device-appropriate synchronization for accurate measurements
+- **Diagnostics**: Comprehensive device capability reporting and MPS verification
+
+**Apple Silicon Optimizations**:
+- **Unified Memory Architecture**: Shared CPU/GPU memory pool eliminates transfer overhead
+- **Memory Pressure Control**: `PYTORCH_MPS_HIGH_WATERMARK_RATIO` prevents system-wide swapping
+- **MPS Fallback Handling**: `PYTORCH_ENABLE_MPS_FALLBACK` for unsupported operations during development
+- **Float32 Precision**: Consistent dtype usage avoiding MPS float64 limitations
+
+**Platform-Specific Features**:
+```python
+# MPS: Unified memory, automatic operation fusion
+torch.mps.synchronize()
+torch.mps.current_allocated_memory()
+
+# CUDA: Discrete memory, explicit management
+torch.cuda.synchronize()
+torch.cuda.memory_allocated()
+```
+
+#### 3. Model Training Modules
+
+**Standard Fine-Tuning** (`models/whisper/finetune.py`):
+- **Full Parameter Updates**: Trains all model parameters for maximum accuracy
+- **HuggingFace Integration**: Leverages Seq2SeqTrainer for stable training
+- **Memory Requirements**: 16-24GB for small models, scales with model size
+- **Use Case**: Maximum performance when resources are available
+
+**LoRA Training** (`models/whisper_lora/finetune.py`):
+- **Parameter-Efficient**: Trains only 0.2-3% of parameters via low-rank adapters
+- **Memory Efficient**: 4-8GB VRAM vs 16-24GB for standard training
+- **Adapter Architecture**: Targets attention (q_proj, k_proj, v_proj) and feedforward (fc1, fc2) layers
+- **Checkpoint Size**: 10-50MB adapters vs 1GB+ full models
+- **8-bit Quantization**: Optional INT8 quantization for further memory reduction
+
+**Knowledge Distillation** (`models/distil_whisper/finetune.py`):
+- **Teacher-Student Architecture**: Large teacher model guides smaller student training
+- **Dual Loss Function**: α × KL_divergence + (1-α) × cross_entropy
+- **Temperature Scaling**: Smooths probability distributions for better knowledge transfer
+- **Custom Training Loop**: Precise control over teacher-student interaction
+- **Memory Intensive**: Requires loading both models simultaneously
+
+#### 4. Dataset Management System
+
+**Hierarchical Patch System** (`utils/dataset_utils.py`):
+- **Override System**: Manual transcription corrections via CSV patches
+- **Blacklist Management**: Automatic filtering of problematic samples
+- **Protection Lists**: Preserve high-quality ground truth from blacklisting
+- **Patch Precedence**: Override → Protection → Blacklist application order
+
+**Patch Directory Structure**:
+```
+data_patches/{dataset}/
+├── override_text_perfect/     # Transcription corrections
+│   └── corrections.csv        # id,text_perfect columns
+├── do_not_blacklist/          # Protected samples
+│   └── ground_truth.csv       # id column
+└── delete/                    # Blacklisted samples
+    └── problematic.csv        # id column
+```
+
+**Streaming Support**:
+- **Cloud Storage Integration**: Direct streaming from Google Cloud Storage
+- **Memory-Efficient Loading**: Process datasets larger than available RAM
+- **Patch Compatibility**: O(1) lookups maintain patch application with streaming
+
+#### 5. Training Visualizer
+
+**Real-Time Visualization** (`visualizer.py`):
+- **Flask + SocketIO Backend**: Streams training metrics to web interface
+- **PyTorch Hook Integration**: Extracts gradients, attention weights, and activations
+- **WebGL Frontend**: GPU-accelerated 3D visualizations with Three.js
+- **Performance Buffering**: Prevents visualization from impacting training speed
+
+**Visualization Features**:
+- **3D Neural Network**: Interactive layer visualization with gradient flow
+- **Loss Landscape**: Real-time loss surface evolution
+- **Attention Heatmaps**: Visualize model focus during training
+- **Memory Waves**: System resource utilization patterns
+- **Token Particles**: Generated token visualization
+
+**Architecture Integration**:
+```python
+# Training script integration
+if args.visualize:
+    visualizer = TrainingVisualizer(model, device)
+    visualizer.start_server()
+    trainer.add_callback(visualizer.get_callback())
+```
+
+#### 6. Interactive Configuration Wizard
+
+**Progressive Disclosure Interface** (`wizard.py`):
+- **Guided Configuration**: Step-by-step training setup for beginners
+- **Smart Defaults**: Intelligent parameter selection based on hardware
+- **Method Recommendations**: Suggests training approach based on resources
+- **Profile Generation**: Creates config.ini profiles on-the-fly
+
+**Hardware-Aware Recommendations**:
+```python
+# Automatic batch size calculation
+available_memory = get_available_memory()
+model_memory = ModelSpecs.SIZES[model_size]["memory"]
+recommended_batch = calculate_optimal_batch_size(
+    available_memory, model_memory, training_method
+)
+```
+
+**Integration Flow**:
+1. Hardware detection and capability assessment
+2. Dataset selection and validation
+3. Training method recommendation
+4. Parameter optimization for hardware
+5. Profile generation and training execution
+
+### Data Flow Architecture
+
+```
+Dataset CSV → Prepare Script → Patches Applied → DataLoader
+                                     ↓
+                              Training Module
+                          (Standard/LoRA/Distill)
+                                     ↓
+                              Device Manager
+                              (MPS/CUDA/CPU)
+                                     ↓
+                          Model → Checkpoints → Export
+                            ↓
+                      Visualizer (optional)
+```
+
+### Memory Management Strategy
+
+**Apple Silicon (MPS)**:
+- Unified memory architecture requires system-wide pressure management
+- Default 80% memory allocation prevents swapping
+- Gradient checkpointing for large models
+- Attention slicing for memory-constrained scenarios
+
+**NVIDIA (CUDA)**:
+- Discrete GPU memory with explicit allocation control
+- 90% default allocation for maximum utilization
+- Automatic mixed precision for memory efficiency
+- Multi-GPU support via DataParallel
+
+**Batch Size Optimization**:
+- Platform-specific recommendations based on memory bandwidth
+- Gradient accumulation to simulate larger batches
+- Dynamic batch sizing based on sequence length
+
 ## Model Architectures
 
 The base Whisper models come in several sizes, each with a specific number of encoder and decoder layers. In the standard architecture, the number of layers for the encoder and decoder is symmetrical.
@@ -112,6 +305,17 @@ pip install packaging filelock tabulate
 pip install peft
 ```
 
+Note: For deterministic installs, you can use a lockfile with uv or pip-tools:
+```bash
+# Using uv
+uv pip compile requirements.txt -o requirements.lock
+uv pip install -r requirements.lock
+
+# Or using pip-tools
+pip-compile --generate-hashes -o requirements.lock requirements.txt
+pip install -r requirements.lock
+```
+
 ### 4. Verify MPS setup
 ```bash
 python scripts/system_check.py
@@ -120,6 +324,8 @@ python scripts/system_check.py
 ## Cloud Storage Streaming (New!)
 
 Train on massive datasets without downloading them locally. The framework now supports streaming audio files directly from Google Cloud Storage during training.
+
+The preparer auto-detects `gs://` URIs and switches to streaming mode. It also validates the prepared CSV schema (requires `id` and your configured text column) before training/evaluation.
 
 ### Benefits
 - **No disk space required**: Audio files stream directly from GCS
@@ -268,6 +474,8 @@ export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 export SDPA_ALLOW_FLASH_ATTN=1
 ```
 
+Additionally, to reduce memory spikes, preprocessing and dataloader workers are capped by default on MPS. Override via `preprocessing_num_workers` and `dataloader_num_workers` in `config.ini` if needed.
+
 ### Recommended Batch Sizes (Updated for PyTorch 2.3 with Flash Attention 2)
 
 #### Standard Fine-Tuning
@@ -291,6 +499,21 @@ export SDPA_ALLOW_FLASH_ATTN=1
 2. **Monitor memory**: Use Activity Monitor to check memory pressure
 3. **Gradual increase**: Increase batch sizes if no swapping occurs
 4. **Gradient accumulation**: Use to simulate larger batches
+
+## CI
+
+A macOS CI workflow performs smoke import tests, prepares a tiny streaming dataset, and runs a short evaluation with a tiny model. See `.github/workflows/ci-macos.yml`.
+
+- Optional mini-train smoke: set repository variable `RUN_MINI_TRAIN=1` to enable a tiny guarded train step using `openai/whisper-tiny` (kept off by default to preserve CI time).
+
+## Visualizer Controls
+
+- Start the visualizer by setting `visualize=True` in your profile. It auto-binds to `127.0.0.1` and picks a free port starting at 8080.
+- Throttle update frequency with `viz_update_steps` (defaults to your `logging_steps`).
+- In the UI, use the bottom-right controls to toggle heavy elements on/off at runtime: 3D view, Attention heatmap, Token cloud, Spectrogram.
+- You can also pass URL params for a lighter mode:
+  - `?viz=light` disables heavy widgets by default
+  - `show3D=0`, `showAttention=0`, `showTokens=0`, `showSpectrogram=0` to individually disable
 
 ## Project Structure
 ```

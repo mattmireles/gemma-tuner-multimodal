@@ -1,0 +1,110 @@
+name: macOS CI
+
+on:
+  push:
+    branches: [ main, visualizer ]
+  pull_request:
+    branches: [ main, visualizer ]
+
+jobs:
+  test:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (uv if available, fallback to pip)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if command -v uv >/dev/null 2>&1; then
+            uv pip install -r requirements.txt
+          else
+            pip install -r requirements.txt
+          fi
+          # Install a CPU-only PyTorch to run preprocessing/evaluation logic
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Smoke import tests
+        run: |
+          python - <<'PY'
+          import importlib
+          importlib.import_module('main')
+          importlib.import_module('scripts.evaluate')
+          importlib.import_module('models.whisper.finetune')
+          print('OK: basic imports')
+          PY
+
+      - name: Prepare tiny streaming dataset
+        run: |
+          python main.py prepare test_streaming --config config.ini
+
+      - name: Evaluate prepped dataset with tiny settings
+        env:
+          PYTORCH_MPS_HIGH_WATERMARK_RATIO: "0.8"
+        run: |
+          # Use a minimal profile-like config for evaluation
+          python - <<'PY'
+          import json, os
+          from scripts.evaluate import run_evaluation
+          profile = {
+            "dataset": "test_streaming",
+            "text_column": "text_verbatim",
+            "max_label_length": 64,
+            "max_duration": 30.0,
+            "validation_split": "test_streaming_prepared",  # fallback file is accepted
+            "per_device_eval_batch_size": 2,
+            "dtype": "float32",
+            "attn_implementation": "eager",
+            "model_name_or_path": "openai/whisper-tiny",  # tiny model for speed
+          }
+          os.makedirs('output/ci-eval', exist_ok=True)
+          run_evaluation(profile, 'output/ci-eval')
+          print('OK: evaluation ran')
+          PY
+
+      - name: Optional mini-train smoke (guarded)
+        if: ${{ env.RUN_MINI_TRAIN == '1' }}
+        env:
+          RUN_MINI_TRAIN: ${{ vars.RUN_MINI_TRAIN || '0' }}
+        run: |
+          python - <<'PY'
+          import os, json
+          from scripts.finetune import main as finetune_main
+          profile = {
+            "model": "whisper-tiny",
+            "base_model": "openai/whisper-tiny",
+            "dataset": "test_streaming",
+            "text_column": "text_verbatim",
+            "max_label_length": 64,
+            "max_duration": 30.0,
+            "train_split": "test_streaming_prepared",
+            "per_device_train_batch_size": 1,
+            "num_train_epochs": 1,
+            "gradient_accumulation_steps": 1,
+            "save_strategy": "no",
+            "eval_strategy": "no",
+            "logging_steps": 10,
+            "save_steps": 1000,
+            "save_total_limit": 1,
+            "learning_rate": 1e-4,
+            "warmup_steps": 0,
+            "dtype": "float32",
+            "attn_implementation": "eager",
+          }
+          os.makedirs('output/ci-train', exist_ok=True)
+          finetune_main(profile, 'output/ci-train')
+          print('OK: mini-train ran')
+          PY
+
+
