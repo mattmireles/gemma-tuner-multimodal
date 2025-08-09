@@ -152,8 +152,8 @@ def main():
     - Executes evaluation and captures metrics
     
     export:
-    - Calls scripts.export.export_ggml() for model format conversion
-    - No run directory creation (model conversion utility)
+    - Calls scripts.export.export_model_dir() for HF/SafeTensors export
+    - No run directory creation (model export utility)
     
     blacklist:
     - Creates blacklist generation run directory

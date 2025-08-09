@@ -182,7 +182,7 @@ def export(model_path_or_profile: str = typer.Argument(..., help="Model path or 
     - `whisper-tuner export <model_path_or_hub_id>`
 
     Calls to:
-    - core.ops.export() which defers to scripts.export.export_ggml()
+    - core.ops.export() which defers to scripts.export.export_model_dir()
 
     Args:
         model_path_or_profile: Local model directory or Hugging Face model id
