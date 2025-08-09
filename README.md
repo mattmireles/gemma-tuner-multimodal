@@ -46,11 +46,11 @@ The Whisper Fine-Tuner framework is built on a modular, platform-agnostic archit
 **Run Management**:
 ```
 output/
-├── run-001-{profile}/
+├── {id}-{profile}/
 │   ├── metadata.json       # Run configuration and status
-│   ├── checkpoint-*/        # Training checkpoints
-│   ├── adapter_model/       # LoRA adapters (if applicable)
-│   └── trainer_state.json   # Training metrics
+│   ├── metrics.json        # Consolidated metrics (train/eval)
+│   ├── checkpoint-*/       # Training checkpoints
+│   └── adapter_model/      # LoRA adapters (if applicable)
 ```
 
 #### 2. Device Management Layer
@@ -108,9 +108,9 @@ torch.cuda.memory_allocated()
 - **Protection Lists**: Preserve high-quality ground truth from blacklisting
 - **Patch Precedence**: Override → Protection → Blacklist application order
 
-**Patch Directory Structure**:
+**Patch Directory Structure** (by dataset source from `config.ini`):
 ```
-data_patches/{dataset}/
+data_patches/{source}/
 ├── override_text_perfect/     # Transcription corrections
 │   └── corrections.csv        # id,text_perfect columns
 ├── do_not_blacklist/          # Protected samples
@@ -373,7 +373,7 @@ python scripts/prepare_data.py your_dataset
 python scripts/prepare_data.py your_dataset --no-download
 ```
 
-With `--no-download`, audio files are streamed from Google Cloud Storage during training, eliminating disk space requirements for massive datasets.
+With `--no-download`, audio files are streamed from Google Cloud Storage during training. The loader validates that your CSV contains at least `id` and your configured text column.
 
 ### 2. Configure training
 Edit `config.ini` to set:
@@ -399,8 +399,9 @@ python main.py finetune medium-data3
 python cli_typer.py evaluate medium-data3
 python cli_typer.py evaluate whisper-tiny+test_streaming
 
-# Legacy script (still supported)
-python scripts/evaluate.py --model_name_or_path output/run-001-medium-data3 --dataset data3
+# Legacy entrypoint and script (still supported)
+python main.py evaluate medium-data3
+python scripts/evaluate.py --model_name_or_path output/{id}-medium-data3 --dataset data3
 ```
 
 ## LoRA Quick Start
@@ -530,7 +531,7 @@ python cli_typer.py evaluate medium-data3
 python cli_typer.py evaluate whisper-tiny+test_streaming
 
 # Export (HF/SafeTensors model dir)
-python cli_typer.py export output/run-001-medium-data3
+python cli_typer.py export output/{id}-medium-data3
 ```
 
 The legacy `main.py` and scripts remain supported.
@@ -581,7 +582,7 @@ whisper-fine-tuner-macos/
 
 - Canonical CLI: Prefer `cli_typer.py` for new workflows; `main.py` remains for backward compatibility.
 - Unified inference: Use `core/inference.py` from evaluation/blacklist paths to avoid duplication.
-- Shared preprocessing: `utils/dataset_prep.py` will centralize dataset feature prep and label encoding in Phase 1b; wire new code to it once added.
+- Tests: Run `pytest` for fast unit coverage (no heavy model pulls). See `tests/` for examples.
 
 ### Distillation-Specific Issues
 1. **Out of memory with dual models**: Reduce batch sizes significantly - distillation requires ~2x memory
