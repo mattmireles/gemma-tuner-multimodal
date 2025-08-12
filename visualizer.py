@@ -588,8 +588,12 @@ def start_visualization_server(host='127.0.0.1', port=VisualizationConstants.DEF
         Executes in a daemon thread to avoid blocking training.
         Configured for development mode with appropriate safety checks.
         """
-        # Allow unsafe werkzeug only if explicitly in dev mode
-        allow_unsafe = os.environ.get("VIZ_ALLOW_UNSAFE_WERKZEUG", "0") == "1"
+        # Allow unsafe werkzeug in explicit dev mode or under pytest to avoid thread exceptions
+        # This keeps production usage safe while making local tests/dev seamless.
+        allow_unsafe = (
+            os.environ.get("VIZ_ALLOW_UNSAFE_WERKZEUG", "0") == "1"
+            or os.environ.get("PYTEST_CURRENT_TEST") is not None
+        )
         socketio.run(
             app,
             host=host,
