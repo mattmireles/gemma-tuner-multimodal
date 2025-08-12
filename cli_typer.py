@@ -1,10 +1,66 @@
 #!/usr/bin/env python3
 """
-Optional Typer-based CLI wrapper for Whisper Fine-Tuner.
+Modern Typer-based CLI for Whisper Fine-Tuner with Enhanced Developer Experience
 
-This is an opt-in interface that mirrors the argparse CLI in main.py but with
-a more ergonomic developer experience. It delegates to the same core modules
-(core/config, core/runs, core/ops, utils/device) to avoid logic drift.
+This module provides the primary command-line interface for the Whisper fine-tuning
+system using Typer's modern CLI framework. It offers a more ergonomic and type-safe
+alternative to the legacy argparse implementation while maintaining full compatibility
+with the underlying core operations.
+
+Key responsibilities:
+- Command routing for all fine-tuning operations (prepare, finetune, evaluate, export)
+- Type-safe argument parsing with rich help documentation
+- Automatic signal handling for graceful interruption support
+- Unified logging configuration across all commands
+- Run directory management and metadata tracking
+- Device configuration normalization for Apple Silicon optimization
+
+Called by:
+- Direct shell invocation: `python cli_typer.py <command> <args>`
+- Shell alias: `whisper-tuner <command> <args>` (if configured)
+- CI/CD pipelines using modern CLI patterns
+- Automated testing frameworks via Typer's testing utilities
+- Docker containers for reproducible experiments
+
+Calls to:
+- core/config.py for profile and dataset configuration loading
+- core/runs.py for experiment tracking and run management
+- core/ops.py for delegated operation execution
+- utils/device.py for MPS/CUDA/CPU device selection
+- core/logging.py for structured logging initialization
+
+Command structure:
+- prepare: Dataset preparation and preprocessing
+- finetune: Model training with profile-based configuration
+- evaluate: Model evaluation on test datasets
+- export: Model conversion to deployment formats
+- blacklist: Quality-based sample filtering
+- streaming: Real-time ASR inference
+
+Signal handling:
+Implements POSIX signal handlers for graceful interruption:
+- SIGINT (Ctrl-C): Marks run as cancelled, saves metadata, exits cleanly
+- SIGTERM: Handles container/process manager termination requests
+
+Device handling:
+Automatically detects and configures optimal device settings:
+- Apple Silicon (MPS): Optimized batch sizes and memory settings
+- NVIDIA CUDA: GPU acceleration with appropriate dtype selection
+- CPU fallback: Universal compatibility mode
+
+Run management:
+Every command creates a structured run directory containing:
+- metadata.json: Complete experiment configuration and results
+- run.log: Detailed execution logs for debugging
+- Model checkpoints and evaluation outputs
+- Performance metrics and timing information
+
+Design principles:
+- Type safety: Leverages Python type hints for validation
+- Ergonomics: Intuitive command structure with rich help
+- Compatibility: Maintains parity with legacy argparse CLI
+- Extensibility: Easy addition of new commands via decorators
+- Testability: Typer's testing utilities enable comprehensive CLI testing
 """
 
 from __future__ import annotations
@@ -31,10 +87,31 @@ from core import ops
 from utils.device import get_device, apply_device_defaults, get_env_info
 
 
-app = typer.Typer(help="Whisper Fine-Tuner (Typer): prepare, finetune, evaluate, export, blacklist")
+# CLI Application Instance with Enhanced Help
+# Creates the main Typer application that coordinates all subcommands
+# Provides automatic help generation and command discovery
+app = typer.Typer(
+    help="Whisper Fine-Tuner (Typer): prepare, finetune, evaluate, export, blacklist",
+    add_completion=False,  # Disable shell completion for cleaner interface
+    rich_markup_mode="rich",  # Enable rich terminal formatting
+)
 
 
 def _normalize_device_defaults(profile_config: dict) -> None:
+    """Apply device-specific configuration defaults for optimal performance.
+    
+    Called by:
+    - finetune() before training execution
+    - evaluate() before model evaluation
+    - blacklist() before quality analysis
+    
+    Calls to:
+    - utils/device.apply_device_defaults() for MPS/CUDA/CPU optimization
+    
+    Side effects:
+    - Modifies profile_config in-place with device-optimal settings
+    - Sets batch_size, gradient_accumulation, mixed_precision defaults
+    """
     apply_device_defaults(profile_config)
 
 

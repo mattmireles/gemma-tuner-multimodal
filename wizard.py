@@ -33,6 +33,17 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 
+# Ensure this project's root is first on sys.path to avoid name collisions
+# with other projects that may also define a top-level `constants` module.
+try:
+    import sys as _sys
+    from pathlib import Path as _Path
+    _project_root = _Path(__file__).resolve().parent
+    if str(_project_root) not in _sys.path:
+        _sys.path.insert(0, str(_project_root))
+except Exception:
+    pass
+
 # Rich for beautiful terminal UI
 from rich.console import Console
 from rich.panel import Panel
@@ -48,7 +59,18 @@ from questionary import Style
 
 # Import existing utilities
 from utils.device import get_device
-from constants import MemoryLimits
+
+# Robust import of MemoryLimits with safe fallback
+try:
+    from constants import MemoryLimits  # type: ignore
+except Exception:
+    class MemoryLimits:  # Fallback defaults
+        MPS_DEFAULT_FRACTION = 0.8
+        CUDA_DEFAULT_FRACTION = 0.9
+    print(
+        "constants module not found or incompatible. Using default MemoryLimits. "
+        "Ensure this project's constants.py is available."
+    )
 
 # Initialize console and styling
 console = Console()
@@ -171,11 +193,12 @@ We'll guide you through training your custom Whisper model in just a few questio
     """
     
     console.print(Panel(
-        Align.center(Text(logo, style="bold blue")) + welcome_text,
+        Align.center(Text(logo, style="bold blue"), vertical="middle"),
         title="🎯 Whisper Fine-Tuner",
         border_style="blue",
         padding=(1, 2)
     ))
+    console.print(welcome_text)
     
     input()  # Wait for user to press Enter
 
@@ -647,12 +670,13 @@ def execute_training(profile_config: Dict[str, Any]):
     
     try:
         # Execute training via subprocess to avoid import side effects
+        # Use module invocation so this works when installed as a package
         result = subprocess.run([
-            sys.executable, 
-            "main.py",
-            "finetune", 
+            sys.executable,
+            "-m", "main",
+            "finetune",
             profile_name,
-            "--config", 
+            "--config",
             str(temp_config_path)
         ], check=True, text=True, capture_output=False)
         

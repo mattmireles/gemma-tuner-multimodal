@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper-fine-tuner-macos"
+version = "0.1.0"
+description = "Whisper fine-tuning tools with Apple Silicon (MPS) support"
+readme = "README.md"
+authors = [{ name = "Whisper Fine-Tuner Maintainers" }]
+requires-python = ">=3.8"
+
+[project.scripts]
+whisper-tune = "wizard:wizard_main"
+
+[tool.setuptools]
+# Include top-level single-file modules
+py-modules = [
+  "wizard",
+  "main",
+  "cli_typer",
+  "constants",
+  "visualizer",
+]
+
+[tool.setuptools.packages.find]
+# Discover regular packages from package directories
+include = [
+  "core*",
+  "utils*",
+  "scripts*",
+  "models*",
+]
