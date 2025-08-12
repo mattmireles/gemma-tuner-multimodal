@@ -529,6 +529,22 @@ def show_confirmation_screen(method: Dict[str, Any], model: str, dataset: Dict[s
         padding=(1, 2)
     ))
     
+    # Ask about visualization
+    console.print(f"\n[bold cyan]Optional: Enable Training Visualizer?[/bold cyan]")
+    console.print("[dim]Watch your AI learn in real-time with stunning 3D graphics![/dim]")
+    
+    enable_viz = questionary.confirm(
+        "🎆 Enable live training visualization?",
+        default=True,
+        style=apple_style
+    ).ask()
+    
+    # Store visualization choice for later use
+    method_config['visualize'] = enable_viz
+    
+    if enable_viz:
+        console.print("[green]✨ Visualization will open in your browser when training starts![/green]")
+    
     # Confirmation prompt
     return questionary.confirm(
         "Start training with this configuration?",
@@ -589,6 +605,10 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
     elif dataset["type"] in ["local_csv", "local_audio"]:
         profile_config["train_dataset_path"] = dataset["path"]
         profile_config["eval_dataset_path"] = dataset["path"]  # Same for now
+    
+    # Add visualization flag if enabled
+    if method_config.get('visualize', False):
+        profile_config['visualize'] = True
     
     return profile_config
 
