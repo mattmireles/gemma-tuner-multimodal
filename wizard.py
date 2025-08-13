@@ -132,13 +132,23 @@ class ModelSpecs:
     }
 
 
-def _infer_num_mel_bins(model_name_or_key: str) -> int:
+def _infer_num_mel_bins(model_name_or_key: Any) -> int:
     """Return expected mel bins for a Whisper model key/name.
-
+    
+    Accepts a variety of inputs (string model key, tuple, or None) and
+    normalizes to a lowercase string for robust handling.
+    
     - Whisper large-v3 variants use 128 mel bins
     - Most other OpenAI Whisper models use 80 mel bins
     """
-    key = (model_name_or_key or "").lower()
+    # Normalize input to a lowercase string defensively
+    value: Any = model_name_or_key
+    if isinstance(value, tuple) and value:
+        value = value[0]
+    try:
+        key = (value or "").lower()
+    except Exception:
+        key = str(value or "").lower()
     if "large-v3" in key:
         return 128
     return 80
@@ -732,30 +742,33 @@ def configure_method_specifics(method: Dict[str, Any], model: str | tuple, seed:
         
         # Define student model path
         if arch_choice == "custom":
-            # Encoder source (large models)
+            # Encoder/decoder sources
             if not config.get("student_encoder_from") or not config.get("student_decoder_from"):
                 cfg = _read_config()
                 available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
                 large_like = [m for m in available_models if ("large" in m or "medium" in m)]
                 small_like = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
-                enc_choice = questionary.select(
+                encoder_source = questionary.select(
                     "Choose an Encoder source (teacher model)",
                     choices=[{"name": m, "value": m} for m in large_like],
                     style=apple_style,
                 ).ask()
-                dec_choice = questionary.select(
+                decoder_source = questionary.select(
                     "Choose a Decoder source (small/efficient model)",
                     choices=[{"name": m, "value": m} for m in small_like],
                     style=apple_style,
                 ).ask()
                 # Save in config
                 config["student_model_type"] = "custom"
-                config["student_encoder_from"] = enc_choice
-                config["student_decoder_from"] = dec_choice
+                config["student_encoder_from"] = encoder_source
+                config["student_decoder_from"] = decoder_source
+            else:
+                encoder_source = config.get("student_encoder_from")
+                decoder_source = config.get("student_decoder_from")
 
             # Teacher selection (guide to match encoder mel bins)
             teacher_models = ["whisper-large-v3", "whisper-large-v2", "whisper-medium"]
-            student_mels = _infer_num_mel_bins(config.get("student_encoder_from", enc_choice))
+            student_mels = _infer_num_mel_bins(encoder_source)
             teacher_choices = []
             for teacher in teacher_models:
                 txt = teacher
