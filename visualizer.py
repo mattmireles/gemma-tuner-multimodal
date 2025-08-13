@@ -527,7 +527,7 @@ def _find_free_port(preferred_port: int) -> int:
             s.bind(("127.0.0.1", 0))
             return s.getsockname()[1]
 
-from constants import VisualizationConstants
+from wft_constants import VisualizationConstants
 
 
 def start_visualization_server(host='127.0.0.1', port=VisualizationConstants.DEFAULT_PORT, open_browser=False):
