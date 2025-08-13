@@ -276,7 +276,16 @@ def detect_datasets() -> List[Dict[str, Any]]:
         "description": "I'll specify my dataset path manually"
     })
     
-    return datasets
+    # Ensure the BigQuery import option appears first in the wizard list
+    # without changing the relative order of the remaining entries.
+    bigquery_first: List[Dict[str, Any]] = []
+    others: List[Dict[str, Any]] = []
+    for item in datasets:
+        if item.get("type") == "bigquery_import":
+            bigquery_first.append(item)
+        else:
+            others.append(item)
+    return bigquery_first + others
 
 def select_training_method() -> Dict[str, Any]:
     """Step 1: Select training method with progressive disclosure"""
