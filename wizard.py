@@ -131,6 +131,18 @@ class ModelSpecs:
         "distil-small-encoder-tiny-decoder": {"params": "244M→195M", "memory_gb": 4.5, "hours_100k": 2.0, "hf_id": "openai/whisper-small"},
     }
 
+
+def _infer_num_mel_bins(model_name_or_key: str) -> int:
+    """Return expected mel bins for a Whisper model key/name.
+
+    - Whisper large-v3 variants use 128 mel bins
+    - Most other OpenAI Whisper models use 80 mel bins
+    """
+    key = (model_name_or_key or "").lower()
+    if "large-v3" in key:
+        return 128
+    return 80
+
 def get_device_info() -> Dict[str, Any]:
     """Get device information for memory and time estimation"""
     device = get_device()
@@ -659,11 +671,37 @@ def configure_method_specifics(method: Dict[str, Any], model: str) -> Dict[str, 
                     choice_text += " ⭐ Recommended"
                 teacher_choices.append({"name": choice_text, "value": teacher})
         
+        # Filter incompatible teacher/student mel-bin combos (e.g., large-v3=128 mel vs tiny/base/small=80 mel)
+        student_mels = _infer_num_mel_bins(model)
+        filtered_teacher_choices = []
+        for ch in teacher_choices:
+            t_model = ch["value"]
+            if _infer_num_mel_bins(t_model) != student_mels:
+                # mark but still allow selection with warning suffix
+                ch = {"name": ch["name"] + " (incompatible mel bins; not recommended)", "value": t_model}
+            filtered_teacher_choices.append(ch)
+
         teacher_choice = questionary.select(
             "Which teacher model should we distill knowledge from?",
-            choices=teacher_choices,
+            choices=filtered_teacher_choices,
             style=apple_style
         ).ask()
+
+        # If incompatible, warn and allow the user to switch
+        if _infer_num_mel_bins(teacher_choice) != student_mels:
+            console.print("[yellow]Warning:[/yellow] Selected teacher uses a different number of mel bins than the student.")
+            console.print("[yellow]Teacher expects 128 mel (large-v3) vs Student 80 mel (tiny/base/small), or vice versa.[/yellow]")
+            if not questionary.confirm("Proceed anyway? (advanced users only)", default=False, style=apple_style).ask():
+                # Re-ask with only compatible options
+                compat = [c for c in filtered_teacher_choices if _infer_num_mel_bins(c["value"]) == student_mels]
+                if not compat:
+                    console.print("[red]No compatible teachers available; please pick a different student or teacher.[/red]")
+                    raise SystemExit(1)
+                teacher_choice = questionary.select(
+                    "Choose a compatible teacher (matching mel bins):",
+                    choices=compat,
+                    style=apple_style,
+                ).ask()
         # Resolve to full HF repo id via config.ini when possible
         try:
             cfg = _read_config()
