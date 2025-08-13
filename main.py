@@ -83,58 +83,104 @@ elif device.type == "mps":
 
 def main():
     """
-    Main entry point orchestrating all Whisper fine-tuning operations.
+    Main entry point orchestrating all Whisper fine-tuning operations with comprehensive workflow management.
     
-    This function implements the central command-line interface and operation
-    routing for the entire fine-tuning system. It handles argument parsing,
-    configuration loading, run management, and error handling.
-    
-    Operation flow:
-    1. Parse command-line arguments and validate parameters
-    2. Load configuration from config.ini
-    3. Route to appropriate operation handler
-    4. Create run directories and track metadata
-    5. Execute operation with error handling
-    6. Update run status and completion markers
-    
-    Supported operations and their workflows:
-    
-    prepare:
-    - Calls scripts.prepare_data.prepare_data() for dataset preprocessing
-    - No run directory creation (global dataset preparation)
-    
-    finetune:
-    - Creates run directory with unique ID
-    - Loads profile configuration with inheritance
-    - Dynamically imports model-specific training module
-    - Executes training with progress tracking
-    - Marks run as completed on success
-    
-    evaluate:
-    - Supports profile-based or model+dataset evaluation
-    - Links to existing fine-tuning runs for profile evaluation
-    - Creates evaluation-specific run directories
-    - Executes evaluation and captures metrics
-    
-    export:
-    - Calls scripts.export.export_model_dir() for HF/SafeTensors export
-    - No run directory creation (model export utility)
-    
-    blacklist:
-    - Creates blacklist generation run directory
-    - Links to completed fine-tuning run for model access
-    - Generates training sample blacklists for data quality
-    
-    Error handling:
-    - Captures exceptions during operation execution
-    - Updates run metadata with error information
-    - Preserves failed runs for debugging
-    - Provides detailed error context in logs
+    This function implements the central command-line interface and operation routing for the entire
+    fine-tuning system. It provides a unified entry point for all training, evaluation, export, and
+    data management operations while handling complex configuration inheritance, run management, and
+    cross-platform optimization (Apple Silicon MPS, NVIDIA CUDA, CPU).
     
     Called by:
-    - Command-line invocation: python main.py <operation> <args>
-    - Batch processing scripts for automated experiments
-    - CI/CD pipelines for continuous training/evaluation
+    - Direct command-line invocation: python main.py <operation> <args>
+    - wizard.py:execute_training() via subprocess for wizard-generated workflows (line 1127)
+    - Batch processing scripts for automated experiments and hyperparameter sweeps
+    - CI/CD pipelines for continuous training, evaluation, and model deployment
+    - Research experiment orchestration systems managing comparative studies
+    - Production training pipelines executing scheduled model updates and validation
+    
+    Calls to (comprehensive operation dispatch mapping):
+    - core/config.py:load_profile_config(), load_model_dataset_config() for configuration management
+    - core/runs.py:get_next_run_id(), create_run_directory(), update_run_metadata() for run lifecycle
+    - core/ops.py operation dispatchers: prepare(), finetune(), evaluate(), export(), blacklist()
+    - utils/device.py:get_device(), apply_device_defaults(), get_env_info() for platform optimization
+    - Signal handlers for graceful interruption and run status management
+    - File logging systems for comprehensive operation tracking and debugging
+    
+    Operation flow and lifecycle management:
+    1. Early MPS memory configuration (BEFORE PyTorch import) for Apple Silicon optimization
+    2. Platform detection and backend optimization setup (MPS, CUDA, CPU)
+    3. Argument parsing and validation with operation-specific parameter handling
+    4. Configuration loading with hierarchical inheritance and profile resolution
+    5. Run directory creation with unique ID generation and metadata initialization
+    6. Signal handler registration for graceful interruption and cleanup
+    7. File logging setup for operation tracking and debugging
+    8. Operation-specific preprocessing (device defaults, configuration validation)
+    9. Operation dispatch to specialized handlers with error boundary management
+    10. Success handling: completion marking, metadata updates, automatic GGUF export
+    11. Error handling: failure tracking, diagnostic information capture, cleanup
+    
+    Supported operations and their complete workflows:
+    
+    prepare (Dataset Preprocessing):
+    - Dispatches to core/ops.py:prepare() for dataset download and preprocessing
+    - No run directory creation (global dataset preparation operation)
+    - Handles large dataset downloads, format conversion, and split generation
+    - Integrates with HuggingFace datasets and custom data sources
+    
+    finetune (Model Training):
+    - Creates run directory with sequential ID and comprehensive metadata
+    - Loads profile configuration with full inheritance chain resolution
+    - Applies device-specific configuration defaults (MPS, CUDA, CPU)
+    - Dispatches to core/ops.py:finetune() which routes to model-specific implementations
+    - Tracks training progress with real-time metadata updates
+    - Automatic GGUF export on successful completion for whisper.cpp compatibility
+    - Signal handling for graceful interruption and run status preservation
+    
+    evaluate (Model Evaluation):
+    - Supports three evaluation modes: profile-based, model+dataset, profile+dataset
+    - Links to existing fine-tuning runs for profile-based evaluation
+    - Creates evaluation-specific run directories with parent run linking
+    - Dispatches to core/ops.py:evaluate() for comprehensive metric computation
+    - Captures detailed evaluation results including WER, CER, and prediction analysis
+    - Integrates with run metadata system for evaluation result tracking
+    
+    export (Model Format Conversion):
+    - Dispatches to core/ops.py:export() for HuggingFace/SafeTensors export
+    - No run directory creation (utility operation for model conversion)
+    - Handles model serialization and format validation
+    
+    export-gguf (Whisper.cpp Conversion):
+    - Dispatches to core/ops.py:export_gguf() for GGUF format conversion
+    - Automated whisper.cpp tool acquisition and conversion pipeline
+    - Optimized for deployment and inference performance
+    
+    blacklist (Data Quality Management):
+    - Creates blacklist generation run directory with training run linking
+    - Links to completed fine-tuning run for model-based sample analysis
+    - Dispatches to core/ops.py:blacklist() for intelligent outlier detection
+    - Generates training sample blacklists for iterative data quality improvement
+    - Integrates with data patch system for manual override support
+    
+    Error handling and recovery (production-ready):
+    - Comprehensive exception catching with operation-specific error contexts
+    - Automatic run metadata updates with error information and diagnostic details
+    - Preserves failed runs for debugging and analysis with complete state capture
+    - Signal handling for graceful interruption (SIGINT, SIGTERM) with cleanup
+    - Detailed error logging with stack traces and operation context
+    - Run status management ensuring consistent state across interruptions and failures
+    
+    Apple Silicon optimizations (comprehensive MPS support):
+    - Early MPS memory configuration before PyTorch import (lines 8-33)
+    - Platform-specific backend optimization setup (cuDNN benchmark, MPS watermarks)
+    - Device-specific configuration defaults applied before all operations
+    - Memory fraction control and pressure management for unified memory architecture
+    - Automatic GGUF export optimized for Apple Silicon deployment scenarios
+    
+    Cross-platform compatibility:
+    - Unified device detection and optimization across MPS, CUDA, and CPU platforms
+    - Platform-specific performance optimizations and memory management strategies
+    - Consistent operation behavior across different hardware configurations
+    - File system path handling for cross-platform deployment (Windows, macOS, Linux)
     """
     # Logging options via environment for simplicity
     log_json = os.environ.get("LOG_JSON", "0") == "1"
