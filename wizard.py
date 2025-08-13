@@ -669,9 +669,14 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
         "description": f"Imported from BigQuery {project_id}.{dataset_id}.{table_id}",
     }
 
-def configure_method_specifics(method: Dict[str, Any], model: str, seed: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def configure_method_specifics(method: Dict[str, Any], model: str | tuple, seed: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Step 4: Method-specific configuration (progressive disclosure)"""
-    
+    # Defensive: older call sites may pass a (model, seed) tuple.
+    if isinstance(model, tuple):
+        model, seed_from_tuple = model
+        if seed is None and isinstance(seed_from_tuple, dict):
+            seed = seed_from_tuple
+
     config = {} if seed is None else dict(seed)
     
     if method["key"] == "lora":
@@ -1091,14 +1096,14 @@ def wizard_main():
         # Step 1: Select training method
         method = select_training_method()
         
-        # Step 2: Select model
-        model = select_model(method)
+        # Step 2: Select model (returns (model_key, seed))
+        model, seed = select_model(method)
         
         # Step 3: Select dataset  
         dataset = select_dataset(method)
         
-        # Step 4: Method-specific configuration
-        method_config = configure_method_specifics(method, model)
+        # Step 4: Method-specific configuration (pass seed for custom hybrids)
+        method_config = configure_method_specifics(method, model, seed)
         
         # Step 5: Estimate time and resources
         estimates = estimate_training_time(method, model, dataset)
