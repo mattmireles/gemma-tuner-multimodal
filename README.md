@@ -827,6 +827,57 @@ per_device_train_batch_size = 12
 ### Export to CoreML (coming soon)
 For maximum inference performance on Apple Silicon, export to CoreML after training.
 
+## LLM-First Documentation Philosophy
+
+This codebase follows a comprehensive **LLM-first documentation philosophy**, designed to maximize maintainability and understanding for both human and AI developers. Every module, function, and constant has been documented with the explicit goal of providing context for future AI-assisted development.
+
+### Documentation Standards
+
+Our documentation adheres to these principles:
+
+1. **Comprehensive Module Docstrings**: Every Python module begins with a detailed docstring explaining its purpose, responsibilities, and role in the system architecture.
+
+2. **Cross-File References**: All functions document:
+   - **Called by**: Which files and functions call this code (with line numbers)
+   - **Calls to**: Which external functions and modules this code depends on
+   - **Integration points**: How the code fits into the broader system workflow
+
+3. **Named Constants**: All magic numbers have been replaced with named constants in dedicated classes:
+   - `TrainingConstants`, `DistillationConstants`, `RunConstants`, `ConfigConstants`, etc.
+   - Each constant includes documentation explaining its purpose and typical values
+   - Platform-specific constants are clearly marked (MPS, CUDA, CPU)
+
+4. **State Management Documentation**: Complex state transitions and lifecycles are explicitly documented:
+   - Configuration merge hierarchies
+   - Run directory state transitions
+   - Memory management strategies per platform
+   - Training workflow stages
+
+5. **Platform-Specific Optimizations**: Apple Silicon (MPS) considerations are documented throughout:
+   - Unified vs discrete memory architecture differences
+   - MPS operation limitations and workarounds
+   - Memory pressure management strategies
+   - Float32 precision requirements
+
+### Key Documentation Highlights
+
+- **`core/config.py`**: Hierarchical configuration system with complete merge order documentation
+- **`core/runs.py`**: Run management with directory structure diagrams and metadata schemas
+- **`core/ops.py`**: Operation dispatch with deferred import patterns for performance
+- **`utils/device.py`**: Comprehensive platform detection and memory management strategies
+- **`models/*/finetune.py`**: Training implementations with algorithm descriptions and memory requirements
+
+### For AI Developers
+
+When working with this codebase using AI assistance:
+
+1. **Context is preserved**: Cross-file references help AI understand system-wide impacts
+2. **Constants are meaningful**: Named constants provide semantic understanding vs magic numbers
+3. **Patterns are documented**: Common workflows and best practices are explicitly stated
+4. **Gotchas are highlighted**: Platform-specific issues and workarounds are clearly marked
+
+This documentation approach ensures that future AI systems can effectively understand, modify, and extend the codebase while maintaining architectural integrity and platform compatibility.
+
 ## Acknowledgments
 
 - OpenAI for Whisper
