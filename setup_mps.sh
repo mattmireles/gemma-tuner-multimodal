@@ -35,12 +35,12 @@ echo "✅ Python is native ARM64"
 echo ""
 echo "Setting MPS environment variables..."
 export PYTORCH_ENABLE_MPS_FALLBACK=1
-export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
+export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.9
 export SDPA_ALLOW_FLASH_ATTN=1
 
 echo "✅ Environment variables set:"
 echo "   PYTORCH_ENABLE_MPS_FALLBACK=1 (for compatibility)"
-echo "   PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8 (80% memory limit)"
+echo "   PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.9 (90% memory limit)"
 echo "   SDPA_ALLOW_FLASH_ATTN=1 (Flash Attention 2 enabled - reduces memory by ~28%)"
 
 # Install dependencies

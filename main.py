@@ -6,8 +6,30 @@
 import os
 import platform
 if platform.system() == "Darwin" and platform.machine() == "arm64":
-    # Set MPS memory limit for Apple Silicon before ANY other imports
-    os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.8")
+    # Set/validate MPS memory limits before ANY other imports
+    # Clamp invalid values (must be 0.0 < ratio < 1.0). Some environments set 1.4 erroneously.
+    def _clamp_ratio(name: str, default_value: float) -> float:
+        cur = os.environ.get(name)
+        if cur is None:
+            os.environ[name] = str(default_value)
+            return default_value
+        try:
+            val = float(cur)
+            if not (0.0 < val < 1.0):
+                os.environ[name] = str(default_value)
+                return default_value
+            return val
+        except Exception:
+            os.environ[name] = str(default_value)
+            return default_value
+
+    high = _clamp_ratio("PYTORCH_MPS_HIGH_WATERMARK_RATIO", 0.9)
+    low = _clamp_ratio("PYTORCH_MPS_LOW_WATERMARK_RATIO", 0.7)
+    # Ensure ordering: low < high
+    if not (low < high):
+        # Reset low to a safe margin below high
+        safe_low = max(min(high - 0.1, 0.85), 0.1)
+        os.environ["PYTORCH_MPS_LOW_WATERMARK_RATIO"] = f"{safe_low:.2f}"
 
 """
 Whisper Fine-Tuner CLI
@@ -26,6 +48,7 @@ import time
 import logging
 import signal
 import torch
+
 
 from core.logging import init_logging, add_file_handler
 from core.config import load_profile_config, load_model_dataset_config

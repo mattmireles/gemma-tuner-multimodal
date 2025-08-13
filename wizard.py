@@ -33,16 +33,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 
-# Ensure this project's root is first on sys.path to avoid name collisions
-# with other projects that may also define a top-level `constants` module.
-try:
-    import sys as _sys
-    from pathlib import Path as _Path
-    _project_root = _Path(__file__).resolve().parent
-    if str(_project_root) not in _sys.path:
-        _sys.path.insert(0, str(_project_root))
-except Exception:
-    pass
 
 # Rich for beautiful terminal UI
 from rich.console import Console
@@ -59,18 +49,6 @@ from questionary import Style
 
 # Import existing utilities
 from utils.device import get_device
-
-# Robust import of MemoryLimits with safe fallback
-try:
-    from constants import MemoryLimits  # type: ignore
-except Exception:
-    class MemoryLimits:  # Fallback defaults
-        MPS_DEFAULT_FRACTION = 0.8
-        CUDA_DEFAULT_FRACTION = 0.9
-    print(
-        "constants module not found or incompatible. Using default MemoryLimits. "
-        "Ensure this project's constants.py is available."
-    )
 
 # Initialize console and styling
 console = Console()
@@ -121,16 +99,36 @@ class ModelSpecs:
     """Model specifications for estimation calculations"""
     
     MODELS = {
-        "whisper-tiny": {"params": "39M", "memory_gb": 1.2, "hours_100k": 0.5},
-        "whisper-base": {"params": "74M", "memory_gb": 2.1, "hours_100k": 1.0}, 
-        "whisper-small": {"params": "244M", "memory_gb": 4.2, "hours_100k": 2.5},
-        "whisper-medium": {"params": "769M", "memory_gb": 8.4, "hours_100k": 6.0},
-        "whisper-large": {"params": "1550M", "memory_gb": 16.8, "hours_100k": 12.0},
-        "whisper-large-v2": {"params": "1550M", "memory_gb": 16.8, "hours_100k": 12.0},
-        "whisper-large-v3": {"params": "1550M", "memory_gb": 16.8, "hours_100k": 12.0},
-        "distil-whisper-small": {"params": "166M", "memory_gb": 3.2, "hours_100k": 1.8},
-        "distil-whisper-medium": {"params": "394M", "memory_gb": 6.1, "hours_100k": 3.5},
-        "distil-whisper-large-v2": {"params": "756M", "memory_gb": 12.4, "hours_100k": 8.0},
+        # OpenAI Standard Models
+        "whisper-tiny": {"params": "39M", "memory_gb": 1.2, "hours_100k": 0.5, "hf_id": "openai/whisper-tiny"},
+        "whisper-base": {"params": "74M", "memory_gb": 2.1, "hours_100k": 1.0, "hf_id": "openai/whisper-base"}, 
+        "whisper-small": {"params": "244M", "memory_gb": 4.2, "hours_100k": 2.5, "hf_id": "openai/whisper-small"},
+        "whisper-medium": {"params": "769M", "memory_gb": 8.4, "hours_100k": 6.0, "hf_id": "openai/whisper-medium"},
+        "whisper-large-v2": {"params": "1550M", "memory_gb": 16.8, "hours_100k": 12.0, "hf_id": "openai/whisper-large-v2"},
+        "whisper-large-v3": {"params": "1550M", "memory_gb": 16.8, "hours_100k": 12.0, "hf_id": "openai/whisper-large-v3"},
+        
+        # OpenAI English-Only Models
+        "whisper-tiny.en": {"params": "39M", "memory_gb": 1.2, "hours_100k": 0.45, "hf_id": "openai/whisper-tiny.en"},
+        "whisper-base.en": {"params": "74M", "memory_gb": 2.1, "hours_100k": 0.9, "hf_id": "openai/whisper-base.en"},
+        "whisper-small.en": {"params": "244M", "memory_gb": 4.2, "hours_100k": 2.3, "hf_id": "openai/whisper-small.en"},
+        "whisper-medium.en": {"params": "769M", "memory_gb": 8.4, "hours_100k": 5.5, "hf_id": "openai/whisper-medium.en"},
+
+        # Distil-Whisper Models (Pre-trained by HuggingFace)
+        "distil-small.en": {"params": "166M", "memory_gb": 3.2, "hours_100k": 1.8, "hf_id": "distil-whisper/distil-small.en"},
+        "distil-medium.en": {"params": "394M", "memory_gb": 6.1, "hours_100k": 3.5, "hf_id": "distil-whisper/distil-medium.en"},
+        "distil-large-v2": {"params": "756M", "memory_gb": 12.4, "hours_100k": 8.0, "hf_id": "distil-whisper/distil-large-v2"},
+        "distil-large-v3": {"params": "756M", "memory_gb": 12.4, "hours_100k": 7.5, "hf_id": "distil-whisper/distil-large-v3"},
+        
+        # Custom Distillation Targets (Create your own distilled models)
+        "distil-tiny-from-medium": {"params": "39M", "memory_gb": 2.8, "hours_100k": 1.2, "hf_id": "openai/whisper-tiny"},
+        "distil-base-from-medium": {"params": "74M", "memory_gb": 4.2, "hours_100k": 2.0, "hf_id": "openai/whisper-base"},
+        "distil-tiny.en-from-medium.en": {"params": "39M", "memory_gb": 2.8, "hours_100k": 1.1, "hf_id": "openai/whisper-tiny.en"},
+        "distil-base.en-from-medium.en": {"params": "74M", "memory_gb": 4.2, "hours_100k": 1.8, "hf_id": "openai/whisper-base.en"},
+        
+        # Hybrid Encoder-Decoder Models (Fast decoding with quality encoding)
+        "distil-large-encoder-tiny-decoder": {"params": "1550M→195M", "memory_gb": 10.2, "hours_100k": 6.0, "hf_id": "openai/whisper-large-v3"},
+        "distil-medium-encoder-tiny-decoder": {"params": "769M→195M", "memory_gb": 6.8, "hours_100k": 3.5, "hf_id": "openai/whisper-medium"},
+        "distil-small-encoder-tiny-decoder": {"params": "244M→195M", "memory_gb": 4.5, "hours_100k": 2.0, "hf_id": "openai/whisper-small"},
     }
 
 def get_device_info() -> Dict[str, Any]:
@@ -203,40 +201,53 @@ We'll guide you through training your custom Whisper model in just a few questio
     input()  # Wait for user to press Enter
 
 def detect_datasets() -> List[Dict[str, Any]]:
-    """Auto-detect available datasets"""
-    datasets = []
-    
-    # Check for local datasets
-    data_dir = Path("data")
-    if data_dir.exists():
-        for subdir in data_dir.iterdir():
-            if subdir.is_dir():
-                # Look for CSV files (common dataset format)
-                csv_files = list(subdir.glob("*.csv"))
-                if csv_files:
-                    datasets.append({
-                        "name": subdir.name,
-                        "type": "local_csv",
-                        "path": str(subdir),
-                        "files": len(csv_files),
-                        "description": f"Local dataset with {len(csv_files)} CSV files"
-                    })
-                
-                # Look for audio files
-                audio_extensions = ["*.wav", "*.mp3", "*.flac", "*.m4a"]
-                audio_files = []
-                for ext in audio_extensions:
-                    audio_files.extend(list(subdir.glob(f"**/{ext}")))
-                
-                if audio_files:
-                    datasets.append({
-                        "name": subdir.name,
-                        "type": "local_audio",
-                        "path": str(subdir),
-                        "files": len(audio_files),
-                        "description": f"Local audio dataset with {len(audio_files)} files"
-                    })
-    
+    """Auto-detect available datasets under data/datasets plus curated sources.
+
+    We intentionally scan only the immediate children of `data/datasets` to avoid
+    treating the parent `data/` directory or the `datasets/` folder itself as a dataset.
+    """
+    datasets: List[Dict[str, Any]] = []
+
+    # Prefer canonical layout: data/datasets/<name>
+    root = Path("data/datasets")
+    if root.exists():
+        for subdir in sorted([p for p in root.iterdir() if p.is_dir()]):
+            # Skip hidden and cache directories
+            if subdir.name.startswith(".") or subdir.name in {".cache", "__pycache__"}:
+                continue
+
+            # Look for CSV files (common dataset format)
+            csv_files = list(subdir.glob("*.csv"))
+            if csv_files:
+                datasets.append({
+                    "name": subdir.name,
+                    "type": "local_csv",
+                    "path": str(subdir),
+                    "files": len(csv_files),
+                    "description": f"Local dataset with {len(csv_files)} CSV files",
+                })
+
+            # Look for audio files recursively inside this dataset folder
+            audio_extensions = ["*.wav", "*.mp3", "*.flac", "*.m4a"]
+            audio_files: List[Path] = []
+            for ext in audio_extensions:
+                audio_files.extend(subdir.glob(f"**/{ext}"))
+            if audio_files:
+                datasets.append({
+                    "name": subdir.name,
+                    "type": "local_audio",
+                    "path": str(subdir),
+                    "files": len(audio_files),
+                    "description": f"Local audio dataset with {len(audio_files)} files",
+                })
+
+    # Add BigQuery import option (virtual source)
+    datasets.append({
+        "name": "Import from Google BigQuery",
+        "type": "bigquery_import",
+        "description": "Query BQ, export surgical slice to _prepared.csv"
+    })
+
     # Add common Hugging Face datasets
     hf_datasets = [
         {"name": "mozilla-foundation/common_voice_13_0", "type": "huggingface", "description": "Common Voice multilingual dataset"},
@@ -278,28 +289,34 @@ def select_training_method() -> Dict[str, Any]:
     return selected_method
 
 def select_model(method: Dict[str, Any]) -> str:
-    """Step 2: Select model based on training method"""
+    """Step 2: Select model based on training method, driven by config.ini."""
     
     console.print(f"\n[bold]Step 2: Choose your model[/bold]")
     
     device_info = get_device_info()
     available_memory = device_info["available_memory_gb"]
     
-    # Filter models based on method and memory constraints
-    if method["key"] == "standard":
-        base_models = ["whisper-tiny", "whisper-base", "whisper-small", "whisper-medium", "whisper-large-v3"]
-    elif method["key"] == "lora":
-        base_models = ["whisper-base", "whisper-small", "whisper-medium", "whisper-large-v3"]  # LoRA can handle larger models
-    else:  # distillation
-        base_models = ["distil-whisper-small", "distil-whisper-medium", "distil-whisper-large-v2"]
+    # Dynamically discover available models from config.ini
+    cfg = _read_config()
+    available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
     
+    # Filter models based on the selected training method
+    if method["key"] == "lora":
+        base_models = [m for m in available_models if "lora" in m]
+    elif method["key"] == "distillation":
+        base_models = [m for m in available_models if "distil" in m]
+    else: # standard
+        base_models = [m for m in available_models if "lora" not in m and "distil" not in m]
+
     # Build model choices with memory and time estimates
     choices = []
     for model_name in base_models:
-        if model_name not in ModelSpecs.MODELS:
+        # Use a display-friendly name if the config name is long
+        display_name = model_name.replace("-lora", "")
+        if display_name not in ModelSpecs.MODELS:
             continue
             
-        specs = ModelSpecs.MODELS[model_name]
+        specs = ModelSpecs.MODELS[display_name]
         required_memory = specs["memory_gb"] * method["memory_multiplier"]
         
         # Skip if not enough memory
@@ -316,17 +333,37 @@ def select_model(method: Dict[str, Any]) -> str:
         
         memory_str = f"{required_memory:.1f}GB"
         
-        choice_text = f"{model_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
+        # Create descriptive text for distillation models
+        if "from-medium" in display_name:
+            if "tiny" in display_name:
+                model_desc = "Distill tiny (39M) from larger teacher"
+            elif "base" in display_name:
+                model_desc = "Distill base (74M) from larger teacher"
+            else:
+                model_desc = display_name
+            choice_text = f"{model_desc} - ~{time_str}, {memory_str} memory"
+        elif "encoder-tiny-decoder" in display_name:
+            if "large" in display_name:
+                model_desc = "Large Encoder / Tiny Decoder - Fast generation, best quality"
+            elif "medium" in display_name:
+                model_desc = "Medium Encoder / Tiny Decoder - Faster, good quality"
+            elif "small" in display_name:
+                model_desc = "Small Encoder / Tiny Decoder - Balanced speed & quality"
+            else:
+                model_desc = display_name
+            choice_text = f"{model_desc} - ~{time_str}, {memory_str} memory"
+        else:
+            choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
         
         # Add recommendation for optimal choice
-        if model_name == "whisper-small" and method["key"] != "distillation":
+        if display_name == "whisper-small" and method["key"] != "distillation":
             choice_text += " ⭐ Recommended"
-        elif model_name == "distil-whisper-small" and method["key"] == "distillation":
+        elif display_name == "distil-base-from-medium" and method["key"] == "distillation":
             choice_text += " ⭐ Recommended"
         
         choices.append({
             "name": choice_text,
-            "value": model_name
+            "value": model_name  # Return the full config name, e.g., "whisper-base-lora"
         })
     
     if not choices:
@@ -368,6 +405,11 @@ def select_dataset(method: Dict[str, Any]) -> Dict[str, Any]:
         style=apple_style
     ).ask()
     
+    # Handle BigQuery import flow
+    if selected_dataset.get("type") == "bigquery_import":
+        bq_dataset = select_bigquery_table_and_export()
+        return bq_dataset
+
     # Handle custom dataset path
     if selected_dataset["name"] == "custom":
         dataset_path = questionary.path(
@@ -379,6 +421,178 @@ def select_dataset(method: Dict[str, Any]) -> Dict[str, Any]:
         selected_dataset["name"] = Path(dataset_path).name
     
     return selected_dataset
+
+def _read_config() -> configparser.ConfigParser:
+    cfg = configparser.ConfigParser()
+    cfg.read("config.ini")
+    return cfg
+
+def _write_config(cfg: configparser.ConfigParser) -> None:
+    with open("config.ini", "w") as f:
+        cfg.write(f)
+
+def _add_dataset_to_config(dataset_name: str, text_column: str) -> None:
+    """Ensure `[dataset:dataset_name]` exists with source and text_column."""
+    cfg = _read_config()
+    section = f"dataset:{dataset_name}"
+    if not cfg.has_section(section):
+        cfg.add_section(section)
+    cfg.set(section, "source", dataset_name)
+    if text_column:
+        cfg.set(section, "text_column", text_column)
+    
+    # BQ-created datasets have standard train/validation splits.
+    # This ensures they are always present for the config validator.
+    if not cfg.has_option(section, "train_split"):
+        cfg.set(section, "train_split", "train")
+    if not cfg.has_option(section, "validation_split"):
+        cfg.set(section, "validation_split", "validation")
+        
+    _write_config(cfg)
+
+def _update_bq_defaults(project_id: Optional[str], dataset_id: Optional[str]) -> None:
+    cfg = _read_config()
+    section = "bigquery"
+    if not cfg.has_section(section):
+        cfg.add_section(section)
+    if project_id:
+        cfg.set(section, "last_project_id", project_id)
+    if dataset_id:
+        cfg.set(section, "last_dataset_id", dataset_id)
+    _write_config(cfg)
+
+def _infer_candidate_columns(schema_fields: List[Dict[str, Any]]) -> Tuple[List[str], List[str], List[str]]:
+    names = [f.get("name") if isinstance(f, dict) else getattr(f, "name", "") for f in schema_fields]
+    names_lower = [str(n or "") for n in names]
+    def pick(patterns: List[str]) -> List[str]:
+        res: List[str] = []
+        for p in patterns:
+            for n in names:
+                if n and n.lower() == p:
+                    if n not in res:
+                        res.append(n)
+        return res
+    audio_candidates = pick(["audio_path", "audio_url", "gcs_uri", "uri", "path", "audio"])
+    transcript_candidates = pick(["text_perfect", "text_verbatim", "transcript", "asr_text", "text"]) 
+    language_candidates = pick(["language", "lang", "locale"]) 
+    # Add fallbacks if empty
+    if not audio_candidates:
+        audio_candidates = names[:5]
+    if not transcript_candidates:
+        transcript_candidates = names[:5]
+    return audio_candidates, transcript_candidates, language_candidates
+
+def select_bigquery_table_and_export() -> Dict[str, Any]:
+    """Interactive flow to import a surgical slice from BigQuery and return a dataset dict.
+
+    Produces a dataset directory under `data/datasets/` with a `_prepared.csv`,
+    updates `config.ini`, and returns a `local_csv` dataset descriptor.
+    """
+    from core import bigquery as bq
+
+    console.print("\n[bold]BigQuery Import[/bold]")
+
+    # Auth check
+    if not bq.check_gcp_auth():
+        console.print("[yellow]GCP auth not detected. Run: gcloud auth application-default login[/yellow]")
+        proceed = questionary.confirm("Continue anyway (may fail)?", default=False, style=apple_style).ask()
+        if not proceed:
+            return {"name": "custom", "type": "custom", "description": "Manual path"}
+
+    # Defaults
+    cfg = _read_config()
+    last_project = cfg.get("bigquery", "last_project_id", fallback="")
+    last_dataset = cfg.get("bigquery", "last_dataset_id", fallback="")
+
+    # Project
+    project_id = questionary.text("GCP Project ID:", default=last_project, style=apple_style).ask()
+
+    # Dataset selection
+    datasets = bq.list_datasets(project_id) or []
+    if datasets:
+        dataset_id = questionary.select("Dataset:", choices=datasets, style=apple_style).ask()
+    else:
+        dataset_id = questionary.text("Dataset ID:", default=last_dataset or "", style=apple_style).ask()
+
+    # Table selection (single-table MVP)
+    tables = bq.list_tables(project_id, dataset_id) or []
+    if tables:
+        table_id = questionary.select("Table:", choices=tables, style=apple_style).ask()
+    else:
+        table_id = questionary.text("Table ID:", style=apple_style).ask()
+
+    _update_bq_defaults(project_id, dataset_id)
+
+    # Schema and candidates
+    schema = bq.get_table_schema(project_id, dataset_id, table_id)
+    # Convert to serializable for inference helper
+    schema_dicts = [{"name": f.name, "type": f.field_type, "mode": f.mode} for f in schema]
+    audio_cands, text_cands, lang_cands = _infer_candidate_columns(schema_dicts)
+
+    audio_col = questionary.select("Audio path column:", choices=audio_cands, style=apple_style).ask()
+    transcript_col = questionary.select("Transcript source column:", choices=text_cands, style=apple_style).ask()
+    # The target column name should be the same as the source column name.
+    # This removes the need for an extra user prompt.
+    transcript_target = transcript_col
+
+    use_language = False
+    language_col = None
+    languages: Optional[List[str]] = None
+    if lang_cands:
+        use_language = questionary.confirm("Filter by language?", default=True, style=apple_style).ask()
+        if use_language:
+            language_col = questionary.select("Language column:", choices=lang_cands, style=apple_style).ask()
+            distinct = bq.get_distinct_languages(project_id, dataset_id, table_id, language_column=language_col) or []
+            if distinct:
+                languages = questionary.checkbox("Select languages (Space to toggle):", choices=distinct, style=apple_style).ask()
+            else:
+                languages = None
+
+    # Sampling
+    limit_str = questionary.text("Max rows to fetch (blank = no limit):", default="1000", style=apple_style).ask()
+    try:
+        limit = int(limit_str) if limit_str.strip() else None
+    except Exception:
+        limit = 1000
+    sample_random = questionary.confirm("Random sample?", default=True, style=apple_style).ask()
+    sample = "random" if sample_random else "first"
+
+    extra_where = questionary.text("Advanced WHERE (optional):", default="", style=apple_style).ask()
+    extra_where = extra_where.strip() or None
+
+    # Execute export
+    out_dir = Path("data/datasets")
+    try:
+        dataset_dir = bq.build_query_and_export(
+            project_id=project_id,
+            tables=[(dataset_id, table_id)],
+            audio_col=audio_col,
+            transcript_col=transcript_col,
+            transcript_target=transcript_target,  # sets output column name
+            language_col=language_col,
+            languages=languages,
+            limit=limit,
+            sample=sample,  # "random" or "first"
+            extra_where=extra_where,
+            out_dir=out_dir,
+        )
+    except Exception as e:
+        console.print(f"[red]BigQuery export failed:[/red] {e}")
+        raise
+
+    dataset_name = dataset_dir.name
+    # Update config.ini for dataset resolution and text_column
+    # Use the source column name (transcript_col) which is now the same as transcript_target
+    _add_dataset_to_config(dataset_name, transcript_target)
+
+    # Return dataset descriptor compatible with downstream flow
+    return {
+        "name": dataset_name,
+        "type": "local_csv",
+        "path": str(dataset_dir),
+        "files": 1,
+        "description": f"Imported from BigQuery {project_id}.{dataset_id}.{table_id}",
+    }
 
 def configure_method_specifics(method: Dict[str, Any], model: str) -> Dict[str, Any]:
     """Step 4: Method-specific configuration (progressive disclosure)"""
@@ -445,11 +659,22 @@ def configure_method_specifics(method: Dict[str, Any], model: str) -> Dict[str, 
                     choice_text += " ⭐ Recommended"
                 teacher_choices.append({"name": choice_text, "value": teacher})
         
-        config["teacher_model"] = questionary.select(
+        teacher_choice = questionary.select(
             "Which teacher model should we distill knowledge from?",
             choices=teacher_choices,
             style=apple_style
         ).ask()
+        # Resolve to full HF repo id via config.ini when possible
+        try:
+            cfg = _read_config()
+            sec = f"model:{teacher_choice}"
+            if cfg.has_section(sec) and cfg.has_option(sec, "base_model"):
+                resolved_teacher = cfg.get(sec, "base_model")
+            else:
+                resolved_teacher = f"openai/{teacher_choice}" if teacher_choice.startswith("whisper-") else teacher_choice
+        except Exception:
+            resolved_teacher = teacher_choice
+        config["teacher_model"] = resolved_teacher
         
         # Temperature
         temp_choices = [
@@ -577,30 +802,22 @@ def show_confirmation_screen(method: Dict[str, Any], model: str, dataset: Dict[s
 
 def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[str, Any], 
                           method_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate config dict for the existing training infrastructure"""
+    """Generate config dict for the existing training infrastructure by leveraging the core config loader."""
     
-    # Base configuration
-    profile_config = {
-        "model": model,
-        "dataset": dataset["name"],
-        "dataset_path": dataset.get("path", ""),
-        "learning_rate": "1e-5",  # Smart default
-        "batch_size": "16",
-        "num_epochs": "3",
-        "warmup_steps": "500",
-        "eval_steps": "1000",
-        "save_steps": "1000",
-        "logging_steps": "100",
-        "gradient_checkpointing": True,
-        "fp16": True,
-        "dataloader_num_workers": "4",
-        "remove_unused_columns": False,
-        "label_smoothing_factor": "0.1",
-        "load_best_model_at_end": True,
-        "metric_for_best_model": "eval_loss",
-        "greater_is_better": False,
-        "save_total_limit": "3",
-    }
+    from core.config import load_model_dataset_config
+    
+    # Load the base configuration from config.ini using the robust, hierarchical loader.
+    # This ensures that all central defaults are respected.
+    cfg = _read_config()
+    profile_config = load_model_dataset_config(cfg, model, dataset["name"])
+
+    # CRITICAL: Add the model and dataset keys that are required by load_profile_config
+    # These are not included in load_model_dataset_config but are required for profile sections
+    profile_config["model"] = model
+    profile_config["dataset"] = dataset["name"]
+
+    # Layer the user's interactive choices on top of the base configuration.
+    # This overrides the defaults with the specific parameters selected in the wizard.
     
     # Method-specific configuration
     if method["key"] == "lora":
@@ -609,8 +826,9 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
             "peft_method": "lora",
             "lora_r": method_config["lora_r"],
             "lora_alpha": method_config["lora_alpha"], 
-            "lora_dropout": method_config["lora_dropout"],
-            "target_modules": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+            "lora_dropout": method_config.get("lora_dropout", 0.1), # Sensible default
+            # Use canonical key expected by trainer; leave as list, not string
+            "lora_target_modules": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
         })
     elif method["key"] == "distillation":
         profile_config.update({
@@ -633,6 +851,13 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
     if method_config.get('visualize', False):
         profile_config['visualize'] = True
     
+    # Ensure required splits are always present for validation
+    # These are required by the configuration validator
+    if "train_split" not in profile_config:
+        profile_config["train_split"] = "train"
+    if "validation_split" not in profile_config:
+        profile_config["validation_split"] = "validation"
+    
     return profile_config
 
 def execute_training(profile_config: Dict[str, Any]):
@@ -650,14 +875,32 @@ def execute_training(profile_config: Dict[str, Any]):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     temp_config_path = config_dir / f"wizard_config_{timestamp}.ini"
     
-    # Generate INI format config
-    config = configparser.ConfigParser()
-    config["DEFAULT"] = {
-        "output_dir": "output",
-        "logging_dir": "logs",
-    }
+    # Start by reading the main config.ini to get all model and dataset definitions
+    main_config = _read_config()
     
-    # Create a profile section
+    # Create a new config that copies all necessary sections from main config
+    config = configparser.ConfigParser()
+    
+    # Copy DEFAULT section
+    # Note: ConfigParser treats DEFAULT as a special section that is not returned by
+    # has_section("DEFAULT"). We must read it directly to preserve global defaults
+    # like num_train_epochs, logging_steps, etc., which training requires.
+    try:
+        config["DEFAULT"] = dict(main_config["DEFAULT"])  # always present if file parsed
+    except Exception:
+        # Fallback minimal defaults if main config is malformed
+        config["DEFAULT"] = {
+            "output_dir": "output",
+            "logging_dir": "logs",
+        }
+    
+    # Copy all essential sections from main config
+    # This ensures model definitions, dataset definitions, and group configs are available
+    for section in main_config.sections():
+        if section.startswith(("model:", "dataset:", "group:", "dataset_defaults")):
+            config[section] = dict(main_config[section])
+    
+    # Create the wizard profile section with user's selections
     profile_name = f"wizard_{timestamp}"
     config[f"profile:{profile_name}"] = profile_config
     
@@ -671,14 +914,15 @@ def execute_training(profile_config: Dict[str, Any]):
     try:
         # Execute training via subprocess to avoid import side effects
         # Use module invocation so this works when installed as a package
+        module_cwd = Path(__file__).resolve().parent
         result = subprocess.run([
             sys.executable,
             "-m", "main",
             "finetune",
             profile_name,
             "--config",
-            str(temp_config_path)
-        ], check=True, text=True, capture_output=False)
+            str(temp_config_path.resolve())
+        ], check=True, text=True, capture_output=False, cwd=str(module_cwd))
         
         console.print(f"\n[bold green]✅ Training completed successfully![/bold green]")
         console.print(f"[green]Model saved in output directory[/green]")

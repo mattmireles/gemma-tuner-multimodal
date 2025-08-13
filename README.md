@@ -164,6 +164,7 @@ The Wizard is a beautiful, step-by-step CLI that guides you through setting up a
 - Helps you choose a training method: Standard, LoRA, or Distillation
 - Filters model choices by your available memory and method
 - Auto-detects local datasets in `data/*` and offers common 🤗 datasets
+- NEW: "Import from Google BigQuery" — interactively select project/dataset/table, choose languages and transcript column, and materialize a minimal `_prepared.csv` locally for immediate training (no loader changes required)
 - Collects method-specific parameters (e.g., LoRA rank/alpha, distillation temperature/teacher)
 - Estimates training time and memory usage for your choices
 - Optionally enables the live Training Visualizer
@@ -195,6 +196,13 @@ python wizard.py
 4. Dataset Selection
    - Auto-detects local datasets under `data/<dataset>/` with `*.csv` or audio files
    - Offers a few common 🤗 datasets (e.g., Common Voice, LibriSpeech)
+   - “Import from Google BigQuery” lets you select:
+     - Project → Dataset → Table (with live listing when possible)
+     - Audio path column, transcript source column, and target transcript field (`text_perfect` or `text_verbatim`)
+     - Optional language column + multi-select of languages (adds `WHERE language IN (...)`)
+     - Optional random sampling and LIMIT to control cost
+     - Optional advanced SQL `WHERE` fragment for surgical filtering (e.g., date/duration)
+     - The wizard builds a dynamic SQL query, executes it, writes `_prepared.csv`, and updates `config.ini` automatically
    - “Custom path” lets you type a path (see limitations below)
 
 5. Method-Specific Configuration
@@ -224,7 +232,16 @@ The temporary profile is generated on-the-fly and deleted after launch. To make 
 ##### Important Limitations (current)
 - The training system loads many required defaults from `config.ini` (e.g., `[model:*]`, `[dataset:*]`, and `[group:*]` sections). Ensure your chosen `model` and `dataset` exist there so the pipeline can resolve required keys like `base_model`, `train_split`, `text_column`, etc.
 - “Custom path” is primarily for selection convenience. For full compatibility, define a matching `[dataset:<name>]` in `config.ini` (with `source = <dataset_name>` and split settings) and select that dataset in the wizard.
-- The wizard doesn’t overwrite your `config.ini`; it generates a temporary profile with your selections and relies on `config.ini` to provide the remaining defaults.
+- The wizard doesn’t overwrite your `config.ini`; it generates a temporary profile with your selections and relies on `config.ini` to provide the remaining defaults. The BigQuery import flow will append a new `[dataset:<generated>]` section with `source=<generated>` and `text_column` so the loader can resolve the CSV immediately.
+
+###### BigQuery Import Details
+- Requires `google-cloud-bigquery` and ADC auth (`gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS`)
+- Only the columns you select are queried (id synthesized if missing)
+- Optional language filter, random sampling, and LIMIT to reduce cost
+- Outputs:
+  - `data/datasets/bq_<dataset>_<table>_<YYYYMMDD>/bq_..._prepared.csv`
+  - `data/datasets/.../.bq_query.sql` (exact SQL used)
+  - `data/datasets/.../metadata.json` (selections and row count)
 
 If you see a config validation error mentioning missing keys (e.g., `base_model` or `train_split`), add the required `[model:*]`/`[dataset:*]` sections in `config.ini` and re-run the wizard.
 
@@ -542,7 +559,7 @@ export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 export SDPA_ALLOW_FLASH_ATTN=1
 ```
 
-Additionally, to reduce memory spikes, preprocessing and dataloader workers are capped by default on MPS. Override via `preprocessing_num_workers` and `dataloader_num_workers` in `config.ini` if needed. Evaluation now includes a one-shot OOM fallback that halves the eval batch size and retries once before failing.
+Preprocessing now defaults to using all available CPU cores for Dataset.map() on all platforms (including MPS). You can override via `preprocessing_num_workers` in `config.ini` (set to a positive integer to pin, or 0/negative for "auto" = all cores). Dataloader workers remain platform-optimized via `dataloader_num_workers`.
 
 ### Recommended Batch Sizes (Updated for PyTorch 2.3 with Flash Attention 2)
 
