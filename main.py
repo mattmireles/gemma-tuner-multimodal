@@ -270,6 +270,22 @@ def main():
             except Exception:
                 logger.info(f"✅ Training completed successfully!\nModel saved in: {run_dir}")
 
+            # Auto-convert to GGUF for whisper.cpp
+            try:
+                from core.ops import export_gguf as _export_gguf
+                gguf_path = _export_gguf(run_dir)
+                if gguf_path:
+                    gguf_abs = os.path.abspath(gguf_path)
+                    if platform.system() == "Darwin" or platform.system().lower().startswith("linux"):
+                        gguf_uri = f"file://{gguf_abs}"
+                        logger.info(f"📦 GGUF exported for whisper.cpp: {gguf_uri}")
+                    else:
+                        logger.info(f"📦 GGUF exported for whisper.cpp: {gguf_abs}")
+                else:
+                    logger.warning("Skipped GGUF export (whisper.cpp not found or conversion failed). You can run: python -m main export-gguf '<run_dir>'")
+            except Exception as e:
+                logger.warning(f"GGUF export step failed: {e}")
+
 
         except ImportError as e:
             logger.error(f"Module import error during finetuning: {e}")
