@@ -301,7 +301,11 @@ def select_training_method() -> Dict[str, Any]:
     return selected_method
 
 def select_model(method: Dict[str, Any]) -> str:
-    """Step 2: Select model based on training method, driven by config.ini."""
+    """Step 2: Select model based on training method, driven by config.ini.
+
+    For distillation, this returns the STUDENT model key (not teacher).
+    Teacher will be chosen in a later step via configure_method_specifics().
+    """
     
     console.print(f"\n[bold]Step 2: Choose your model[/bold]")
     
@@ -316,7 +320,8 @@ def select_model(method: Dict[str, Any]) -> str:
     if method["key"] == "lora":
         base_models = [m for m in available_models if "lora" in m]
     elif method["key"] == "distillation":
-        base_models = [m for m in available_models if "distil" in m]
+        # For distillation, list only small/base students to fine-tune as student
+        base_models = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
     else: # standard
         base_models = [m for m in available_models if "lora" not in m and "distil" not in m]
 
@@ -659,49 +664,75 @@ def configure_method_specifics(method: Dict[str, Any], model: str) -> Dict[str, 
         
     elif method["key"] == "distillation":
         console.print(f"\n[bold]Step 4: Distillation Configuration[/bold]")
-        
-        # Teacher model selection
-        teacher_models = ["whisper-large-v3", "whisper-large-v2", "whisper-medium"]
-        teacher_choices = []
-        
-        for teacher in teacher_models:
-            if teacher != model:  # Don't allow same model as teacher and student
-                choice_text = f"{teacher}"
-                if teacher == "whisper-large-v3":
-                    choice_text += " ⭐ Recommended"
-                teacher_choices.append({"name": choice_text, "value": teacher})
-        
-        # Filter incompatible teacher/student mel-bin combos (e.g., large-v3=128 mel vs tiny/base/small=80 mel)
-        student_mels = _infer_num_mel_bins(model)
-        filtered_teacher_choices = []
-        for ch in teacher_choices:
-            t_model = ch["value"]
-            if _infer_num_mel_bins(t_model) != student_mels:
-                # mark but still allow selection with warning suffix
-                ch = {"name": ch["name"] + " (incompatible mel bins; not recommended)", "value": t_model}
-            filtered_teacher_choices.append(ch)
-
-        teacher_choice = questionary.select(
-            "Which teacher model should we distill knowledge from?",
-            choices=filtered_teacher_choices,
-            style=apple_style
+        # Step 4A: choose architecture definition path
+        arch_choice = questionary.select(
+            "How would you like to define your student model?",
+            choices=[
+                {"name": "Choose a standard, pre-defined student model", "value": "standard"},
+                {"name": "Build a custom student by mixing encoder and decoder", "value": "custom"},
+            ],
+            style=apple_style,
         ).ask()
+        
+        # Define student model path
+        if arch_choice == "custom":
+            # Encoder source (large models)
+            cfg = _read_config()
+            available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
+            large_like = [m for m in available_models if ("large" in m or "medium" in m)]
+            enc_choice = questionary.select(
+                "Choose an Encoder source (teacher model)",
+                choices=[{"name": m, "value": m} for m in large_like],
+                style=apple_style,
+            ).ask()
 
-        # If incompatible, warn and allow the user to switch
-        if _infer_num_mel_bins(teacher_choice) != student_mels:
-            console.print("[yellow]Warning:[/yellow] Selected teacher uses a different number of mel bins than the student.")
-            console.print("[yellow]Teacher expects 128 mel (large-v3) vs Student 80 mel (tiny/base/small), or vice versa.[/yellow]")
-            if not questionary.confirm("Proceed anyway? (advanced users only)", default=False, style=apple_style).ask():
-                # Re-ask with only compatible options
-                compat = [c for c in filtered_teacher_choices if _infer_num_mel_bins(c["value"]) == student_mels]
-                if not compat:
-                    console.print("[red]No compatible teachers available; please pick a different student or teacher.[/red]")
-                    raise SystemExit(1)
-                teacher_choice = questionary.select(
-                    "Choose a compatible teacher (matching mel bins):",
-                    choices=compat,
-                    style=apple_style,
-                ).ask()
+            # Decoder source (small models)
+            small_like = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
+            dec_choice = questionary.select(
+                "Choose a Decoder source (small/efficient model)",
+                choices=[{"name": m, "value": m} for m in small_like],
+                style=apple_style,
+            ).ask()
+
+            # Save in config
+            config["student_model_type"] = "custom"
+            config["student_encoder_from"] = enc_choice
+            config["student_decoder_from"] = dec_choice
+
+            # Teacher selection (guide to match encoder mel bins)
+            teacher_models = ["whisper-large-v3", "whisper-large-v2", "whisper-medium"]
+            student_mels = _infer_num_mel_bins(enc_choice)
+            teacher_choices = []
+            for teacher in teacher_models:
+                txt = teacher
+                if _infer_num_mel_bins(teacher) != student_mels:
+                    txt += " (incompatible mel bins; not recommended)"
+                teacher_choices.append({"name": txt, "value": teacher})
+            teacher_choice = questionary.select(
+                "Which teacher model should we distill knowledge from?",
+                choices=teacher_choices,
+                style=apple_style,
+            ).ask()
+        else:
+            # Standard student: teacher from curated list with compatibility filter
+            teacher_models = ["whisper-large-v3", "whisper-large-v2", "whisper-medium"]
+            teacher_choices = []
+            for teacher in teacher_models:
+                if teacher != model:
+                    choice_text = f"{teacher}"
+                    teacher_choices.append({"name": choice_text, "value": teacher})
+            student_mels = _infer_num_mel_bins(model)
+            filtered_teacher_choices = []
+            for ch in teacher_choices:
+                t_model = ch["value"]
+                if _infer_num_mel_bins(t_model) != student_mels:
+                    ch = {"name": ch["name"] + " (incompatible mel bins; not recommended)", "value": t_model}
+                filtered_teacher_choices.append(ch)
+            teacher_choice = questionary.select(
+                "Which teacher model should we distill knowledge from?",
+                choices=filtered_teacher_choices,
+                style=apple_style,
+            ).ask()
         # Resolve to full HF repo id via config.ini when possible
         try:
             cfg = _read_config()
