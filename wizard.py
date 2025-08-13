@@ -815,7 +815,13 @@ def show_confirmation_screen(method: Dict[str, Any], model: str, dataset: Dict[s
     config_table.add_column("Value", style="green")
     
     config_table.add_row("Training Method", method["name"].replace("🚀", "").replace("🎨", "").replace("🧠", "").strip())
-    config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")
+    # Distillation: show student architecture details (standard vs custom)
+    if method["key"] == "distillation" and method_config.get("student_model_type") == "custom":
+        config_table.add_row("Student", "Custom Hybrid")
+        config_table.add_row("Encoder From", str(method_config.get("student_encoder_from")))
+        config_table.add_row("Decoder From", str(method_config.get("student_decoder_from")))
+    else:
+        config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")
     config_table.add_row("Dataset", f"{dataset['name']} ({estimates['samples']:,} samples)")
     
     # Add method-specific configuration
@@ -905,6 +911,11 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
             "distillation_temperature": method_config["temperature"],
             "distillation_alpha": 0.5,  # Balance between hard and soft targets
         })
+        # Propagate custom student architecture if selected
+        if method_config.get("student_model_type") == "custom":
+            profile_config["student_model_type"] = "custom"
+            profile_config["student_encoder_from"] = method_config.get("student_encoder_from")
+            profile_config["student_decoder_from"] = method_config.get("student_decoder_from")
     
     # Dataset-specific configuration
     if dataset["type"] == "huggingface":
