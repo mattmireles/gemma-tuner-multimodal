@@ -327,9 +327,17 @@ def select_model(method: Dict[str, Any]) -> str:
 
     # Build model choices with memory and time estimates
     choices = []
+    # For distillation, restrict students to a clean set of base Whisper models
+    allowed_students = {
+        "whisper-tiny", "whisper-base", "whisper-small",
+        "whisper-tiny.en", "whisper-base.en", "whisper-small.en",
+    }
     for model_name in base_models:
         # Use a display-friendly name if the config name is long
         display_name = model_name.replace("-lora", "")
+        if method["key"] == "distillation":
+            if display_name not in allowed_students:
+                continue
         if display_name not in ModelSpecs.MODELS:
             continue
             
