@@ -150,6 +150,7 @@ def main():
             "finetune",
             "evaluate",
             "export",
+            "export-gguf",
             "pseudo_label",
             "gather",
             "validate_data",
@@ -255,6 +256,21 @@ def main():
             mark_run_as_completed(run_dir)
             update_run_metadata(run_dir, status="completed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+            # Provide a clickable link to the output directory
+            try:
+                import platform
+                run_dir_abs = os.path.abspath(run_dir)
+                if platform.system() == "Darwin" or platform.system().lower().startswith("linux"):
+                    # Use file:// URI scheme for macOS and Linux
+                    uri = f"file://{run_dir_abs}"
+                    logger.info(f"✅ Training completed successfully!\nModel saved in: {uri}")
+                else:
+                    # Fallback for Windows and other OSes
+                    logger.info(f"✅ Training completed successfully!\nModel saved in: {run_dir_abs}")
+            except Exception:
+                logger.info(f"✅ Training completed successfully!\nModel saved in: {run_dir}")
+
+
         except ImportError as e:
             logger.error(f"Module import error during finetuning: {e}")
             update_run_metadata(run_dir, status="failed", end_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), error_message=f"ImportError: {str(e)}")
@@ -358,6 +374,11 @@ def main():
         if not args.profile_or_model_dataset:
             parser.error("The 'export' operation requires a model path or HF id.")
         ops.export(args.profile_or_model_dataset)
+
+    elif args.operation == "export-gguf":
+        if not args.profile_or_model_dataset:
+            parser.error("The 'export-gguf' operation requires a path to a trained model directory.")
+        ops.export_gguf(args.profile_or_model_dataset)
 
     elif args.operation == "pseudo_label":
         from scripts.pseudo_label import main as pseudo_label_main
