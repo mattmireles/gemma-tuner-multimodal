@@ -300,7 +300,7 @@ def select_training_method() -> Dict[str, Any]:
     
     return selected_method
 
-def select_model(method: Dict[str, Any]) -> str:
+def select_model(method: Dict[str, Any]):
     """Step 2: Select model based on training method, driven by config.ini.
 
     For distillation, this returns the STUDENT model key (not teacher).
@@ -320,27 +320,32 @@ def select_model(method: Dict[str, Any]) -> str:
     if method["key"] == "lora":
         base_models = [m for m in available_models if "lora" in m]
     elif method["key"] == "distillation":
-        # For distillation, list only small/base students to fine-tune as student
-        base_models = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
+        # For distillation, list base students (including medium) to fine-tune as student
+        base_models = [
+            m for m in available_models
+            if ("tiny" in m or "base" in m or "small" in m or "medium" in m)
+        ]
     else: # standard
         base_models = [m for m in available_models if "lora" not in m and "distil" not in m]
 
     # Build model choices with memory and time estimates
     choices = []
-    # For distillation, restrict students to a clean set of base Whisper models
+    # For distillation, restrict students to a clean set and add Custom Hybrid entry
     allowed_students = {
-        "whisper-tiny", "whisper-base", "whisper-small",
-        "whisper-tiny.en", "whisper-base.en", "whisper-small.en",
+        "whisper-tiny", "whisper-base", "whisper-small", "whisper-medium",
+        "whisper-tiny.en", "whisper-base.en", "whisper-small.en", "whisper-medium.en",
     }
+    seen: set[str] = set()
     for model_name in base_models:
         # Use a display-friendly name if the config name is long
         display_name = model_name.replace("-lora", "")
-        if method["key"] == "distillation":
-            if display_name not in allowed_students:
-                continue
+        if method["key"] == "distillation" and display_name not in allowed_students:
+            continue
+        if display_name in seen:
+            continue
         if display_name not in ModelSpecs.MODELS:
             continue
-            
+        seen.add(display_name)
         specs = ModelSpecs.MODELS[display_name]
         required_memory = specs["memory_gb"] * method["memory_multiplier"]
         
@@ -388,20 +393,56 @@ def select_model(method: Dict[str, Any]) -> str:
         
         choices.append({
             "name": choice_text,
-            "value": model_name  # Return the full config name, e.g., "whisper-base-lora"
+            "value": model_name  # Return the full config name, e.g., "whisper-base"
+        })
+
+    # Distillation: add a Custom Hybrid option inline at Step 2
+    if method["key"] == "distillation":
+        choices.append({
+            "name": "Build a Custom Hybrid (mix encoder and decoder)",
+            "value": "__custom_hybrid__",
         })
     
     if not choices:
         console.print("[red]❌ No models available for your memory constraints. Consider using LoRA training.[/red]")
         sys.exit(1)
     
+    prompt = (
+        "Which model do you want to fine-tune?" if method["key"] != "distillation"
+        else "Which student model do you want to train? (or choose Custom Hybrid)"
+    )
     selected_model = questionary.select(
-        f"Which model do you want to {'fine-tune' if method['key'] != 'distillation' else 'train'}?",
+        prompt,
         choices=choices,
         style=apple_style
     ).ask()
-    
-    return selected_model
+
+    # If user chose Custom Hybrid, immediately ask how to customize (encoder/decoder)
+    if method["key"] == "distillation" and selected_model == "__custom_hybrid__":
+        cfg = _read_config()
+        available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
+        enc_sources = [m for m in available_models if ("large" in m or "medium" in m)]
+        dec_sources = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
+
+        enc_choice = questionary.select(
+            "Choose an Encoder source (large/medium)",
+            choices=[{"name": m, "value": m} for m in enc_sources],
+            style=apple_style,
+        ).ask()
+        dec_choice = questionary.select(
+            "Choose a Decoder source (tiny/base/small)",
+            choices=[{"name": m, "value": m} for m in dec_sources],
+            style=apple_style,
+        ).ask()
+
+        seed = {
+            "student_model_type": "custom",
+            "student_encoder_from": enc_choice,
+            "student_decoder_from": dec_choice,
+        }
+        return selected_model, seed
+
+    return selected_model, {}
 
 def select_dataset(method: Dict[str, Any]) -> Dict[str, Any]:
     """Step 3: Select dataset"""
@@ -619,10 +660,10 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
         "description": f"Imported from BigQuery {project_id}.{dataset_id}.{table_id}",
     }
 
-def configure_method_specifics(method: Dict[str, Any], model: str) -> Dict[str, Any]:
+def configure_method_specifics(method: Dict[str, Any], model: str, seed: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Step 4: Method-specific configuration (progressive disclosure)"""
     
-    config = {}
+    config = {} if seed is None else dict(seed)
     
     if method["key"] == "lora":
         console.print(f"\n[bold]Step 4: LoRA Configuration[/bold]")
@@ -672,44 +713,35 @@ def configure_method_specifics(method: Dict[str, Any], model: str) -> Dict[str, 
         
     elif method["key"] == "distillation":
         console.print(f"\n[bold]Step 4: Distillation Configuration[/bold]")
-        # Step 4A: choose architecture definition path
-        arch_choice = questionary.select(
-            "How would you like to define your student model?",
-            choices=[
-                {"name": "Choose a standard, pre-defined student model", "value": "standard"},
-                {"name": "Build a custom student by mixing encoder and decoder", "value": "custom"},
-            ],
-            style=apple_style,
-        ).ask()
+        # If user already chose Custom Hybrid in Step 2, skip asking architecture again
+        arch_choice = "custom" if (model == "__custom_hybrid__" or config.get("student_model_type") == "custom") else "standard"
         
         # Define student model path
         if arch_choice == "custom":
             # Encoder source (large models)
-            cfg = _read_config()
-            available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
-            large_like = [m for m in available_models if ("large" in m or "medium" in m)]
-            enc_choice = questionary.select(
-                "Choose an Encoder source (teacher model)",
-                choices=[{"name": m, "value": m} for m in large_like],
-                style=apple_style,
-            ).ask()
-
-            # Decoder source (small models)
-            small_like = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
-            dec_choice = questionary.select(
-                "Choose a Decoder source (small/efficient model)",
-                choices=[{"name": m, "value": m} for m in small_like],
-                style=apple_style,
-            ).ask()
-
-            # Save in config
-            config["student_model_type"] = "custom"
-            config["student_encoder_from"] = enc_choice
-            config["student_decoder_from"] = dec_choice
+            if not config.get("student_encoder_from") or not config.get("student_decoder_from"):
+                cfg = _read_config()
+                available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
+                large_like = [m for m in available_models if ("large" in m or "medium" in m)]
+                small_like = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
+                enc_choice = questionary.select(
+                    "Choose an Encoder source (teacher model)",
+                    choices=[{"name": m, "value": m} for m in large_like],
+                    style=apple_style,
+                ).ask()
+                dec_choice = questionary.select(
+                    "Choose a Decoder source (small/efficient model)",
+                    choices=[{"name": m, "value": m} for m in small_like],
+                    style=apple_style,
+                ).ask()
+                # Save in config
+                config["student_model_type"] = "custom"
+                config["student_encoder_from"] = enc_choice
+                config["student_decoder_from"] = dec_choice
 
             # Teacher selection (guide to match encoder mel bins)
             teacher_models = ["whisper-large-v3", "whisper-large-v2", "whisper-medium"]
-            student_mels = _infer_num_mel_bins(enc_choice)
+            student_mels = _infer_num_mel_bins(config.get("student_encoder_from", enc_choice))
             teacher_choices = []
             for teacher in teacher_models:
                 txt = teacher
@@ -892,11 +924,15 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
     # Load the base configuration from config.ini using the robust, hierarchical loader.
     # This ensures that all central defaults are respected.
     cfg = _read_config()
-    profile_config = load_model_dataset_config(cfg, model, dataset["name"])
+    # For custom hybrid, load base defaults from decoder source instead of sentinel model
+    model_for_loader = model
+    if method["key"] == "distillation" and method_config.get("student_model_type") == "custom" and model == "__custom_hybrid__":
+        model_for_loader = method_config.get("student_decoder_from") or model
+    profile_config = load_model_dataset_config(cfg, model_for_loader, dataset["name"])
 
     # CRITICAL: Add the model and dataset keys that are required by load_profile_config
     # These are not included in load_model_dataset_config but are required for profile sections
-    profile_config["model"] = model
+    profile_config["model"] = model_for_loader
     profile_config["dataset"] = dataset["name"]
 
     # Layer the user's interactive choices on top of the base configuration.
