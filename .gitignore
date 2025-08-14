@@ -84,4 +84,4 @@ blacklists/
 !.gitignore
 !data/datasets/.gitkeep
 !data/audio/.gitkeep
-!data/patches/.gitkeep
+!data/patches/.gitkeeptools/whisper.cpp/

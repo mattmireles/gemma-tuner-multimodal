@@ -3,7 +3,7 @@
 # See README for the correct pip command. Do not pin torch in this file.
 
 # Hugging Face ecosystem (pin to a tested, compatible set)
-transformers==4.53.3
+transformers==4.54.0
 datasets==2.18.0
 accelerate==0.27.2
 evaluate==0.4.1

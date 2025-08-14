@@ -776,6 +776,39 @@ def select_dataset(method: Dict[str, Any]) -> Dict[str, Any]:
     
     return selected_dataset
 
+def configure_training_parameters() -> Dict[str, Any]:
+    """Step 4: Training Parameters (mandatory)
+    
+    Prompts for critical hyperparameters with simple guidance, returning a dict:
+    {"learning_rate": float, "num_train_epochs": int, "warmup_steps": int}
+    """
+    console.print(f"\n[bold]Step 4: Training Parameters[/bold]")
+    # Learning rate
+    console.print("[dim]This is the most important hyperparameter. It controls how much the model learns from the data. A smaller number is safer. The default (1e-5) is a good starting point for fine-tuning.[/dim]")
+    lr_str = questionary.text("What learning rate do you want to use?", default="1e-5", style=apple_style).ask()
+    try:
+        learning_rate = float(lr_str)
+    except Exception:
+        learning_rate = 1e-5
+
+    # Number of epochs
+    console.print("[dim]An epoch is one full pass through the entire training dataset. More epochs can lead to better results, but also increase the risk of overfitting. For fine-tuning, 1-3 epochs is usually enough.[/dim]")
+    epochs_str = questionary.text("How many training epochs?", default="3", style=apple_style).ask()
+    try:
+        num_train_epochs = int(epochs_str)
+    except Exception:
+        num_train_epochs = 3
+
+    # Warmup steps
+    console.print("[dim]This gradually increases the learning rate at the start of training, which helps stabilize the model. A small number like 50-100 is a safe choice.[/dim]")
+    warmup_str = questionary.text("How many warmup steps for the learning rate?", default="50", style=apple_style).ask()
+    try:
+        warmup_steps = int(warmup_str)
+    except Exception:
+        warmup_steps = 50
+
+    return {"learning_rate": learning_rate, "num_train_epochs": num_train_epochs, "warmup_steps": warmup_steps}
+
 def _read_config() -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
     cfg.read("config.ini")
@@ -1067,7 +1100,7 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
     }
 
 def configure_method_specifics(method: Dict[str, Any], model: str | tuple, seed: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    """Step 4: Method-specific configuration (progressive disclosure)"""
+    """Step 5: Method-specific configuration (progressive disclosure)"""
     # Defensive: older call sites may pass a (model, seed) tuple.
     if isinstance(model, tuple):
         model, seed_from_tuple = model
@@ -1077,7 +1110,7 @@ def configure_method_specifics(method: Dict[str, Any], model: str | tuple, seed:
     config = {} if seed is None else dict(seed)
     
     if method["key"] == "lora":
-        console.print(f"\n[bold]Step 4: LoRA Configuration[/bold]")
+        console.print(f"\n[bold]Step 5: LoRA Configuration[/bold]")
         console.print("[dim]LoRA (Low-Rank Adaptation) parameters for efficient fine-tuning[/dim]")
         
         # LoRA rank
@@ -1123,7 +1156,7 @@ def configure_method_specifics(method: Dict[str, Any], model: str | tuple, seed:
         config["use_peft"] = True
         
     elif method["key"] == "distillation":
-        console.print(f"\n[bold]Step 4: Distillation Configuration[/bold]")
+        console.print(f"\n[bold]Step 5: Distillation Configuration[/bold]")
         # If user already chose Custom Hybrid in Step 2, skip asking architecture again
         arch_choice = "custom" if (model == "__custom_hybrid__" or config.get("student_model_type") == "custom") else "standard"
         
@@ -1278,7 +1311,7 @@ def show_confirmation_screen(method: Dict[str, Any], model: str, dataset: Dict[s
                            method_config: Dict[str, Any], estimates: Dict[str, Any]) -> bool:
     """Step 5: Beautiful confirmation screen"""
     
-    console.print(f"\n[bold cyan]Step 5: Ready to Train![/bold cyan]")
+    console.print(f"\n[bold cyan]Step 6: Ready to Train![/bold cyan]")
     
     # Create a beautiful configuration table
     config_table = Table(show_header=False, box=None, padding=(0, 2))
@@ -1294,6 +1327,13 @@ def show_confirmation_screen(method: Dict[str, Any], model: str, dataset: Dict[s
     else:
         config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")
     config_table.add_row("Dataset", f"{dataset['name']} ({estimates['samples']:,} samples)")
+    # Training parameters (added in Step 4)
+    if "learning_rate" in method_config:
+        config_table.add_row("Learning Rate", str(method_config["learning_rate"]))
+    if "num_train_epochs" in method_config:
+        config_table.add_row("Epochs", str(method_config["num_train_epochs"]))
+    if "warmup_steps" in method_config:
+        config_table.add_row("Warmup Steps", str(method_config["warmup_steps"]))
     
     # Add method-specific configuration
     if method["key"] == "lora":
@@ -1406,6 +1446,11 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
         profile_config["train_dataset_path"] = dataset["path"]
         profile_config["eval_dataset_path"] = dataset["path"]  # Same for now
     
+    # Merge training parameters from Step 4 (learning_rate, num_train_epochs, warmup_steps)
+    for k in ("learning_rate", "num_train_epochs", "warmup_steps"):
+        if k in method_config:
+            profile_config[k] = method_config[k]
+
     # Add visualization flag if enabled
     if method_config.get('visualize', False):
         profile_config['visualize'] = True
@@ -1535,7 +1580,8 @@ def execute_training(profile_config: Dict[str, Any]):
             "output_dir": "output",
             "logging_dir": "logs",
             "num_train_epochs": "3",
-            "learning_rate": "5e-5"
+            # Safety net: conservative default LR for fine-tuning
+            "learning_rate": "1e-5"
         }
     
     # Essential section copying for training infrastructure support
@@ -1725,15 +1771,20 @@ def wizard_main():
         # Supports local files, BigQuery imports, and HuggingFace datasets
         dataset = select_dataset(method)
         
-        # Step 4: Method-specific configuration with smart defaults
+        # Step 4: Training parameters (mandatory hyperparameters)
+        training_params = configure_training_parameters()
+
+        # Step 5: Method-specific configuration with smart defaults
         # Reveals advanced options only when needed, passes seed for custom hybrids
         method_config = configure_method_specifics(method, model, seed)
+        # Merge training parameters into method_config for downstream display and merging
+        method_config.update(training_params)
         
-        # Step 5: Resource estimation with realistic expectations
+        # Step 6: Resource estimation with realistic expectations
         # Calculates training time and memory requirements based on hardware
         estimates = estimate_training_time(method, model, dataset, method_config)
         
-        # Step 6: Beautiful confirmation screen with final approval
+        # Step 7: Beautiful confirmation screen with final approval
         # Comprehensive configuration review before committing to training
         if show_confirmation_screen(method, model, dataset, method_config, estimates):
             
