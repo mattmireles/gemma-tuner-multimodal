@@ -420,7 +420,59 @@ def get_device_info() -> Dict[str, Any]:
     return device_info
 
 def show_welcome_screen():
-    """Display an elegant welcome screen"""
+    """
+    Displays elegant Steve Jobs-inspired welcome screen with system capability verification.
+    
+    This function creates the first impression of the wizard using Apple's design language
+    principles: beautiful visual elements, clear system status, and confidence-building
+    through capability verification. It serves as both introduction and technical validation.
+    
+    Called by:
+    - wizard_main() as the opening experience (line 1801)
+    - Interactive training workflows requiring system status validation
+    - Development and demonstration environments for visual appeal
+    
+    Calls to:
+    - get_device_info() for comprehensive system capability detection (line 311)
+    - rich.console for Apple-inspired visual formatting and layout
+    - rich.panel for elegant bordered content presentation
+    
+    Design Philosophy:
+    - Progressive disclosure: Only essential information shown initially
+    - Confidence building: Clear indication system is ready for training
+    - Visual hierarchy: ASCII art logo draws attention, then system details
+    - Apple aesthetics: Blue color scheme, clean typography, generous whitespace
+    
+    System Verification Elements:
+    - Device type detection (Apple Silicon MPS, NVIDIA CUDA, CPU fallback)
+    - Available memory calculation for training capacity planning
+    - Training readiness status with visual confirmation
+    - Hardware optimization status for performance expectations
+    
+    User Experience Flow:
+    1. ASCII art logo creates immediate visual impact and brand recognition
+    2. System information builds confidence in hardware capabilities
+    3. Ready status provides clear signal to proceed with training
+    4. Press Enter prompt gives user control over pacing
+    
+    Visual Design Elements:
+    - Custom ASCII logo using box-drawing characters for terminal aesthetics
+    - Apple Silicon emoji (🍎) for brand association and hardware recognition
+    - Color coding: Blue for branding, Green for success, Dim for instructions
+    - Panel borders using Rich styling for professional appearance
+    
+    Technical Integration:
+    - Uses identical device detection logic to training pipeline
+    - Memory calculations align with training resource planning
+    - Status verification prevents wizard from proceeding with invalid configurations
+    - Visual feedback matches training progress indicators for consistency
+    
+    Accessibility Considerations:
+    - High contrast color choices for terminal visibility
+    - Clear text hierarchy for screen readers
+    - Simple interaction model (Enter key) for universal access
+    - Descriptive status messages for non-visual confirmation
+    """
     
     # ASCII art logo
     logo = """
