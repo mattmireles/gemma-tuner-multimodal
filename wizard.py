@@ -237,6 +237,10 @@ class ModelSpecs:
         "distil-large-encoder-tiny-decoder": {"params": "1550M→195M", "memory_gb": 10.2, "hours_100k": 6.0, "hf_id": "openai/whisper-large-v3"},
         "distil-medium-encoder-tiny-decoder": {"params": "769M→195M", "memory_gb": 6.8, "hours_100k": 3.5, "hf_id": "openai/whisper-medium"},
         "distil-small-encoder-tiny-decoder": {"params": "244M→195M", "memory_gb": 4.5, "hours_100k": 2.0, "hf_id": "openai/whisper-small"},
+
+        # Gemma 3n Models (approximate sizing for gating)
+        "gemma-3n-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 10.0, "hf_id": "google/gemma-3n-E2B-it"},
+        "gemma-3n-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 18.0, "hf_id": "google/gemma-3n-E4B-it"},
     }
 
 
@@ -530,29 +534,45 @@ def detect_datasets() -> List[Dict[str, Any]]:
             others.append(item)
     return bigquery_first + others
 
-def select_training_method() -> Dict[str, Any]:
+def select_model_family() -> str:
+    """Step 0: Choose model family (Whisper or Gemma)."""
+    console.print("\n[bold]Step 0: Choose your model family[/bold]")
+    families = [
+        {"name": "🌬️ Whisper - The robust ASR model from OpenAI.", "value": "whisper"},
+        {"name": "💎 Gemma - The new multimodal model from Google.", "value": "gemma"},
+    ]
+    return questionary.select(
+        "Which model family do you want to work with?",
+        choices=families,
+        style=apple_style
+    ).ask()
+
+
+def select_training_method(family: str | None = None) -> Dict[str, Any]:
     """Step 1: Select training method with progressive disclosure"""
-    
     console.print("\n[bold]Step 1: Choose your training method[/bold]")
-    
+
     methods = [TrainingMethod.STANDARD, TrainingMethod.LORA, TrainingMethod.DISTILLATION]
-    
+    # Gemma family supports LoRA-only in first release
+    if family == "gemma":
+        methods = [TrainingMethod.LORA]
+
     choices = []
     for method in methods:
         choices.append({
             "name": f"{method['name']} - {method['description']}",
             "value": method
         })
-    
+
     selected_method = questionary.select(
         "What kind of fine-tuning do you want to run?",
         choices=choices,
         style=apple_style
     ).ask()
-    
+
     return selected_method
 
-def select_model(method: Dict[str, Any]):
+def select_model(method: Dict[str, Any], family: str | None = None):
     """Step 2: Select model based on training method, driven by config.ini.
 
     For distillation, this returns the STUDENT model key (not teacher).
@@ -567,10 +587,29 @@ def select_model(method: Dict[str, Any]):
     # Dynamically discover available models from config.ini
     cfg = _read_config()
     available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
+    # Apply family filter
+    if family in ("whisper", "gemma"):
+        filtered = []
+        for m in available_models:
+            section = f"model:{m}"
+            grp = cfg.get(section, "group", fallback="").strip().lower()
+            if family == "gemma" and grp == "gemma":
+                filtered.append(m)
+            if family == "whisper" and grp != "gemma":
+                filtered.append(m)
+        available_models = filtered
     
     # Filter models based on the selected training method
     if method["key"] == "lora":
-        base_models = [m for m in available_models if "lora" in m]
+        # Include LoRA-suffixed Whisper models AND Gemma family models (Gemma uses LoRA-only path)
+        base_models = []
+        for m in available_models:
+            if "lora" in m:
+                base_models.append(m)
+                continue
+            section = f"model:{m}"
+            if cfg.has_option(section, "group") and cfg.get(section, "group").strip().lower() == "gemma":
+                base_models.append(m)
     elif method["key"] == "distillation":
         # For distillation, list base students (including medium) to fine-tune as student
         base_models = [
@@ -641,6 +680,8 @@ def select_model(method: Dict[str, Any]):
         if display_name == "whisper-small" and method["key"] != "distillation":
             choice_text += " ⭐ Recommended"
         elif display_name == "distil-base-from-medium" and method["key"] == "distillation":
+            choice_text += " ⭐ Recommended"
+        elif display_name == "gemma-3n-e2b-it" and method["key"] == "lora":
             choice_text += " ⭐ Recommended"
         
         choices.append({
@@ -1346,6 +1387,19 @@ def show_confirmation_screen(method: Dict[str, Any], model: str, dataset: Dict[s
     config_table.add_row("", "")  # Spacer
     config_table.add_row("Estimated Time", f"{estimates['hours']:.1f} hours")
     config_table.add_row("Memory Usage", f"{estimates['memory_gb']:.1f} GB")
+    # Display dtype/attention when Gemma is selected or when group specifies
+    try:
+        cfg = _read_config()
+        section = f"model:{model}"
+        if cfg.has_section(section):
+            group = cfg.get(section, "group", fallback="").strip().lower()
+            if group == "gemma":
+                dtype = cfg.get("group:gemma", "dtype", fallback="bfloat16")
+                attn = cfg.get("group:gemma", "attn_implementation", fallback="eager")
+                config_table.add_row("Precision (dtype)", dtype)
+                config_table.add_row("Attention Impl", attn)
+    except Exception:
+        pass
     config_table.add_row("Completion ETA", estimates['eta'].strftime("%I:%M %p today" if estimates['hours'] < 12 else "%I:%M %p tomorrow"))
     
     device_info = get_device_info()
@@ -1422,8 +1476,13 @@ def generate_profile_config(method: Dict[str, Any], model: str, dataset: Dict[st
             "lora_alpha": method_config["lora_alpha"], 
             "lora_dropout": method_config.get("lora_dropout", 0.1), # Sensible default
             # Use canonical key expected by trainer; leave as list, not string
-            "lora_target_modules": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+            # Prefer canonical Gemma naming (o_proj not out_proj)
+            "lora_target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "fc1", "fc2"],
         })
+        # Gemma-specific safety: if selected model belongs to group:gemma, enforce eager attention
+        section = f"model:{model_for_loader}"
+        if cfg.has_option(section, "group") and cfg.get(section, "group").strip().lower() == "gemma":
+            profile_config["attn_implementation"] = "eager"
     elif method["key"] == "distillation":
         profile_config.update({
             "teacher_model": method_config["teacher_model"],
@@ -1759,13 +1818,16 @@ def wizard_main():
         # Creates confidence through hardware verification and beautiful design
         show_welcome_screen()
         
+        # Step 0: Model family selection (Whisper vs Gemma)
+        family = select_model_family()
+        
         # Step 1: Training method selection with progressive disclosure
         # Presents three clear choices with quality/efficiency trade-offs
-        method = select_training_method()
+        method = select_training_method(family)
         
         # Step 2: Model selection with intelligent constraints
         # Returns (model_key, seed_dict) tuple for configuration flexibility
-        model, seed = select_model(method)
+        model, seed = select_model(method, family)
         
         # Step 3: Dataset selection with automatic discovery
         # Supports local files, BigQuery imports, and HuggingFace datasets
