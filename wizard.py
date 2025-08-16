@@ -1060,12 +1060,26 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
     else:
         dataset_id = questionary.text("Dataset ID:", default=last_dataset or "", style=apple_style).ask()
 
-    # Table selection (single-table MVP)
-    tables = bq.list_tables(project_id, dataset_id) or []
-    if tables:
-        table_id = questionary.select("Table:", choices=tables, style=apple_style).ask()
-    else:
-        table_id = questionary.text("Table ID:", style=apple_style).ask()
+    # Table selection (single-table MVP) with preflight and auto-refresh
+    def _pick_table() -> str:
+        tbls = bq.list_tables(project_id, dataset_id) or []
+        if tbls:
+            return questionary.select("Table:", choices=tbls, style=apple_style).ask()
+        return questionary.text("Table ID:", style=apple_style).ask()
+
+    # Initial pick
+    table_id = _pick_table()
+    # Preflight verify and auto-refresh once if needed
+    ok, msg = bq.verify_table(project_id, dataset_id, table_id)
+    if not ok:
+        console.print("[yellow]Selected table/view failed preflight. Refreshing table list...[/yellow]")
+        table_id = _pick_table()
+        ok2, msg2 = bq.verify_table(project_id, dataset_id, table_id)
+        if not ok2:
+            console.print(f"[red]Preflight failed again for '{table_id}':[/red] {msg2}")
+            raise RuntimeError(
+                "BigQuery table check failed. Please choose a concrete table or fix the view wildcard."
+            )
 
     _update_bq_defaults(project_id, dataset_id)
 
@@ -1662,17 +1676,66 @@ def execute_training(profile_config: Dict[str, Any]):
     console.print("[dim]Press Ctrl+C to interrupt (training will be saved at checkpoints)[/dim]")
     
     try:
-        # Subprocess training execution with environment isolation
-        # Uses module invocation for package compatibility and clean resource management
-        module_cwd = Path(__file__).resolve().parent
-        result = subprocess.run([
-            sys.executable,
-            "-m", "main",              # Module invocation for package compatibility
-            "finetune",               # Training operation
-            profile_name,             # Generated wizard profile
-            "--config",               # Custom configuration file
-            str(temp_config_path.resolve())  # Absolute path for cross-platform compatibility
-        ], check=True, text=True, capture_output=False, cwd=str(module_cwd))
+        # Ask if user wants distributed training; if so, route to distributed launcher
+        enable_dist = questionary.confirm(
+        "Enable distributed training (multi-GPU)?",
+        default=False,
+        style=apple_style
+        ).ask()
+
+        if enable_dist:
+        # Gather distributed params with sensible defaults
+            num_nodes_str = questionary.text(
+            "How many GPUs to use?",
+            default="2",
+            style=apple_style
+            ).ask()
+            try:
+                num_nodes = int(num_nodes_str)
+            except Exception:
+                num_nodes = 2
+
+            strategy = questionary.select(
+            "Which distributed strategy?",
+            choices=["allreduce", "diloco"],
+            style=apple_style
+            ).ask()
+
+            h_param = 100
+            if strategy == "diloco":
+                h_param_str = questionary.text(
+                "DiLoCo communication interval H?",
+                default="100",
+                style=apple_style
+                ).ask()
+                try:
+                    h_param = int(h_param_str)
+                except Exception:
+                    h_param = 100
+
+            module_cwd = Path(__file__).resolve().parent
+            result = subprocess.run([
+                sys.executable,
+                str(module_cwd / "train_distributed.py"),
+                "--profile", profile_name,
+                "--output_dir", str(Path("output") / f"wizard_{timestamp}"),
+                "--num_nodes", str(num_nodes),
+                "--strategy", strategy,
+                "--h_param", str(h_param),
+                "--config", str(temp_config_path.resolve())
+            ], check=True, text=True, capture_output=False, cwd=str(module_cwd))
+        else:
+            # Subprocess training execution with environment isolation
+            # Uses module invocation for package compatibility and clean resource management
+            module_cwd = Path(__file__).resolve().parent
+            result = subprocess.run([
+                sys.executable,
+                "-m", "main",              # Module invocation for package compatibility
+                "finetune",               # Training operation
+                profile_name,             # Generated wizard profile
+                "--config",               # Custom configuration file
+                str(temp_config_path.resolve())  # Absolute path for cross-platform compatibility
+            ], check=True, text=True, capture_output=False, cwd=str(module_cwd))
         
         # Success feedback with actionable next steps
         console.print(f"\n[bold green]✅ Training completed successfully![/bold green]")
