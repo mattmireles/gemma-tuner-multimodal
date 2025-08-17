@@ -126,6 +126,28 @@ def prepare(
     ops.prepare({"dataset": dataset})
 
 
+@app.command(name="prepare-granary")
+def prepare_granary(
+    profile: str = typer.Argument(..., help="Dataset profile name for Granary dataset (e.g., granary-en)"),
+    config: str = typer.Option("config.ini", help="Path to configuration file"),
+    json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
+):
+    """Prepare NVIDIA Granary dataset for training with optimized validation and streaming support."""
+    init_logging("INFO", json_format=json_logging)
+    
+    # Import here to avoid circular dependency
+    from scripts.prepare_granary import prepare_granary as _prepare_granary
+    
+    try:
+        manifest_path = _prepare_granary(profile)
+        typer.echo(f"✅ Granary dataset prepared successfully!")
+        typer.echo(f"📄 Manifest: {manifest_path}")
+        typer.echo(f"🎯 Ready for training with profile: {profile}")
+    except Exception as e:
+        typer.echo(f"❌ Granary preparation failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
 @app.command()
 def finetune(
     profile: str = typer.Argument(..., help="Profile name as defined under [profile:*]"),

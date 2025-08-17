@@ -193,6 +193,7 @@ def main():
         "operation",
         choices=[
             "prepare",
+            "prepare-granary",
             "finetune",
             "evaluate",
             "export",
@@ -233,6 +234,30 @@ def main():
         # Build a minimal config dict mirroring profile_config expectation for prepare()
         profile_config = {"dataset": args.profile_or_model_dataset}
         ops.prepare(profile_config)
+
+    elif args.operation == "prepare-granary":
+        if not args.profile_or_model_dataset:
+            parser.error("The 'prepare-granary' operation requires a profile name (as defined in config.ini).")
+        
+        # Import and execute Granary preparation script
+        from scripts.prepare_granary import prepare_granary
+        
+        try:
+            profile_name = args.profile_or_model_dataset
+            manifest_path = prepare_granary(profile_name)
+            logger.info(f"✅ Granary dataset preparation completed successfully!")
+            logger.info(f"📄 Manifest created: {manifest_path}")
+            logger.info(f"🚀 You can now train using this dataset with the existing training pipeline.")
+            
+        except ValueError as e:
+            logger.error(f"❌ Configuration error during Granary preparation: {e}")
+            raise
+        except FileNotFoundError as e:
+            logger.error(f"❌ File not found during Granary preparation: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during Granary preparation: {e}", exc_info=True)
+            raise
 
     elif args.operation == "finetune":
         if not args.profile_or_model_dataset:
