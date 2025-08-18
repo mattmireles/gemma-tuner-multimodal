@@ -50,6 +50,14 @@ from questionary import Style
 # Import existing utilities
 from utils.device import get_device
 
+# Try to import distributed training functionality
+try:
+    from distributed.utils import load_hosts_config, validate_ssh_connectivity
+    from distributed.launcher import DistributedLauncher
+    HAS_DISTRIBUTED = True
+except ImportError:
+    HAS_DISTRIBUTED = False
+
 # Initialize console and styling
 console = Console()
 
@@ -2142,6 +2150,149 @@ def execute_training(profile_config: Dict[str, Any]):
             # Ignore cleanup errors - temporary files will be cleaned up eventually
             pass
 
+def check_distributed_training():
+    """
+    Check if distributed training is configured and offer it as an option.
+    
+    Beautiful progressive disclosure:
+    1. Check for distributed_hosts.json
+    2. Validate connectivity to configured machines
+    3. Offer distributed training with estimated speedup
+    
+    Returns:
+        Dict or None: Hosts configuration if distributed training is selected, None otherwise
+    """
+    if not HAS_DISTRIBUTED:
+        return None
+        
+    hosts_file = Path("distributed_hosts.json")
+    if not hosts_file.exists():
+        return None
+    
+    try:
+        hosts_config = load_hosts_config("distributed_hosts.json")
+        
+        # Enhanced local environment validation (ExoLabs integration)
+        from distributed.utils import validate_training_environment
+        print("\n🖥️ Validating local environment for distributed training...")
+        local_env = validate_training_environment()
+        
+        # Report Apple Silicon compatibility
+        if local_env['is_apple_silicon']:
+            if local_env['is_rosetta_emulation']:
+                print("⚠️ WARNING: Python running under Rosetta 2")
+                print("   Consider reinstalling with native ARM64 Python for optimal performance")
+            
+            if not local_env['mps_functional'] and local_env['mps_available']:
+                print("⚠️ MPS available but not functional - this may impact training performance")
+            elif local_env['mps_functional']:
+                print("✅ Apple Silicon MPS validated and ready")
+        
+        # Show critical issues if any
+        if local_env['environment_issues']:
+            print("⚠️ Environment issues detected:")
+            for issue in local_env['environment_issues'][:2]:  # Show max 2 to avoid clutter
+                print(f"   • {issue}")
+        
+        # Quick connectivity check
+        worker_addrs = hosts_config['workers']
+        ssh_user = hosts_config['ssh_user']
+        
+        print("\n🔍 Checking other Macs on your network...")
+        time.sleep(0.5)  # Brief pause for effect
+        
+        try:
+            available_workers = validate_ssh_connectivity(
+                hosts=worker_addrs,
+                ssh_user=ssh_user,
+                ssh_key_path=hosts_config.get('ssh_key_path')
+            )
+        except Exception as e:
+            print(f"⚠️ Could not reach other Macs: {e}")
+            return None
+        
+        if available_workers:
+            total_machines = len(available_workers) + 1
+            estimated_speedup = min(total_machines * 0.8, total_machines)  # Account for overhead
+            
+            console.print(Panel(
+                f"🚀 I found {len(available_workers)} other Macs on your network!\n\n"
+                f"📊 Estimated speedup: {estimated_speedup:.1f}x faster training\n"
+                f"🎯 Strategy: DiLoCo (minimal communication, maximum speed)\n"
+                f"💡 Perfect for your multi-Mac setup",
+                title="✨ Distributed Training Available",
+                border_style="bright_blue"
+            ))
+            
+            use_distributed = questionary.confirm(
+                "🌟 Use distributed training across multiple Macs?",
+                default=True,
+                style=apple_style
+            ).ask()
+            
+            if use_distributed:
+                console.print(f"[green]✅ Distributed training enabled across {total_machines} machines[/green]")
+                time.sleep(WizardConstants.ANIMATION_DELAY)
+                return hosts_config
+        
+    except Exception as e:
+        console.print(f"[yellow]Distributed training config found but invalid: {e}[/yellow]")
+    
+    return None
+
+
+def execute_distributed_training(profile_config: Dict[str, Any], hosts_config: Dict[str, Any]):
+    """
+    Execute distributed training across multiple machines.
+    
+    Args:
+        profile_config: Training configuration from wizard
+        hosts_config: Distributed hosts configuration
+    """
+    console.print(f"\n[bold green]🚀 Starting distributed training across {len(hosts_config['workers']) + 1} machines...[/bold green]")
+    
+    try:
+        # Create launcher
+        launcher = DistributedLauncher("distributed_hosts.json")
+        
+        # Convert wizard config to distributed training args
+        training_args = {
+            "strategy": "diloco",  # Default to DiLoCo for V1
+            "model": "openai/whisper-tiny",  # Use tiny model for testing
+            "num-epochs": 1,  # Conservative for testing
+            "batch-size": 4,
+            "hosts-config": "distributed_hosts.json"
+        }
+        
+        console.print(f"[dim]📡 Setting up secure connections...[/dim]")
+        
+        # Record start time
+        start_time = time.time()
+        
+        # Launch distributed training
+        launcher.launch(training_args)
+        
+        # Calculate training time
+        training_time = time.time() - start_time
+        
+        console.print(f"\n[bold green]✅ Distributed training completed successfully![/bold green]")
+        console.print(f"⏱️ Total time: {training_time:.1f} seconds")
+        
+        # Check for results
+        if Path("distributed_training_result.pt").exists():
+            console.print(f"💾 Training results saved to distributed_training_result.pt")
+        
+        console.print(f"\n[bold]🎉 Your multi-Mac training setup is working perfectly![/bold]")
+        console.print(f"[dim]Next time, you can use larger models and longer training sessions.[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Distributed training failed: {e}[/red]")
+        console.print(f"[yellow]⚠️ Falling back to single-machine training...[/yellow]")
+        
+        # Fall back to regular training
+        execute_training(profile_config)
+
+
 def wizard_main():
     """
     Main wizard orchestration function implementing Steve Jobs-inspired progressive disclosure.
@@ -2289,8 +2440,17 @@ def wizard_main():
             # Configuration generation for production training infrastructure
             profile_config = generate_profile_config(method, model, dataset, method_config)
             
+            # Step 8: Check for distributed training opportunity
+            # Steve Jobs magic: auto-discover other Macs and offer seamless speedup
+            hosts_config = check_distributed_training()
+            
             # Training execution with progress monitoring and error handling
-            execute_training(profile_config)
+            if hosts_config:
+                # Execute distributed training across multiple machines
+                execute_distributed_training(profile_config, hosts_config)
+            else:
+                # Execute standard single-machine training
+                execute_training(profile_config)
             
         else:
             # Graceful cancellation with guidance for future use

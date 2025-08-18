@@ -340,6 +340,197 @@ def blacklist(
     typer.echo(f"Blacklist created at: {path}")
 
 
+@app.command(name="distributed-train")
+def distributed_train(
+    hosts_config: str = typer.Option("distributed_hosts.json", help="Path to distributed hosts configuration"),
+    strategy: str = typer.Option("diloco", help="Distributed training strategy (diloco, sparta, simplereduce)"),
+    model: str = typer.Option("openai/whisper-tiny", help="Whisper model to train"),
+    epochs: int = typer.Option(1, help="Number of training epochs"),
+    batch_size: int = typer.Option(4, help="Training batch size"),
+    validate_only: bool = typer.Option(False, help="Only validate setup, don't run training"),
+    verbose: bool = typer.Option(False, help="Enable verbose output"),
+):
+    """Launch distributed training across multiple Macs.
+    
+    This command enables training Whisper models across multiple machines using
+    advanced distributed strategies like DiLoCo (Distributed Low-Communication).
+    
+    Examples:
+        # Test your distributed setup
+        python cli_typer.py distributed-train --validate-only
+        
+        # Run distributed training with DiLoCo
+        python cli_typer.py distributed-train --strategy diloco --model openai/whisper-medium
+        
+        # Quick test with tiny model
+        python cli_typer.py distributed-train --epochs 1 --batch-size 2
+    """
+    try:
+        # Import distributed training modules
+        from distributed.utils import (
+            load_hosts_config, 
+            validate_ssh_connectivity, 
+            check_remote_dependencies,
+            validate_training_environment,
+            validate_mps_compatibility
+        )
+        from distributed.launcher import DistributedLauncher
+        
+        typer.echo("🎯 Distributed Training - Multi-Mac Setup")
+        typer.echo("=" * 50)
+        
+        # Validate setup
+        typer.echo("🔍 Validating distributed training setup...")
+        
+        # Enhanced local environment validation (ExoLabs integration)
+        typer.echo("\n🖥️ Checking local environment compatibility...")
+        local_env = validate_training_environment()
+        
+        # Report Apple Silicon specific findings
+        if local_env['is_apple_silicon']:
+            typer.echo("🍎 Apple Silicon detected")
+            if local_env['is_rosetta_emulation']:
+                typer.echo("⚠️ WARNING: Python running under Rosetta 2 (x86_64)")
+                typer.echo("   This will severely degrade MPS performance")
+            
+            if local_env['mps_available'] and local_env['mps_functional']:
+                typer.echo("✅ MPS device validated and functional")
+            elif local_env['mps_available']:
+                typer.echo("⚠️ MPS available but not functional")
+            
+            if not local_env['mps_fallback_enabled']:
+                typer.echo("🔧 Auto-configuring MPS fallback for stability")
+            if not local_env['mps_memory_configured']:
+                typer.echo("🧠 Auto-configuring MPS memory management")
+            
+            # Detailed MPS compatibility analysis in verbose mode
+            if verbose:
+                typer.echo("\n🔍 Detailed Apple Silicon Compatibility Analysis:")
+                mps_compat = validate_mps_compatibility()
+                typer.echo(f"   Compatibility Score: {mps_compat['compatibility_score']}/6")
+                
+                if mps_compat['issues']:
+                    typer.echo("   Issues Found:")
+                    for issue in mps_compat['issues']:
+                        typer.echo(f"     • {issue}")
+                        
+                if mps_compat['recommendations']:
+                    typer.echo("   Recommendations:")
+                    for rec in mps_compat['recommendations'][:3]:  # Limit to top 3
+                        typer.echo(f"     • {rec}")
+        
+        # Report critical issues and recommendations
+        if local_env['environment_issues']:
+            typer.echo("\n⚠️ Environment Issues Detected:")
+            for issue in local_env['environment_issues']:
+                typer.echo(f"   • {issue}")
+                
+        if local_env['recommendations']:
+            typer.echo("\n💡 Recommendations:")
+            for rec in local_env['recommendations']:
+                typer.echo(f"   • {rec}")
+                
+        if not local_env['torch_distributed']:
+            typer.echo("❌ torch.distributed not available - distributed training requires PyTorch with distributed support", err=True)
+            raise typer.Exit(1)
+        
+        # Load hosts configuration
+        try:
+            hosts_config_data = load_hosts_config(hosts_config)
+            master_addr = hosts_config_data['master']
+            worker_addrs = hosts_config_data['workers']
+            ssh_user = hosts_config_data['ssh_user']
+            
+            typer.echo(f"📍 Master: {master_addr}")
+            typer.echo(f"👥 Workers: {', '.join(worker_addrs)}")
+            typer.echo(f"👤 SSH User: {ssh_user}")
+            
+        except Exception as e:
+            typer.echo(f"❌ Configuration error: {e}", err=True)
+            raise typer.Exit(1)
+        
+        # Test SSH connectivity
+        typer.echo("\n🌐 Testing SSH connectivity...")
+        try:
+            reachable_workers = validate_ssh_connectivity(
+                hosts=worker_addrs,
+                ssh_user=ssh_user,
+                ssh_key_path=hosts_config_data.get('ssh_key_path')
+            )
+            
+            if len(reachable_workers) != len(worker_addrs):
+                typer.echo(f"⚠️ Only {len(reachable_workers)}/{len(worker_addrs)} workers reachable")
+                if not reachable_workers:
+                    typer.echo("❌ No workers reachable - check SSH configuration", err=True)
+                    raise typer.Exit(1)
+            else:
+                typer.echo("✅ All workers reachable via SSH")
+                
+        except Exception as e:
+            typer.echo(f"❌ SSH connectivity test failed: {e}", err=True)
+            raise typer.Exit(1)
+        
+        # Check dependencies if verbose
+        if verbose:
+            typer.echo("\n📦 Checking dependencies on workers...")
+            try:
+                dep_results = check_remote_dependencies(
+                    hosts=reachable_workers,
+                    ssh_user=ssh_user,
+                    python_env=hosts_config_data.get('python_env', 'python3')
+                )
+                
+                for host, deps in dep_results.items():
+                    typer.echo(f"  {host}:")
+                    typer.echo(f"    Python: {deps.get('python_version', 'Unknown')}")
+                    typer.echo(f"    PyTorch: {deps.get('pytorch_version', 'Unknown')}")
+                    typer.echo(f"    Distributed: {deps.get('torch_distributed', False)}")
+                    
+            except Exception as e:
+                typer.echo(f"⚠️ Dependency check warning: {e}")
+        
+        typer.echo("\n✅ Distributed training setup validation passed!")
+        
+        # Stop here if only validating
+        if validate_only:
+            typer.echo("\n🎉 Setup looks good! You're ready for distributed training.")
+            return
+        
+        # Run distributed training
+        typer.echo(f"\n🚀 Starting distributed training...")
+        typer.echo(f"Strategy: {strategy}")
+        typer.echo(f"Model: {model}")
+        typer.echo(f"Epochs: {epochs}")
+        
+        # Prepare training arguments
+        training_args = {
+            "strategy": strategy,
+            "model": model,
+            "num-epochs": epochs,
+            "batch-size": batch_size,
+            "hosts-config": hosts_config
+        }
+        
+        # Launch distributed training
+        launcher = DistributedLauncher(hosts_config)
+        launcher.launch(training_args)
+        
+        typer.echo("\n✅ Distributed training completed successfully!")
+        
+        # Check for results
+        import os
+        if os.path.exists("distributed_training_result.pt"):
+            typer.echo("💾 Training results saved to distributed_training_result.pt")
+        
+    except ImportError:
+        typer.echo("❌ Distributed training not available - missing dependencies", err=True)
+        typer.echo("Run: pip install -r requirements.txt", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"❌ Distributed training failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
 def _load_config(path: str):
     """Load an INI configuration into ConfigParser with no side effects.
 
