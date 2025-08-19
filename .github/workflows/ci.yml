@@ -45,8 +45,8 @@ jobs:
           print('MPS available:', torch.backends.mps.is_available())
           PY
           
-          # Run a minimal subset of tests that don't pull large models
-          pytest -q tests/test_config.py tests/test_dataset_utils.py -k "not slow"
+          # Run fast tests only (avoid heavy downloads)
+          pytest -q tests -k "not slow"
 
       - name: Typer CLI import
         run: |

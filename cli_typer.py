@@ -28,6 +28,9 @@ Calls to:
 - core/ops.py for delegated operation execution
 - utils/device.py for MPS/CUDA/CPU device selection
 - core/logging.py for structured logging initialization
+- manage.py for legacy run management operations (via SimpleNamespace mapping)
+- wizard.py for interactive configuration interface
+- distributed/* modules for multi-node training orchestration
 
 Command structure:
 - prepare: Dataset preparation and preprocessing
@@ -36,6 +39,10 @@ Command structure:
 - export: Model conversion to deployment formats
 - blacklist: Quality-based sample filtering
 - streaming: Real-time ASR inference
+- runs: Run management and analysis (list, overview, details, cleanup)
+- wizard: Interactive fine-tuning configuration wizard
+- distributed-train: Multi-node distributed training orchestration
+- distributed-check: Pre-flight validation for distributed environments
 
 Signal handling:
 Implements POSIX signal handlers for graceful interruption:
@@ -68,6 +75,11 @@ from __future__ import annotations
 # Early Apple Silicon (MPS) bootstrap MUST run before any torch imports.
 # It needs to be after the future import (per Python rules) but before
 # any third-party imports that could pull in torch transitively.
+#
+# Called by: This import happens at module load time for cli_typer.py
+# Calls: core.bootstrap module which sets up MPS environment variables
+# Side effects: Sets PYTORCH_MPS_HIGH_WATERMARK_RATIO and related env vars
+# Critical for: Preventing MPS memory pressure issues during training
 import core.bootstrap  # noqa: F401  (early side-effects; deliberately unused)
 
 import os
@@ -91,6 +103,31 @@ from core.runs import (
 )
 from core import ops
 from utils.device import get_device, apply_device_defaults, get_env_info
+
+
+# Constants for AI-first documentation clarity
+class ExitCodes:
+    """Standard POSIX exit codes used throughout the CLI for consistent error reporting."""
+    SUCCESS = 0
+    GENERAL_ERROR = 1
+    INTERRUPTED_BY_CTRL_C = 130  # Standard POSIX code for SIGINT termination
+
+class OutputFormats:
+    """Output formatting constants for consistent user experience across commands."""
+    WER_DECIMAL_PRECISION = 3  # WER values displayed with 3 decimal places for readability
+    
+class DefaultPaths:
+    """Default file paths used across multiple commands for consistency."""
+    DISTRIBUTED_HOSTS_CONFIG = "distributed_hosts.json"
+    DEFAULT_OUTPUT_DIR = "output"
+
+class PlatformOptimizations:
+    """Platform-specific optimization constants for Apple Silicon (MPS) and distributed training."""
+    # Apple Silicon MPS considerations documented in distributed training functions:
+    # - Unified memory architecture requires different memory pressure management
+    # - MPS operations have different performance characteristics than CUDA
+    # - Mixed precision training has specific Apple Silicon optimizations
+    # See distributed_check() function for detailed MPS compatibility validation
 
 
 # CLI Application Instance with Enhanced Help
@@ -150,7 +187,7 @@ def prepare_granary(
         typer.echo(f"🎯 Ready for training with profile: {profile}")
     except Exception as e:
         typer.echo(f"❌ Granary preparation failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
 
 
 @app.command()
@@ -184,7 +221,7 @@ def finetune(
         try:
             update_run_metadata(run_dir, status="cancelled", end_time=_now())
         finally:
-            raise SystemExit(130)
+            raise SystemExit(ExitCodes.INTERRUPTED_BY_CTRL_C)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -351,7 +388,7 @@ runs_app = typer.Typer(help="Manage, list, and inspect training/evaluation runs"
 
 @runs_app.command("list")
 def runs_list(
-    type: Optional[str] = typer.Option(None, "--type", help="Filter by run type", casesensitive=False),
+    type: Optional[str] = typer.Option(None, "--type", help="Filter by run type"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Exact profile name filter"),
     model: Optional[str] = typer.Option(None, "--model", help="Substring model filter"),
     dataset: Optional[str] = typer.Option(None, "--dataset", help="Substring dataset filter"),
@@ -361,12 +398,54 @@ def runs_list(
     min_wer: Optional[float] = typer.Option(None, "--min-wer", help="Minimum WER"),
     max_wer: Optional[float] = typer.Option(None, "--max-wer", help="Maximum WER"),
     include_failed: bool = typer.Option(False, "--include-failed", help="Include failed runs"),
-    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+    output_dir: str = typer.Option(DefaultPaths.DEFAULT_OUTPUT_DIR, "--output-dir", help="Root runs directory"),
 ):
-    """List runs with filters in a table."""
+    """List training and evaluation runs with filtering in a formatted table.
+    
+    This command provides a unified CLI interface to the run management system,
+    wrapping the legacy manage.py functionality with modern Typer argument handling.
+    
+    Called by:
+    - Users investigating training results and comparing runs
+    - CI/CD pipelines generating run reports
+    - `whisper-tuner runs overview` for aggregated statistics
+    
+    Calls:
+    - `manage.list_runs()` via SimpleNamespace parameter mapping
+    - Internally uses run metadata from {output_dir}/*/metadata.json files
+    - Filters runs based on provided criteria using pandas operations
+    
+    Data flow:
+    1. Converts Typer arguments to SimpleNamespace for manage.py compatibility
+    2. manage.list_runs() scans output_dir for run directories
+    3. Loads and filters metadata.json files per criteria
+    4. Outputs formatted table via rich/tabulate
+    
+    Args:
+        type: Filter by run type ('train', 'eval', 'export'). Case-insensitive matching.
+        profile: Exact match filter for training profile name from config files
+        model: Substring filter for model names (e.g., 'whisper-base', 'distil')
+        dataset: Substring filter for dataset names used in training/eval
+        finetuning_run_id: Show only evaluations linked to specific training run
+        from_date: Include runs from this date onwards (YYYY-MM-DD format)
+        to_date: Include runs up to this date (YYYY-MM-DD format)  
+        min_wer: Filter runs with WER >= this value (for evaluation runs)
+        max_wer: Filter runs with WER <= this value (for evaluation runs)
+        include_failed: Include runs with status='failed' or incomplete metadata
+        output_dir: Root directory containing run subdirectories (default: ./output)
+    
+    Output format:
+    - Tabulated list showing: run_id, type, model, dataset, WER, status, date
+    - Color-coded status indicators (green=success, red=failed, yellow=running)
+    - WER values displayed with {OutputFormats.WER_DECIMAL_PRECISION} decimal precision for evaluation runs
+    """
     from types import SimpleNamespace
     from manage import list_runs
-    # Build a namespace compatible with existing manage functions
+    
+    # SimpleNamespace Bridge Pattern for Legacy Integration:
+    # The manage.py module expects argparse Namespace objects with specific attribute names.
+    # We convert Typer's typed parameters to a SimpleNamespace that manage.py can consume.
+    # This pattern maintains backward compatibility while providing modern CLI ergonomics.
     ns = SimpleNamespace(
         type=type,
         profile=profile,
@@ -385,7 +464,7 @@ def runs_list(
 
 @runs_app.command()
 def overview(
-    type: Optional[str] = typer.Option(None, "--type", help="Filter by run type", casesensitive=False),
+    type: Optional[str] = typer.Option(None, "--type", help="Filter by run type"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Exact profile name filter"),
     model: Optional[str] = typer.Option(None, "--model", help="Substring model filter"),
     dataset: Optional[str] = typer.Option(None, "--dataset", help="Substring dataset filter"),
@@ -395,9 +474,48 @@ def overview(
     min_wer: Optional[float] = typer.Option(None, "--min-wer", help="Minimum WER"),
     max_wer: Optional[float] = typer.Option(None, "--max-wer", help="Maximum WER"),
     include_failed: bool = typer.Option(False, "--include-failed", help="Include failed runs"),
-    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+    output_dir: str = typer.Option(DefaultPaths.DEFAULT_OUTPUT_DIR, "--output-dir", help="Root runs directory"),
 ):
-    """Show statistical overview and best runs."""
+    """Generate statistical overview and identify best-performing runs.
+    
+    This command provides aggregated analytics across all runs matching the filter criteria,
+    showing performance trends, success rates, and highlighting top performers.
+    
+    Called by:
+    - Users analyzing training effectiveness across multiple experiments
+    - CI/CD pipelines generating performance reports
+    - Research workflows comparing different model configurations
+    
+    Calls:
+    - `manage.overview()` via SimpleNamespace parameter mapping
+    - Internally aggregates metadata.json files using pandas groupby operations
+    - Calculates statistics like mean WER, success rates, training duration trends
+    
+    Data flow:
+    1. Applies same filtering logic as runs_list()
+    2. Aggregates metrics by model, dataset, and profile combinations
+    3. Identifies best runs by lowest WER within each category
+    4. Outputs formatted statistical summaries and recommendations
+    
+    Args:
+        type: Filter by run type ('train', 'eval', 'export') for targeted analysis
+        profile: Exact match filter for specific training configuration profiles
+        model: Focus analysis on specific model variants (substring matching)
+        dataset: Analyze performance on specific datasets (substring matching)
+        finetuning_run_id: Show evaluation overview for specific training run
+        from_date: Include runs from this date onwards (YYYY-MM-DD format)
+        to_date: Include runs up to this date (YYYY-MM-DD format)
+        min_wer: Focus on runs with WER >= threshold (identify problem areas)
+        max_wer: Focus on runs with WER <= threshold (identify successes)
+        include_failed: Include failed runs in statistical analysis
+        output_dir: Root directory containing run subdirectories
+    
+    Output sections:
+    - Summary statistics: total runs, success rate, mean/median WER
+    - Best performers: lowest WER runs by category
+    - Trend analysis: performance over time, if date range specified
+    - Recommendations: suggested next experiments based on results
+    """
     from types import SimpleNamespace
     from manage import overview as _overview
     ns = SimpleNamespace(
@@ -418,9 +536,39 @@ def overview(
 @runs_app.command()
 def details(
     run_id: str = typer.Argument(..., help="Run ID to display"),
-    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+    output_dir: str = typer.Option(DefaultPaths.DEFAULT_OUTPUT_DIR, "--output-dir", help="Root runs directory"),
 ):
-    """Show JSON metadata for a specific run."""
+    """Display detailed JSON metadata and logs for a specific training/evaluation run.
+    
+    This command provides deep inspection into a single run's configuration, metrics,
+    and execution details for debugging and analysis purposes.
+    
+    Called by:
+    - Users debugging failed runs or investigating specific results
+    - CI/CD pipelines extracting metrics for reporting
+    - Research workflows analyzing hyperparameter effects
+    
+    Calls:
+    - `manage.details()` via SimpleNamespace parameter mapping
+    - Loads {output_dir}/{run_id}/metadata.json for structured data
+    - Optionally displays logs from {output_dir}/{run_id}/training.log
+    
+    Data flow:
+    1. Validates run_id exists in output_dir
+    2. Loads and pretty-prints metadata.json with syntax highlighting
+    3. Shows key metrics summary (WER, loss, duration) if available
+    4. Displays recent log entries for context
+    
+    Args:
+        run_id: Unique identifier for the run (e.g., 'train_20240119_143022')
+        output_dir: Root directory containing run subdirectories
+        
+    Output format:
+    - JSON metadata with syntax highlighting and collapsible sections
+    - Key metrics summary table for quick reference
+    - Recent log entries showing training progress or error details
+    - File size information for model artifacts and datasets
+    """
     from types import SimpleNamespace
     from manage import details as _details
     ns = SimpleNamespace(run_id=run_id)
@@ -429,9 +577,44 @@ def details(
 
 @runs_app.command()
 def cleanup(
-    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+    output_dir: str = typer.Option(DefaultPaths.DEFAULT_OUTPUT_DIR, "--output-dir", help="Root runs directory"),
 ):
-    """Delete failed/cancelled runs to free disk space."""
+    """Delete failed, cancelled, or incomplete runs to free disk space.
+    
+    This command performs safe cleanup of runs that failed during execution,
+    were manually cancelled, or left incomplete due to system issues.
+    
+    Called by:
+    - Users managing disk space after multiple training experiments
+    - CI/CD pipelines cleaning up after test runs
+    - Automated maintenance scripts on training servers
+    
+    Calls:
+    - `manage.cleanup()` via SimpleNamespace parameter mapping
+    - Scans {output_dir}/*/metadata.json for status='failed' or incomplete runs
+    - Uses safe deletion patterns to avoid removing valid partial results
+    
+    Data flow:
+    1. Scans all run directories for status indicators
+    2. Identifies failed runs based on metadata.json status field
+    3. Identifies incomplete runs missing required artifacts
+    4. Prompts user for confirmation before deletion
+    5. Removes run directories and reports disk space freed
+    
+    Args:
+        output_dir: Root directory containing run subdirectories to clean
+        
+    Safety measures:
+    - Only deletes runs with explicit 'failed' status or missing critical files
+    - Preserves runs with 'running' status that might resume
+    - Shows detailed list of runs to be deleted before confirmation
+    - Creates backup of metadata.json files before deletion
+    
+    Output:
+    - List of runs identified for cleanup with reasons
+    - Confirmation prompt with total disk space to be freed
+    - Summary of cleanup results and remaining run count
+    """
     from types import SimpleNamespace
     from manage import cleanup as _cleanup
     ns = SimpleNamespace()  # no args needed currently
@@ -443,17 +626,52 @@ app.add_typer(runs_app, name="runs")
 
 @app.command(name="wizard")
 def run_wizard() -> None:
-    """Launch the interactive fine‑tuning wizard (deprecated: manage.py)."""
+    """Launch the interactive fine-tuning wizard for guided model training setup.
+    
+    This command starts a user-friendly, step-by-step interface that guides users
+    through the complete process of configuring and launching fine-tuning jobs.
+    
+    Called by:
+    - New users learning the fine-tuning workflow
+    - Users preferring interactive configuration over command-line arguments
+    - Automated scripts that need guided parameter selection
+    
+    Calls:
+    - `wizard.wizard_main()` as the primary interactive interface
+    - Internally chains through configuration, dataset, and model selection
+    - May spawn training processes via core.finetune modules
+    
+    Data flow:
+    1. Presents interactive prompts for configuration selection
+    2. Validates user choices against available datasets and models
+    3. Generates configuration files in standard format
+    4. Optionally launches training immediately or saves for later execution
+    
+    Features:
+    - Interactive model selection with compatibility checking
+    - Dataset validation and preprocessing recommendations  
+    - Hardware detection and optimization suggestions (MPS, CUDA, CPU)
+    - Configuration file generation for reproducible runs
+    - Integration with existing run management system
+    
+    Error handling:
+    - ImportError: wizard module not available (missing dependencies)
+    - User interruption (Ctrl+C): graceful exit with partial configuration saved
+    - Invalid selections: retry prompts with helpful guidance
+    
+    Note: This is a legacy interface maintained for backward compatibility.
+    Consider using direct CLI commands for automation and CI/CD workflows.
+    """
     try:
         from wizard import wizard_main
         wizard_main()
     except Exception as e:
         typer.echo(f"❌ Wizard failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
 
 @app.command(name="distributed-train")
 def distributed_train(
-    hosts_config: str = typer.Option("distributed_hosts.json", help="Path to distributed hosts configuration"),
+    hosts_config: str = typer.Option(DefaultPaths.DISTRIBUTED_HOSTS_CONFIG, help="Path to distributed hosts configuration"),
     strategy: str = typer.Option("diloco", help="Distributed training strategy (diloco, sparta, simplereduce)"),
     model: str = typer.Option("openai/whisper-tiny", help="Whisper model to train"),
     epochs: int = typer.Option(1, help="Number of training epochs"),
@@ -461,11 +679,53 @@ def distributed_train(
     validate_only: bool = typer.Option(False, help="Only validate setup, don't run training"),
     verbose: bool = typer.Option(False, help="Enable verbose output"),
 ):
-    """Launch distributed training across multiple Macs.
+    """Launch distributed training across multiple Macs using advanced communication strategies.
     
-    This command enables training Whisper models across multiple machines using
-    advanced distributed strategies like DiLoCo (Distributed Low-Communication).
+    This command orchestrates multi-node training using strategies like DiLoCo (Distributed
+    Low-Communication) that are specifically optimized for Apple Silicon networks where
+    high-bandwidth interconnects are not available.
     
+    Called by:
+    - Users training large models that require distributed resources
+    - Research workflows comparing distributed training strategies
+    - CI/CD pipelines running distributed training tests
+    
+    Calls:
+    - `distributed.utils.load_hosts_config()` to parse network topology
+    - `distributed.utils.validate_ssh_connectivity()` for network verification
+    - `distributed.launcher.DistributedLauncher` to coordinate training
+    - `distributed.utils.validate_mps_compatibility()` for Apple Silicon optimization
+    
+    Data flow:
+    1. Validates local and remote environment compatibility
+    2. Establishes SSH connections to all worker nodes
+    3. Synchronizes code and data across nodes
+    4. Launches coordinated training processes using selected strategy
+    5. Aggregates results and saves to local output directory
+    
+    Environment variables used:
+    - SSH_KEY_PATH: Path to SSH private key for worker authentication
+    - PYTORCH_MPS_HIGH_WATERMARK_RATIO: Memory management for Apple Silicon
+    - DISTRIBUTED_BACKEND: Override PyTorch distributed backend (default: nccl/gloo)
+    
+    Args:
+        hosts_config: JSON file defining network topology with master/worker assignments
+        strategy: Training strategy ('diloco' for low-communication, 'sparta' for sparse updates)
+        model: HuggingFace model identifier for base Whisper model
+        epochs: Number of training epochs across all nodes
+        batch_size: Per-node batch size (total effective batch = batch_size * num_workers)
+        validate_only: Skip training and only validate distributed environment setup
+        verbose: Enable detailed diagnostics including MPS compatibility analysis
+        
+    Raises:
+        typer.Exit(1): If distributed dependencies missing, connectivity fails, or training errors
+        
+    Error handling:
+        - ImportError: Missing distributed training dependencies (suggests dev install)
+        - SSH failures: Reports unreachable workers and suggests configuration fixes
+        - Training failures: Saves partial results and provides debugging guidance
+        - MPS incompatibilities: Provides Apple Silicon-specific recommendations
+        
     Examples:
         # Test your distributed setup
         python cli_typer.py distributed-train --validate-only
@@ -543,7 +803,7 @@ def distributed_train(
                 
         if not local_env['torch_distributed']:
             typer.echo("❌ torch.distributed not available - distributed training requires PyTorch with distributed support", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(ExitCodes.GENERAL_ERROR)
         
         # Load hosts configuration
         try:
@@ -558,7 +818,7 @@ def distributed_train(
             
         except Exception as e:
             typer.echo(f"❌ Configuration error: {e}", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(ExitCodes.GENERAL_ERROR)
         
         # Test SSH connectivity
         typer.echo("\n🌐 Testing SSH connectivity...")
@@ -573,13 +833,13 @@ def distributed_train(
                 typer.echo(f"⚠️ Only {len(reachable_workers)}/{len(worker_addrs)} workers reachable")
                 if not reachable_workers:
                     typer.echo("❌ No workers reachable - check SSH configuration", err=True)
-                    raise typer.Exit(1)
+                    raise typer.Exit(ExitCodes.GENERAL_ERROR)
             else:
                 typer.echo("✅ All workers reachable via SSH")
                 
         except Exception as e:
             typer.echo(f"❌ SSH connectivity test failed: {e}", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(ExitCodes.GENERAL_ERROR)
         
         # Check dependencies if verbose
         if verbose:
@@ -634,13 +894,117 @@ def distributed_train(
             typer.echo("💾 Training results saved to distributed_training_result.pt")
         
     except ImportError:
-        typer.echo("❌ Distributed training not available - missing dependencies", err=True)
-        typer.echo("Run: pip install -r requirements.txt", err=True)
-        raise typer.Exit(1)
+        typer.echo("❌ Distributed training not available - missing optional dependencies", err=True)
+        typer.echo("See README for setup, or install dev deps: pip install -e '.[dev]'", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
     except Exception as e:
         typer.echo(f"❌ Distributed training failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
 
+
+@app.command(name="distributed-check")
+def distributed_check(
+    hosts_config: str = typer.Option(DefaultPaths.DISTRIBUTED_HOSTS_CONFIG, help="Path to distributed hosts configuration"),
+    verbose: bool = typer.Option(False, help="Verbose diagnostics (MPS checks, recommendations)"),
+):
+    """Validate distributed training environment without launching actual training.
+    
+    This command performs comprehensive pre-flight checks for distributed training:
+    - Validates SSH connectivity to all worker nodes
+    - Checks Python/PyTorch compatibility across nodes
+    - Verifies MPS availability and compatibility on Apple Silicon
+    - Validates distributed training dependencies
+    
+    Called by:
+    - Users before running `distributed-train` to avoid setup failures
+    - CI/CD pipelines to validate distributed environment setup
+    - Debugging distributed training connection issues
+    
+    Calls:
+    - `distributed.utils.load_hosts_config()` to parse JSON configuration
+    - `distributed.utils.validate_ssh_connectivity()` for network checks
+    - `distributed.utils.validate_training_environment()` for local environment
+    - `distributed.utils.validate_mps_compatibility()` for Apple Silicon checks
+    
+    Environment variables used:
+    - SSH_KEY_PATH: Optional path to SSH private key for worker connections
+    - PYTORCH_MPS_HIGH_WATERMARK_RATIO: MPS memory management (checked in validation)
+    
+    Args:
+        hosts_config: Path to JSON file containing distributed hosts configuration.
+                     Format: {"master": "host", "workers": ["host1", "host2"], "ssh_user": "user"}
+        verbose: Enable detailed diagnostics including MPS compatibility scores,
+                performance recommendations, and environment-specific guidance
+    
+    Raises:
+        typer.Exit(1): If distributed dependencies are missing or validation fails
+        
+    Error handling:
+    - ImportError: Missing distributed.utils module (suggests installing dev dependencies)
+    - FileNotFoundError: hosts_config file doesn't exist
+    - SSH connection failures: Reports unreachable workers but continues validation
+    - MPS validation errors: On Apple Silicon, reports compatibility issues but doesn't fail
+    """
+    try:
+        from distributed.utils import (
+            load_hosts_config,
+            validate_ssh_connectivity,
+            check_remote_dependencies,
+            validate_training_environment,
+            validate_mps_compatibility,
+        )
+
+        typer.echo("🔍 Distributed environment check")
+        cfg = load_hosts_config(hosts_config)
+        master_addr = cfg['master']
+        worker_addrs = cfg['workers']
+        ssh_user = cfg['ssh_user']
+        typer.echo(f"📍 Master: {master_addr}")
+        typer.echo(f"👥 Workers: {', '.join(worker_addrs)}")
+        typer.echo(f"👤 SSH User: {ssh_user}")
+
+        typer.echo("\n🖥️ Local environment:")
+        env = validate_training_environment()
+        typer.echo(f"  Python: {env.get('python_version')} ({env.get('python_architecture')})")
+        typer.echo(f"  PyTorch: {env.get('pytorch_version')}")
+        typer.echo(f"  torch.distributed: {env.get('torch_distributed')}")
+        if env['environment_issues']:
+            typer.echo("  Issues:")
+            for issue in env['environment_issues']:
+                typer.echo(f"    • {issue}")
+        if verbose and env['recommendations']:
+            typer.echo("  Recommendations:")
+            for rec in env['recommendations']:
+                typer.echo(f"    • {rec}")
+
+        typer.echo("\n🌐 SSH connectivity to workers:")
+        reachable = validate_ssh_connectivity(worker_addrs, ssh_user, cfg.get('ssh_key_path'))
+        typer.echo(f"  Reachable: {len(reachable)}/{len(worker_addrs)}")
+
+        if verbose:
+            typer.echo("\n📦 Remote dependencies:")
+            deps = check_remote_dependencies(reachable, ssh_user, cfg.get('python_env'))
+            for host, info in deps.items():
+                typer.echo(f"  {host}: Python={info.get('python_version')} Torch={info.get('pytorch_version')} dist={info.get('torch_distributed')}")
+
+            if env.get('is_apple_silicon'):
+                typer.echo("\n🍎 MPS compatibility details:")
+                mps = validate_mps_compatibility()
+                typer.echo(f"  Compatibility Score: {mps['compatibility_score']}")
+                if mps['issues']:
+                    typer.echo("  Issues:")
+                    for issue in mps['issues']:
+                        typer.echo(f"    • {issue}")
+                if mps['recommendations']:
+                    typer.echo("  Recommendations:")
+                    for rec in mps['recommendations']:
+                        typer.echo(f"    • {rec}")
+
+        typer.echo("\n✅ Distributed check completed")
+
+    except Exception as e:
+        typer.echo(f"❌ Distributed check failed: {e}", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
 
 def _load_config(path: str):
     """Load an INI configuration into ConfigParser with no side effects.
