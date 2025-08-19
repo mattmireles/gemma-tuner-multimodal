@@ -685,6 +685,53 @@ Preprocessing now defaults to using all available CPU cores for Dataset.map() on
 3. **Gradual increase**: Increase batch sizes if no swapping occurs
 4. **Gradient accumulation**: Use to simulate larger batches
 
+### Mamba-ASR Production Training (Apple Silicon)
+
+This repository includes a production training pipeline for the Mamba-ASR model under `Mamba-ASR-MPS/`. It trains a ConMamba CTC backbone (V=1024) with a learned 1024→29 projection head for a compact, character-level output used by the Core ML runner.
+
+- **Dataset CSV schema (LibriSpeech-style)**: `path,duration,text`
+  - `path`: absolute or relative audio path (wav/flac)
+  - `duration`: seconds (float)
+  - `text`: reference transcript
+
+- **Run training**:
+```bash
+PYTHONPATH="$(pwd)/Mamba-ASR-MPS" \
+python Mamba-ASR-MPS/train.py \
+  --train-csv /path/to/train.csv \
+  --val-csv /path/to/val.csv \
+  --epochs 10 --batch-size 4 --lr 3e-4 --d-model 256 --n-blocks 6
+```
+
+- **Useful flags**:
+  - `--freeze-backbone`: train only the 1024→29 head (fast convergence)
+  - `--checkpoint-dir`: defaults to `Mamba-ASR-MPS/exports/checkpoints`
+  - `--no-post-eval`: skip automatic projection extraction + batch eval
+
+- **Outputs**:
+  - Checkpoints: `Mamba-ASR-MPS/exports/checkpoints/{last.pt,best.pt}`
+  - Learned projection: `Mamba-ASR-MPS/exports/projection_1024x29.csv`
+  - Batch eval reports: `Mamba-ASR-MPS/exports/CoreMLTraces/`
+
+- **Manual post-run (optional)**:
+```bash
+# 1) Extract learned projection from best checkpoint
+python Mamba-ASR-MPS/scripts/extract_projection_from_ckpt.py \
+  --ckpt Mamba-ASR-MPS/exports/checkpoints/best.pt \
+  --w-key proj.weight --b-key proj.bias \
+  --out Mamba-ASR-MPS/exports/projection_1024x29.csv
+
+# 2) Run Core ML batch evaluation (uses learned projection automatically)
+bash Mamba-ASR-MPS/scripts/eval_batch.sh
+```
+
+- **Interpreting final evaluation reports**:
+  - Primary metric: **CER (Character Error Rate)**; lower is better
+  - Report path: `Mamba-ASR-MPS/exports/CoreMLTraces/wer_cer_overview_<model>.md`
+  - Threshold guidance: initial gate `CER ≤ 0.6` for tiny testsets; tighten as models improve
+  - Missing/empty transcripts with `--strict` cause non-zero exit; ensure `exports/testset/{audio,refs}` populated (see `scripts/eval_batch.sh` for expected locations)
+
+
 ## CI
 
 A macOS CI workflow performs smoke import tests, prepares a tiny streaming dataset, and runs a short evaluation with a tiny model. See `.github/workflows/ci-macos.yml`.
