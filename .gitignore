@@ -1,87 +1,35 @@
+# macOS
+.DS_Store
+
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
-.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
 *.egg-info/
-dist/
+.eggs/
+.env
+.venv
+.envrc
+
+# Build artifacts
 build/
-
-# Jupyter Notebooks
-.ipynb_checkpoints
-*.ipynb
-
-# Model outputs and checkpoints
-output/
-checkpoints/
-runs/
-*.pt
-*.pth
-*.bin
-*.safetensors
-*.ggml
-*.gguf
-
-# Data files
-data/audio/
-data/datasets/*/train.csv
-data/datasets/*/validation.csv
-data/datasets/*/metadata.json
-*.wav
-*.mp3
-*.m4a
-*.flac
-
-# Logs
-*.log
-logs/
-tensorboard/
-
-# OS files
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
+dist/
 
 # IDE
 .vscode/
 .idea/
-*.sublime-*
 
-# Environment
-.env
-.env.local
+# Compiled CoreML / Model Artifacts
+**/*.mlmodelc
+**/*.mlpackage
 
-# Temporary files
-tmp/
-temp/
-cache/
-.cache/
+# Large data exports and generated reports
+exports/
+Mamba-ASR-MPS/exports/
 
-# Lock files (keep these for reproducibility)
-# *.lock
+# Logs and run outputs (keep if you want history under output/)
+*.log
 
-# Config overrides (local settings)
-config.local.ini
-config.override.ini
-
-# Results and evaluations
-results/
-evaluations/
-blacklists/
-
-# Do not ignore
-!requirements.txt
-!.gitignore
-!data/datasets/.gitkeep
-!data/audio/.gitkeep
-!data/patches/.gitkeeptools/whisper.cpp/
+# Node/bundle leftovers (if any web assets are present)
+node_modules/

@@ -65,6 +65,11 @@ Design principles:
 
 from __future__ import annotations
 
+# Early Apple Silicon (MPS) bootstrap MUST run before any torch imports.
+# It needs to be after the future import (per Python rules) but before
+# any third-party imports that could pull in torch transitively.
+import core.bootstrap  # noqa: F401  (early side-effects; deliberately unused)
+
 import os
 import json
 from datetime import datetime
@@ -339,6 +344,112 @@ def blacklist(
     path = create_blacklist(profile_config, run_dir)
     typer.echo(f"Blacklist created at: {path}")
 
+
+# -------- Runs management (unified Typer wrapper for manage.py) --------
+runs_app = typer.Typer(help="Manage, list, and inspect training/evaluation runs")
+
+
+@runs_app.command("list")
+def runs_list(
+    type: Optional[str] = typer.Option(None, "--type", help="Filter by run type", casesensitive=False),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Exact profile name filter"),
+    model: Optional[str] = typer.Option(None, "--model", help="Substring model filter"),
+    dataset: Optional[str] = typer.Option(None, "--dataset", help="Substring dataset filter"),
+    finetuning_run_id: Optional[str] = typer.Option(None, "--finetuning-run-id", help="Link evaluations to a train run"),
+    from_date: Optional[str] = typer.Option(None, "--from", help="Start date YYYY-MM-DD"),
+    to_date: Optional[str] = typer.Option(None, "--to", help="End date YYYY-MM-DD"),
+    min_wer: Optional[float] = typer.Option(None, "--min-wer", help="Minimum WER"),
+    max_wer: Optional[float] = typer.Option(None, "--max-wer", help="Maximum WER"),
+    include_failed: bool = typer.Option(False, "--include-failed", help="Include failed runs"),
+    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+):
+    """List runs with filters in a table."""
+    from types import SimpleNamespace
+    from manage import list_runs
+    # Build a namespace compatible with existing manage functions
+    ns = SimpleNamespace(
+        type=type,
+        profile=profile,
+        model=model,
+        dataset=dataset,
+        finetuning_run_id=finetuning_run_id,
+        from_date=from_date,
+        to_date=to_date,
+        min_wer=min_wer,
+        max_wer=max_wer,
+        include_failed=include_failed,
+    )
+    # Let manage.py do its own date parsing and print formatting
+    list_runs(ns, output_dir=output_dir)
+
+
+@runs_app.command()
+def overview(
+    type: Optional[str] = typer.Option(None, "--type", help="Filter by run type", casesensitive=False),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Exact profile name filter"),
+    model: Optional[str] = typer.Option(None, "--model", help="Substring model filter"),
+    dataset: Optional[str] = typer.Option(None, "--dataset", help="Substring dataset filter"),
+    finetuning_run_id: Optional[str] = typer.Option(None, "--finetuning-run-id", help="Filter by train run ID"),
+    from_date: Optional[str] = typer.Option(None, "--from", help="Start date YYYY-MM-DD"),
+    to_date: Optional[str] = typer.Option(None, "--to", help="End date YYYY-MM-DD"),
+    min_wer: Optional[float] = typer.Option(None, "--min-wer", help="Minimum WER"),
+    max_wer: Optional[float] = typer.Option(None, "--max-wer", help="Maximum WER"),
+    include_failed: bool = typer.Option(False, "--include-failed", help="Include failed runs"),
+    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+):
+    """Show statistical overview and best runs."""
+    from types import SimpleNamespace
+    from manage import overview as _overview
+    ns = SimpleNamespace(
+        type=type,
+        profile=profile,
+        model=model,
+        dataset=dataset,
+        finetuning_run_id=finetuning_run_id,
+        from_date=from_date,
+        to_date=to_date,
+        min_wer=min_wer,
+        max_wer=max_wer,
+        include_failed=include_failed,
+    )
+    _overview(ns, output_dir=output_dir)
+
+
+@runs_app.command()
+def details(
+    run_id: str = typer.Argument(..., help="Run ID to display"),
+    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+):
+    """Show JSON metadata for a specific run."""
+    from types import SimpleNamespace
+    from manage import details as _details
+    ns = SimpleNamespace(run_id=run_id)
+    _details(ns, output_dir=output_dir)
+
+
+@runs_app.command()
+def cleanup(
+    output_dir: str = typer.Option("output", "--output-dir", help="Root runs directory"),
+):
+    """Delete failed/cancelled runs to free disk space."""
+    from types import SimpleNamespace
+    from manage import cleanup as _cleanup
+    ns = SimpleNamespace()  # no args needed currently
+    _cleanup(ns, output_dir=output_dir)
+
+
+app.add_typer(runs_app, name="runs")
+
+
+@app.command(name="wizard")
+def run_wizard() -> None:
+    """Launch the interactive fine‑tuning wizard (deprecated: manage.py)."""
+    try:
+        from wizard import wizard_main
+        wizard_main()
+    except Exception as e:
+        typer.echo(f"❌ Wizard failed: {e}", err=True)
+        raise typer.Exit(1)
 
 @app.command(name="distributed-train")
 def distributed_train(

@@ -45,8 +45,14 @@ dependencies = [
   "db-dtypes>=1.4.0,<2.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.5.0,<0.6.0",
+  "pytest>=7.4,<9.0",
+]
+
 [project.scripts]
-whisper-tune = "wizard:wizard_main"
+whisper-tuner = "cli_typer:app"
 
 [tool.setuptools]
 # Include top-level single-file modules
@@ -66,3 +72,12 @@ include = [
   "scripts*",
   "models*",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+

@@ -1,35 +1,10 @@
 #!/usr/bin/env python3
 
-# CRITICAL: MPS memory configuration MUST happen before ANY imports
-# This includes standard library imports, as they may trigger other imports
-# that could initialize PyTorch or its dependencies
+# Ensure Apple Silicon (MPS) environment is configured BEFORE importing torch
+import core.bootstrap  # noqa: F401  (early side-effects; deliberately unused)
+
 import os
 import platform
-if platform.system() == "Darwin" and platform.machine() == "arm64":
-    # Set/validate MPS memory limits before ANY other imports
-    # Clamp invalid values (must be 0.0 < ratio < 1.0). Some environments set 1.4 erroneously.
-    def _clamp_ratio(name: str, default_value: float) -> float:
-        cur = os.environ.get(name)
-        if cur is None:
-            os.environ[name] = str(default_value)
-            return default_value
-        try:
-            val = float(cur)
-            if not (0.0 < val < 1.0):
-                os.environ[name] = str(default_value)
-                return default_value
-            return val
-        except Exception:
-            os.environ[name] = str(default_value)
-            return default_value
-
-    high = _clamp_ratio("PYTORCH_MPS_HIGH_WATERMARK_RATIO", 0.9)
-    low = _clamp_ratio("PYTORCH_MPS_LOW_WATERMARK_RATIO", 0.7)
-    # Ensure ordering: low < high
-    if not (low < high):
-        # Reset low to a safe margin below high
-        safe_low = max(min(high - 0.1, 0.85), 0.1)
-        os.environ["PYTORCH_MPS_LOW_WATERMARK_RATIO"] = f"{safe_low:.2f}"
 
 """
 Whisper Fine-Tuner CLI
@@ -182,6 +157,11 @@ def main():
     - Consistent operation behavior across different hardware configurations
     - File system path handling for cross-platform deployment (Windows, macOS, Linux)
     """
+    # Deprecation notice: prefer Typer CLI
+    try:
+        print("[DEPRECATION] main.py is legacy. Use: python cli_typer.py <command> (or install and run 'whisper-tune').")
+    except Exception:
+        pass
     # Logging options via environment for simplicity
     log_json = os.environ.get("LOG_JSON", "0") == "1"
     init_logging("INFO", json_format=log_json)
