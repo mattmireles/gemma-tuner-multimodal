@@ -21,6 +21,10 @@ from unittest.mock import Mock, patch, MagicMock
 
 from core.config import load_model_dataset_config, load_profile_config, ConfigConstants
 from scripts.prepare_granary import validate_granary_config, resolve_granary_audio_path
+import pytest
+
+# Mark entire module as slow: it imports heavy dependencies and patches HF APIs.
+pytestmark = pytest.mark.slow
 
 
 def make_cfg(sections: dict) -> configparser.ConfigParser:
