@@ -198,6 +198,7 @@ def finetune(
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
     log_file: Optional[str] = typer.Option(None, help="Optional file path for logs"),
 ):
+    """Fine-tune a Whisper model."""
     init_logging("INFO", json_format=json_logging)
     cfg = _load_config(config)
     output_dir = cfg["DEFAULT"]["output_dir"]
@@ -256,25 +257,7 @@ def evaluate(
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
     log_file: Optional[str] = typer.Option(None, help="Optional file path for logs"),
 ):
-    """Run model evaluation from the Typer CLI with LLM-first clarity.
-
-    Called by:
-    - `whisper-tuner evaluate <profile>` for profile-based evaluation
-    - `whisper-tuner evaluate <model+dataset>` for direct model/dataset evaluation
-
-    Calls to:
-    - load_profile_config()/load_model_dataset_config() to resolve configuration
-    - create_run_directory() to establish evaluation run structure
-    - core.ops.evaluate() to execute the evaluation pipeline
-
-    Args:
-        target: Profile name or "model+dataset" (e.g., "whisper-small+data3")
-        config: Path to INI file used for configuration resolution
-        dataset: Optional dataset override when a profile name is supplied
-        max_samples: Optional sample cap for quick/CI runs
-        json_logging: Enable JSON log output for aggregation systems
-        log_file: Optional additional file sink for logs
-    """
+    """Evaluate a fine-tuned Whisper model."""
     init_logging("INFO", json_format=json_logging)
     cfg = _load_config(config)
     output_dir = cfg["DEFAULT"]["output_dir"]
@@ -667,16 +650,83 @@ def run_wizard() -> None:
         wizard_main()
     except Exception as e:
         typer.echo(f"❌ Wizard failed: {e}", err=True)
+        typer.echo("Tip: For the modern CLI, use 'whisper-tuner <command>'.", err=True)
         raise typer.Exit(ExitCodes.GENERAL_ERROR)
+
+
+# -------- Legacy commands wrapper --------
+legacy_app = typer.Typer(help="Legacy interfaces kept for backward compatibility")
+
+
+@legacy_app.command("manage")
+def legacy_manage():
+    """Run legacy manage.py main() if available."""
+    try:
+        import manage as _manage
+        if hasattr(_manage, "main"):
+            _manage.main()
+        else:
+            typer.echo("manage.py has no main(); use 'runs' commands instead.")
+    except Exception as e:
+        typer.echo(f"❌ legacy manage failed: {e}", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
+
+
+app.add_typer(legacy_app, name="legacy")
+
+
+@app.command(name="system-check")
+def system_check():
+    """Print a concise system diagnostics report (Python, Torch, device, MPS).
+
+    Outputs a short, human-readable summary suitable for bug reports and CI logs.
+    """
+    try:
+        import platform as _platform
+        import torch as _torch  # type: ignore
+    except Exception:
+        _torch = None  # type: ignore
+        _platform = None  # type: ignore
+
+    from utils.device import get_env_info, get_device_info, verify_mps_setup
+
+    info = get_env_info()
+    dev = get_device_info()
+
+    typer.echo("🧰 System Check")
+    typer.echo(f"Python: {info.get('python')}")
+    typer.echo(f"OS: {info.get('os')}")
+    typer.echo(f"PyTorch: {info.get('torch')}")
+    typer.echo(f"Transformers: {info.get('transformers')}")
+    typer.echo(f"Datasets: {info.get('datasets')}")
+    typer.echo(f"NumPy: {info.get('numpy')}")
+    typer.echo(f"Device: {dev.get('device')} ({dev.get('description', dev.get('device_type'))})")
+
+    # MPS details if relevant
+    if dev.get("device_type") == "mps":
+        ok, msg = verify_mps_setup()
+        status = "OK" if ok else "ISSUE"
+        typer.echo(f"MPS: {status} - {msg}")
+
+    typer.echo("✅ system-check completed")
 
 @app.command(name="distributed-train")
 def distributed_train(
     hosts_config: str = typer.Option(DefaultPaths.DISTRIBUTED_HOSTS_CONFIG, help="Path to distributed hosts configuration"),
-    strategy: str = typer.Option("diloco", help="Distributed training strategy (diloco, sparta, simplereduce)"),
+    strategy: str = typer.Option(
+        "diloco",
+        help=(
+            "Distributed training strategy.\n"
+            "- diloco: Low-communication updates (good for consumer networks).\n"
+            "- sparta: Sparse updates (experimental, lower bandwidth).\n"
+            "- simplereduce: Simple allreduce baseline (highest bandwidth)."
+        ),
+    ),
     model: str = typer.Option("openai/whisper-tiny", help="Whisper model to train"),
     epochs: int = typer.Option(1, help="Number of training epochs"),
     batch_size: int = typer.Option(4, help="Training batch size"),
     validate_only: bool = typer.Option(False, help="Only validate setup, don't run training"),
+    dry_run: bool = typer.Option(False, help="Run a tiny 10-step local simulation (no SSH)"),
     verbose: bool = typer.Option(False, help="Enable verbose output"),
 ):
     """Launch distributed training across multiple Macs using advanced communication strategies.
@@ -704,7 +754,7 @@ def distributed_train(
     5. Aggregates results and saves to local output directory
     
     Environment variables used:
-    - SSH_KEY_PATH: Path to SSH private key for worker authentication
+    - SSH_KEY_PATH: SSH private key for worker authentication
     - PYTORCH_MPS_HIGH_WATERMARK_RATIO: Memory management for Apple Silicon
     - DISTRIBUTED_BACKEND: Override PyTorch distributed backend (default: nccl/gloo)
     
@@ -730,12 +780,27 @@ def distributed_train(
         # Test your distributed setup
         python cli_typer.py distributed-train --validate-only
         
+        # Smoke-test without SSH (CI-safe)
+        python cli_typer.py distributed-train --dry-run
+        
         # Run distributed training with DiLoCo
         python cli_typer.py distributed-train --strategy diloco --model openai/whisper-medium
         
         # Quick test with tiny model
         python cli_typer.py distributed-train --epochs 1 --batch-size 2
     """
+    # CI-safe fast path: local simulation without importing distributed modules or using SSH
+    if dry_run:
+        typer.echo("🧪 Distributed Training Dry Run")
+        typer.echo("Simulating 10 steps on local CPU...")
+        # Deterministic fake loss curve
+        base = 1.0
+        for step in range(1, 11):
+            loss = base / (step + 1)
+            typer.echo(f"step {step}/10 - loss={loss:.4f}")
+        typer.echo("✅ Dry run completed (no network used)")
+        return
+
     try:
         # Import distributed training modules
         from distributed.utils import (
@@ -899,6 +964,7 @@ def distributed_train(
         raise typer.Exit(ExitCodes.GENERAL_ERROR)
     except Exception as e:
         typer.echo(f"❌ Distributed training failed: {e}", err=True)
+        typer.echo("Hint: See TROUBLESHOOTING.md for MPS and SSH setup tips.", err=True)
         raise typer.Exit(ExitCodes.GENERAL_ERROR)
 
 
@@ -1004,7 +1070,59 @@ def distributed_check(
 
     except Exception as e:
         typer.echo(f"❌ Distributed check failed: {e}", err=True)
+        typer.echo("Hint: See TROUBLESHOOTING.md for SSH setup and localhost instructions.", err=True)
         raise typer.Exit(ExitCodes.GENERAL_ERROR)
+
+
+@app.command(name="distributed-push-code")
+def distributed_push_code(
+    hosts_config: str = typer.Option(DefaultPaths.DISTRIBUTED_HOSTS_CONFIG, help="Path to distributed hosts configuration"),
+    project_path: str = typer.Option(".", help="Path to the project directory to push"),
+):
+    """Synchronize the project directory to all worker nodes using rsync."""
+    import subprocess
+    from distributed.utils import load_hosts_config
+
+    try:
+        typer.echo("🚀 Synchronizing project code to worker nodes...")
+        cfg = load_hosts_config(hosts_config)
+        worker_addrs = cfg["workers"]
+        ssh_user = cfg["ssh_user"]
+        remote_base_path = os.path.dirname(cfg["project_path"])
+
+        for worker in worker_addrs:
+            typer.echo(f"--> Pushing code to {worker}...")
+            # Ensure the parent directory exists on the remote worker
+            subprocess.run(
+                ["ssh", f"{ssh_user}@{worker}", f"mkdir -p {remote_base_path}"],
+                check=True,
+            )
+            # Use rsync to efficiently synchronize the code
+            subprocess.run(
+                [
+                    "rsync",
+                    "-avz",
+                    "--exclude='.git'",
+                    "--exclude='*.pyc'",
+                    "--exclude='__pycache__'",
+                    "--exclude='output'",
+                    "--exclude='data/audio'",
+                    f"{project_path}/",
+                    f"{ssh_user}@{worker}:{cfg['project_path']}",
+                ],
+                check=True,
+            )
+        typer.echo("✅ Code synchronization complete.")
+    except FileNotFoundError:
+        typer.echo(f"Error: rsync or ssh command not found. Please ensure they are installed and in your PATH.", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
+    except subprocess.CalledProcessError as e:
+        typer.echo(f"Error during code push: {e}", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
+    except Exception as e:
+        typer.echo(f"An unexpected error occurred: {e}", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
+
 
 def _load_config(path: str):
     """Load an INI configuration into ConfigParser with no side effects.

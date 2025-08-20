@@ -59,6 +59,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import pytest
 
 
 class TestConstants:
@@ -200,6 +201,7 @@ def _ensure_tiny_dataset(base_dir: Path) -> None:
             f.write(f"1,{wav_path.as_posix()},{TestConstants.TEST_TRANSCRIPTION}\n")
 
 
+@pytest.mark.slow
 def test_sft_single_step(tmp_path: Path):
     """
     End-to-end integration test for supervised fine-tuning workflow.

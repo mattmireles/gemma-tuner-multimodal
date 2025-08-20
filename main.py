@@ -159,7 +159,11 @@ def main():
     """
     # Deprecation notice: prefer Typer CLI
     try:
-        print("[DEPRECATION] main.py is legacy. Use: python cli_typer.py <command> (or install and run 'whisper-tune').")
+        print("[DEPRECATION] main.py is legacy and will be removed in a future release.\n"
+              "Use the modern Typer CLI instead:\n"
+              "  - python cli_typer.py <command>\n"
+              "  - or install the package and run 'whisper-tuner <command>'\n"
+              "See TROUBLESHOOTING.md if you need help migrating.")
     except Exception:
         pass
     # Logging options via environment for simplicity
