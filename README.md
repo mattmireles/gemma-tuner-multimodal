@@ -37,7 +37,7 @@ The Whisper Fine-Tuner framework is built on a modular, platform-agnostic archit
 
 **Canonical CLI** (`cli_typer.py`):
 - Prefer Typer-based commands for all workflows; it delegates to the same core modules.
-- `main.py` remains as a legacy entry point for backward compatibility.
+- `main.py` and `manage.py` are legacy entry points and will be removed in a future release. Prefer the `whisper-tuner` CLI.
 - **Profile-Based Configuration**: Hierarchical configuration system with inheritance (DEFAULT → group → model → dataset → profile)
 - **Run Management**: Sequential run ID generation with metadata tracking and failure recovery
 - **Operation Routing**: Unified CLI for data preparation, training, evaluation, and export operations
@@ -739,6 +739,26 @@ A macOS CI workflow runs lint and a small set of fast tests on every PR. See `.g
 - Lint: `ruff check` + `ruff format --check`
 - Tests: fast, no heavy model downloads (`pytest -k "not slow"`)
 
+### Quick diagnostics
+
+```bash
+# One-line system report (Python, Torch, device, MPS)
+whisper-tuner system-check
+
+# Validate your distributed config without training
+whisper-tuner distributed-check --hosts-config distributed_hosts.json
+
+# CI-safe smoke of distributed flow without SSH
+whisper-tuner distributed-train --dry-run
+```
+
+### Legacy interface
+
+```bash
+# Legacy manage.py (deprecated; prefer `runs` group)
+whisper-tuner legacy manage
+```
+
 ## Typer CLI (Recommended)
 
 Use the Typer CLI for a friendlier interface that delegates to the same core modules:
@@ -760,9 +780,94 @@ python cli_typer.py evaluate whisper-tiny+test_streaming
 # Export (HF/SafeTensors model dir)
 # Exports the model directory as-is with SafeTensors (no GGML/CT2 conversion)
 python cli_typer.py export output/{id}-medium-data3
+
+# Diagnostics
+python cli_typer.py system-check
+
+# Distributed
+python cli_typer.py distributed-check --hosts-config distributed_hosts.json
+python cli_typer.py distributed-train --dry-run
 ```
 
 The legacy `main.py` and scripts remain supported.
+
+### Distributed Training
+
+This project supports distributed training across multiple Macs, allowing you to train larger models faster. Here's how to set it up:
+
+**1. Create `distributed_hosts.json`**
+
+This file tells the trainer which machines to use. Create a file named `distributed_hosts.json` in your project root:
+
+```json
+{
+  "master": "192.168.1.100",
+  "workers": ["192.168.1.101", "192.168.1.102"],
+  "ssh_user": "your_username",
+  "ssh_key_path": "~/.ssh/id_rsa",
+  "python_env": "/Users/your_username/miniconda3/envs/whisper/bin/python",
+  "project_path": "/Users/your_username/projects/whisper-fine-tuner-macos"
+}
+```
+
+- **master**: The IP address of the main machine.
+- **workers**: A list of IP addresses for the worker machines.
+- **ssh_user**: Your username on the worker machines.
+- **ssh_key_path**: The path to your SSH private key.
+- **python_env**: The path to the Python executable on the worker machines.
+- **project_path**: The absolute path to the project directory on the worker machines.
+
+**2. Set Up SSH Access**
+
+Ensure you have passwordless SSH access from the master to all worker machines. You can set this up by adding your public key to the `~/.ssh/authorized_keys` file on each worker.
+
+**3. Synchronize Your Code**
+
+Before starting a training run, make sure all worker machines have the latest version of your code. Use the `distributed-push-code` command to do this automatically:
+
+```bash
+whisper-tuner distributed-push-code
+```
+
+This command will use `rsync` to copy your project directory to all the workers listed in your `distributed_hosts.json` file.
+
+**4. Run Distributed Training**
+
+Once your hosts are configured and the code is synchronized, you can start a distributed training run:
+
+```bash
+whisper-tuner distributed-train --strategy diloco --model openai/whisper-medium
+```
+
+The trainer will automatically connect to the workers and begin the training process.
+
+### Distributed on one Mac (localhost)
+
+```bash
+cat > distributed_hosts.json <<'JSON'
+{
+  "master": "127.0.0.1",
+  "workers": ["127.0.0.1"],
+  "ssh_user": "$(whoami)",
+  "python_env": "$(which python)",
+  "project_path": "$PWD"
+}
+JSON
+
+# SSH localhost convenience (first time only)
+[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -C "local" -f ~/.ssh/id_ed25519 -N ''
+mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys
+grep -q "$(cat ~/.ssh/id_ed25519.pub)" ~/.ssh/authorized_keys || cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
+ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts
+ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+
+# Validate
+whisper-tuner distributed-check --hosts-config distributed_hosts.json --verbose
+
+# Optional: dry-run smoke
+whisper-tuner distributed-train --dry-run
+```
 
 ## Visualizer Controls
 

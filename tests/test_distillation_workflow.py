@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import pytest
 
 
 def _ensure_tiny_dataset(base_dir: Path) -> None:
@@ -27,6 +28,7 @@ def _ensure_tiny_dataset(base_dir: Path) -> None:
             f.write(f"1,{wav_path.as_posix()},hello world\n")
 
 
+@pytest.mark.slow
 def test_distillation_single_step(tmp_path: Path):
     base_dir = Path.cwd()
     _ensure_tiny_dataset(base_dir)

@@ -102,6 +102,7 @@ Whisper fine-tuning workflows.
 import torch
 import os
 import sys
+import pytest
 
 # Set environment variable for initial testing
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
@@ -167,6 +168,7 @@ def test_device_detection():
     
     print()
 
+@pytest.mark.slow
 def test_model_loading():
     """
     Validates Whisper model loading and device placement on MPS.
@@ -257,6 +259,7 @@ def test_model_loading():
     print()
     return True
 
+@pytest.mark.slow
 def test_inference():
     """
     Validates core GPU operations essential for Whisper model inference.

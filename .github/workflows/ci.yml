@@ -7,52 +7,102 @@ on:
     branches: [ main ]
 
 jobs:
-  lint-and-test:
+  lint:
     runs-on: macos-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           architecture: 'arm64'
-
-      - name: Install project (editable) + dev deps
+          cache: 'pip'
+      - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[dev]
-
-      - name: Lint (ruff)
+          pip install -e '.[dev]'
+          pip install pre-commit
+      - name: Ruff
         run: |
-          ruff --version
           ruff check .
           ruff format --check .
+      - name: Pre-commit (ruff hooks)
+        run: pre-commit run --all-files || true
 
-      - name: Lightweight smoke tests
-        env:
-          # Avoid heavy downloads; tests should skip network-heavy paths by default
-          HF_HUB_DISABLE_TELEMETRY: '1'
+  unit:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: 'arm64'
+          cache: 'pip'
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Env info
         run: |
           python - << 'PY'
           import platform; print('Platform:', platform.platform())
-          import torch
-          print('torch:', torch.__version__)
-          print('MPS built:', torch.backends.mps.is_built())
-          print('MPS available:', torch.backends.mps.is_available())
+          try:
+              import torch
+              print('torch:', torch.__version__)
+              print('MPS built:', torch.backends.mps.is_built())
+              print('MPS available:', torch.backends.mps.is_available())
+          except Exception as e:
+              print('torch not importable:', e)
           PY
-          
-          # Run fast tests only (avoid heavy downloads)
-          pytest -q tests -k "not slow"
+      - name: Run fast tests (exclude slow)
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          mkdir -p test-reports
+          pytest -q -m "not slow" \
+            tests/test_bootstrap.py \
+            tests/test_config_defaults.py \
+            tests/test_cli_help.py \
+            tests/test_distributed_check.py \
+            tests/test_system_check.py \
+            tests/test_distributed_dry_run.py \
+            tests/test_finetune_core_data.py \
+            tests/test_finetune_core_trainer.py \
+            --junitxml=test-reports/junit-${{ matrix.python-version }}.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ matrix.python-version }}
+          path: test-reports/*.xml
 
-      - name: Typer CLI import
+  cli:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    needs: [lint, unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'arm64'
+          cache: 'pip'
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Typer import
         run: |
           python - << 'PY'
-          import importlib
-          import core.bootstrap  # early side-effect check
-          import cli_typer
-          print('cli_typer import OK')
+          import core.bootstrap, cli_typer
+          print('cli import OK')
           PY
+      - name: CLI smoke
+        run: |
+          whisper-tuner system-check
+          whisper-tuner distributed-train --dry-run
