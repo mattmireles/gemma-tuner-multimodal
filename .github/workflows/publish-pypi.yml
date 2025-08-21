@@ -1,0 +1,42 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g., v0.2.0)'
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches pyproject.toml
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}"
+          VERSION=$(python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode()).get('project',{}).get('version',''))")
+          echo "pyproject version: $VERSION, tag: $TAG"
+          [[ "v$VERSION" == "$TAG" ]] || { echo "Version mismatch"; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'arm64'
+
+      - name: Build sdist/wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          twine upload dist/*

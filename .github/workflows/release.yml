@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v0.2.0)'
+        required: true
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches pyproject.toml
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}"
+          VERSION=$(python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode()).get('project',{}).get('version',''))")
+          echo "pyproject version: $VERSION, tag: $TAG"
+          [[ "v$VERSION" == "$TAG" ]] || { echo "Version mismatch"; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'arm64'
+
+      - name: Build sdist/wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
+          body: |
+            See CHANGELOG.md for details.
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
