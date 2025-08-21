@@ -90,7 +90,7 @@ from typing import Optional
 
 import typer
 
-
+from wft_constants import FileSystem, OperationTimeouts, LoggingDefaults
 from core.logging import init_logging, add_file_handler
 from core.config import load_profile_config, load_model_dataset_config
 from core.runs import (
@@ -101,6 +101,8 @@ from core.runs import (
     find_latest_finetuning_run,
     find_latest_completed_finetuning_run,
 )
+from core.runs import update_experiments_csv  # lightweight CSV experiment index
+from core.runs import update_experiments_sqlite  # optional SQLite experiment index
 from core import ops
 from utils.device import get_device, apply_device_defaults, get_env_info
 
@@ -119,7 +121,8 @@ class OutputFormats:
 class DefaultPaths:
     """Default file paths used across multiple commands for consistency."""
     DISTRIBUTED_HOSTS_CONFIG = "distributed_hosts.json"
-    DEFAULT_OUTPUT_DIR = "output"
+    DEFAULT_OUTPUT_DIR = FileSystem.OUTPUT_DIR_DEFAULT
+    DEFAULT_CONFIG_FILE = "config.ini"
 
 class PlatformOptimizations:
     """Platform-specific optimization constants for Apple Silicon (MPS) and distributed training."""
@@ -161,21 +164,69 @@ def _normalize_device_defaults(profile_config: dict) -> None:
 @app.command()
 def prepare(
     dataset: str = typer.Argument(..., help="Dataset name as defined in config.ini [dataset:*]"),
-    config: str = typer.Option("config.ini", help="Path to configuration file"),
+    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
 ):
-    init_logging("INFO", json_format=json_logging)
+    """Prepare dataset for training by downloading and preprocessing audio files.
+    
+    This command handles the complete dataset preparation pipeline including
+    audio download, format conversion, quality filtering, and split generation.
+    
+    Called by:
+    - Direct CLI invocation: `whisper-tuner prepare <dataset>`
+    - Batch dataset preparation scripts processing multiple datasets
+    - CI/CD pipelines for automated dataset validation and preprocessing
+    - Data ingestion workflows integrating new audio collections
+    
+    Calls to:
+    - core.logging.init_logging() for logging configuration
+    - core.ops.prepare() for dataset preparation workflow dispatch
+    
+    Args:
+        dataset: Dataset name as defined in config.ini [dataset:*] sections
+        config: Path to INI configuration file (default: config.ini)
+        json_logging: Enable structured JSON logging format
+        
+    Side effects:
+        - Creates data/datasets/{dataset}/ directory structure
+        - Downloads and caches audio files in data/audio/
+        - Generates prepared CSV files for training
+    """
+    init_logging(LoggingDefaults.DEFAULT_LEVEL, json_format=json_logging)
     ops.prepare({"dataset": dataset})
 
 
 @app.command(name="prepare-granary")
 def prepare_granary(
     profile: str = typer.Argument(..., help="Dataset profile name for Granary dataset (e.g., granary-en)"),
-    config: str = typer.Option("config.ini", help="Path to configuration file"),
+    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
 ):
-    """Prepare NVIDIA Granary dataset for training with optimized validation and streaming support."""
-    init_logging("INFO", json_format=json_logging)
+    """Prepare NVIDIA Granary dataset for training with optimized validation and streaming support.
+    
+    This command handles NVIDIA Granary dataset preparation with specialized audio source
+    management and optimized validation workflows for multi-source datasets.
+    
+    Called by:
+    - Direct CLI invocation: `whisper-tuner prepare-granary <profile>`
+    - Specialized dataset preparation workflows requiring Granary-specific handling
+    - Research workflows using NVIDIA Granary multi-domain datasets
+    
+    Calls to:
+    - core.logging.init_logging() for logging configuration
+    - scripts.prepare_granary.prepare_granary() for Granary-specific preparation
+    
+    Args:
+        profile: Dataset profile name (e.g., granary-en) as defined in config.ini
+        config: Path to INI configuration file (default: config.ini)
+        json_logging: Enable structured JSON logging format
+        
+    Side effects:
+        - Creates data/datasets/granary-*/ directory structures
+        - Downloads and processes multi-source audio collections
+        - Generates Granary-specific manifest and CSV files
+    """
+    init_logging(LoggingDefaults.DEFAULT_LEVEL, json_format=json_logging)
     
     # Import here to avoid circular dependency
     from scripts.prepare_granary import prepare_granary as _prepare_granary
@@ -193,18 +244,56 @@ def prepare_granary(
 @app.command()
 def finetune(
     profile: str = typer.Argument(..., help="Profile name as defined under [profile:*]"),
-    config: str = typer.Option("config.ini", help="Path to configuration file"),
+    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
     max_samples: Optional[int] = typer.Option(None, help="Max samples for quick runs"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
     log_file: Optional[str] = typer.Option(None, help="Optional file path for logs"),
 ):
-    """Fine-tune a Whisper model."""
-    init_logging("INFO", json_format=json_logging)
+    """Execute model fine-tuning with comprehensive device optimization and run management.
+    
+    This command handles the complete fine-tuning pipeline including model loading,
+    dataset preparation, training execution, and checkpoint management with full
+    Apple Silicon MPS optimization and device-agnostic configuration.
+    
+    Called by:
+    - Direct CLI invocation: `whisper-tuner finetune <profile>`
+    - wizard.py:execute_training() for interactive training workflows
+    - Batch training automation scripts for systematic model comparison
+    - Hyperparameter sweep frameworks iterating over configurations
+    - CI/CD pipelines executing scheduled training runs
+    
+    Calls to:
+    - core.logging.init_logging() and add_file_handler() for logging setup
+    - _load_config() for configuration file parsing
+    - core.runs.get_next_run_id(), create_run_directory() for run management
+    - load_profile_config() for profile configuration resolution
+    - _normalize_device_defaults() for device-specific optimization
+    - core.ops.finetune() for training execution dispatch
+    - update_run_metadata(), mark_run_as_completed() for run tracking
+    
+    Args:
+        profile: Training profile name as defined in config.ini [profile:*] sections
+        config: Path to INI configuration file (default: config.ini)
+        max_samples: Optional sample limit for quick training runs
+        json_logging: Enable structured JSON logging format
+        log_file: Optional custom log file path (default: run_dir/run.log)
+        
+    Side effects:
+        - Creates structured run directory with metadata and logs
+        - Saves model checkpoints and training artifacts
+        - Updates experiments CSV and SQLite databases
+        - Modifies profile configuration in-place with device defaults
+        
+    Signal handling:
+        - SIGINT/SIGTERM: Graceful cancellation with metadata preservation
+        - Run marked as cancelled with proper cleanup and exit codes
+    """
+    init_logging(LoggingDefaults.DEFAULT_LEVEL, json_format=json_logging)
     cfg = _load_config(config)
     output_dir = cfg["DEFAULT"]["output_dir"]
     run_id = get_next_run_id(output_dir)
     run_dir = create_run_directory(output_dir, profile, run_id, "finetuning")
-    add_file_handler(log_file or os.path.join(run_dir, "run.log"), json_format=json_logging)
+    add_file_handler(log_file or os.path.join(run_dir, LoggingDefaults.RUN_LOG_FILENAME), json_format=json_logging)
 
     def _handle_signal(signum, frame):
         """Signal handler that marks the run as cancelled and exits.
@@ -243,22 +332,73 @@ def finetune(
         _maybe_merge_train_metrics(run_dir)
         mark_run_as_completed(run_dir)
         update_run_metadata(run_dir, status="completed", end_time=_now())
+        try:
+            update_experiments_csv(output_dir, run_dir)
+            update_experiments_sqlite(output_dir, run_dir)
+        except Exception:
+            pass
     except Exception as e:
         update_run_metadata(run_dir, status="failed", end_time=_now(), error_message=str(e))
+        try:
+            update_experiments_csv(output_dir, run_dir)
+            update_experiments_sqlite(output_dir, run_dir)
+        except Exception:
+            pass
         raise
 
 
 @app.command()
 def evaluate(
     target: str = typer.Argument(..., help="Profile name or model+dataset (e.g., whisper-tiny+test_streaming)"),
-    config: str = typer.Option("config.ini", help="Path to configuration file"),
+    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
     dataset: Optional[str] = typer.Option(None, help="Dataset override when using a profile"),
     max_samples: Optional[int] = typer.Option(None, help="Max samples for quick runs"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
     log_file: Optional[str] = typer.Option(None, help="Optional file path for logs"),
 ):
-    """Evaluate a fine-tuned Whisper model."""
-    init_logging("INFO", json_format=json_logging)
+    """Evaluate fine-tuned Whisper models with comprehensive metrics and device optimization.
+    
+    This command provides comprehensive evaluation capabilities supporting multiple evaluation
+    modes, metrics calculation, and detailed analysis reporting with optimizations for
+    Apple Silicon, CUDA, and CPU platforms.
+
+    Called by:
+    - Direct CLI invocation: `whisper-tuner evaluate <target>`
+    - Post-training evaluation workflows triggered after training completion
+    - Model comparison and benchmarking workflows evaluating multiple checkpoints
+    - Quality assurance pipelines validating performance against thresholds
+    - CI/CD pipelines executing automated model validation and regression testing
+
+    Calls to:
+    - core.logging.init_logging() and add_file_handler() for logging setup
+    - _load_config() for configuration file parsing
+    - core.runs.get_next_run_id(), create_run_directory() for run management
+    - load_model_dataset_config() or load_profile_config() for configuration resolution
+    - core.runs.find_latest_completed_finetuning_run() for checkpoint location
+    - _normalize_device_defaults() for device-specific optimization
+    - core.ops.evaluate() for evaluation execution dispatch
+    - update_run_metadata(), mark_run_as_completed() for run tracking
+
+    Evaluation modes:
+    - Profile-based: Evaluate latest fine-tuned model from profile training
+    - Model+dataset: Direct evaluation using model+dataset syntax (e.g., whisper-base+librispeech)
+    - Cross-dataset: Evaluate trained model on alternative datasets
+
+    Args:
+        target: Profile name or model+dataset combination for evaluation
+        config: Path to INI configuration file (default: config.ini)
+        dataset: Dataset override when evaluating a profile on different data
+        max_samples: Optional sample limit for quick evaluation runs
+        json_logging: Enable structured JSON logging format
+        log_file: Optional custom log file path (default: run_dir/run.log)
+        
+    Side effects:
+        - Creates structured evaluation run directory with metrics and predictions
+        - Generates detailed CSV files with prediction analysis
+        - Updates experiments database with evaluation results
+        - Applies device-specific optimizations for evaluation platform
+    """
+    init_logging(LoggingDefaults.DEFAULT_LEVEL, json_format=json_logging)
     cfg = _load_config(config)
     output_dir = cfg["DEFAULT"]["output_dir"]
     run_id = get_next_run_id(output_dir)
@@ -282,7 +422,7 @@ def evaluate(
             raise FileNotFoundError(f"No fine-tuning runs found for profile '{profile_name}'. Train before evaluating.")
         profile_config["model_name_or_path"] = latest
 
-    add_file_handler(log_file or os.path.join(run_dir, "run.log"), json_format=json_logging)
+    add_file_handler(log_file or os.path.join(run_dir, LoggingDefaults.RUN_LOG_FILENAME), json_format=json_logging)
     update_run_metadata(run_dir, config=profile_config, env=get_env_info())
     profile_config["force_languages"] = profile_config.get("force_languages", False)
     profile_config["languages"] = profile_config.get("languages", "all")
@@ -297,6 +437,11 @@ def evaluate(
         _write_metrics(run_dir, metrics)
     mark_run_as_completed(run_dir)
     update_run_metadata(run_dir, status="completed", end_time=_now())
+    try:
+        update_experiments_csv(output_dir, run_dir)
+        update_experiments_sqlite(output_dir, run_dir)
+    except Exception:
+        pass
 
 
 @app.command()
@@ -318,36 +463,54 @@ def export(model_path_or_profile: str = typer.Argument(..., help="Model path or 
 @app.command()
 def blacklist(
     profile: str = typer.Argument(..., help="Profile to generate blacklist for"),
-    config: str = typer.Option("config.ini", help="Path to configuration file"),
+    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
     split: Optional[str] = typer.Option(None, help="Split override for blacklist generation"),
     max_samples: Optional[int] = typer.Option(None, help="Max samples for quick runs"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
     log_file: Optional[str] = typer.Option(None, help="Optional file path for logs"),
 ):
-    """Generate a WER-based blacklist for a given training profile.
+    """Generate intelligent WER-based blacklist for training dataset quality improvement.
+    
+    This command implements automated outlier detection to identify mislabeled or
+    problematic audio samples in training datasets. It generates blacklists while
+    respecting manual overrides and providing detailed diagnostic information.
 
     Called by:
-    - `whisper-tuner blacklist <profile>`
+    - Direct CLI invocation: `whisper-tuner blacklist <profile>`
+    - Training pipelines requiring iterative dataset quality improvement
+    - Quality assurance workflows maintaining dataset integrity
+    - Active learning systems identifying samples requiring manual review
+    - Dataset maintenance pipelines for automated quality filtering
 
     Calls to:
-    - load_profile_config() to resolve profile parameters
-    - core.runs helpers to create the run directory
-    - scripts.blacklist.create_blacklist() to perform analysis and write CSV
+    - core.logging.init_logging() for logging configuration  
+    - _load_config() for configuration file parsing
+    - core.runs.get_next_run_id(), create_run_directory() for run management
+    - core.runs.find_latest_finetuning_run() for model checkpoint location
+    - load_profile_config() for profile configuration resolution
+    - _normalize_device_defaults() for device-specific optimization
+    - scripts.blacklist.create_blacklist() for blacklist generation analysis
 
     Args:
-        profile: Training profile name used to locate the finetuned model
-        config: Path to INI configuration
+        profile: Training profile name used to locate the fine-tuned model
+        config: Path to INI configuration file (default: config.ini)
         split: Dataset split to analyze (defaults to profile's train split)
-        max_samples: Optional sample cap for quick analysis
-        json_logging: Enable JSON logs
-        log_file: Optional file sink path for logs
+        max_samples: Optional sample cap for quick blacklist analysis
+        json_logging: Enable structured JSON logging format
+        log_file: Optional custom log file path (default: run_dir/run.log)
+        
+    Side effects:
+        - Creates blacklist CSV files with detailed diagnostic information
+        - Updates run metadata with blacklist generation results
+        - Integrates with data patch system for manual override handling
+        - Provides statistical summary of dataset quality assessment
     """
-    init_logging("INFO", json_format=json_logging)
+    init_logging(LoggingDefaults.DEFAULT_LEVEL, json_format=json_logging)
     cfg = _load_config(config)
     output_dir = cfg["DEFAULT"]["output_dir"]
     run_id = get_next_run_id(output_dir)
     run_dir = create_run_directory(output_dir, profile, run_id, "blacklist")
-    add_file_handler(log_file or os.path.join(run_dir, "run.log"), json_format=json_logging)
+    add_file_handler(log_file or os.path.join(run_dir, LoggingDefaults.RUN_LOG_FILENAME), json_format=json_logging)
 
     finetuning_run_dir = find_latest_finetuning_run(output_dir, profile)
     if not finetuning_run_dir:
@@ -672,14 +835,55 @@ def legacy_manage():
         raise typer.Exit(ExitCodes.GENERAL_ERROR)
 
 
+@legacy_app.command("main")
+def legacy_main():
+    """Run legacy main.py entrypoint if available (deprecated)."""
+    try:
+        import main as _main
+        if hasattr(_main, "main"):
+            _main.main()
+        else:
+            typer.echo("main.py has no main(); use modern CLI commands instead.")
+    except Exception as e:
+        typer.echo(f"❌ legacy main failed: {e}", err=True)
+        raise typer.Exit(ExitCodes.GENERAL_ERROR)
+
+
 app.add_typer(legacy_app, name="legacy")
 
 
 @app.command(name="system-check")
 def system_check():
-    """Print a concise system diagnostics report (Python, Torch, device, MPS).
+    """Generate comprehensive system compatibility and diagnostics report.
 
-    Outputs a short, human-readable summary suitable for bug reports and CI logs.
+    This command provides thorough system validation for Whisper fine-tuning environments,
+    verifying hardware compatibility, software versions, and configuration settings across
+    Apple Silicon, NVIDIA CUDA, and CPU platforms.
+
+    Called by:
+    - Direct CLI invocation: `whisper-tuner system-check`
+    - CI/CD pipelines for automated compatibility testing and validation
+    - Troubleshooting workflows for deployment and environment setup issues
+    - Pre-training validation to ensure optimal system configuration
+    - Development environment setup verification and optimization
+
+    Calls to:
+    - utils.device.get_env_info() for comprehensive environment information
+    - utils.device.get_device_info() for device capability assessment
+    - utils.device.verify_mps_setup() for Apple Silicon MPS validation
+    - Platform detection libraries for hardware identification
+
+    Validation categories:
+    - Hardware: Device type detection (MPS/CUDA/CPU) and capability reporting
+    - Software: PyTorch, Transformers, Datasets library version verification
+    - Environment: OS version, Python architecture, conda/pip configuration
+    - Performance: Memory availability, MPS compatibility, optimization status
+
+    Output format:
+    - Concise human-readable summary suitable for bug reports and CI logs
+    - Clear pass/fail indicators for critical system components
+    - MPS-specific diagnostics for Apple Silicon compatibility
+    - Optimization recommendations and troubleshooting guidance
     """
     try:
         import platform as _platform
@@ -716,10 +920,13 @@ def distributed_train(
     strategy: str = typer.Option(
         "diloco",
         help=(
-            "Distributed training strategy.\n"
-            "- diloco: Low-communication updates (good for consumer networks).\n"
-            "- sparta: Sparse updates (experimental, lower bandwidth).\n"
-            "- simplereduce: Simple allreduce baseline (highest bandwidth)."
+            "Distributed training strategy (choose based on network + stability).\n"
+            "- diloco: Default. Fewer synchronizations; best on Wi‑Fi/home networks. "
+            "Slightly slower convergence per epoch but higher throughput under low bandwidth.\n"
+            "- sparta: Experimental sparse updates to cut bandwidth further. "
+            "Research-only; accuracy can vary.\n"
+            "- simplereduce: Classic all-reduce (most bandwidth-hungry). Use on wired LAN/localhost; "
+            "fastest convergence but requires stable, high-bandwidth links."
         ),
     ),
     model: str = typer.Option("openai/whisper-tiny", help="Whisper model to train"),

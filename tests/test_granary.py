@@ -20,11 +20,16 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 from core.config import load_model_dataset_config, load_profile_config, ConfigConstants
-from scripts.prepare_granary import validate_granary_config, resolve_granary_audio_path
 import pytest
 
 # Mark entire module as slow: it imports heavy dependencies and patches HF APIs.
 pytestmark = pytest.mark.slow
+
+# Lazy import heavy deps to avoid failing fast CI when excluded with -m "not slow"
+try:
+    from scripts.prepare_granary import validate_granary_config, resolve_granary_audio_path
+except Exception as e:  # pragma: no cover - only triggers in minimal envs
+    pytest.skip(f"Granary dependencies unavailable: {e}", allow_module_level=True)
 
 
 def make_cfg(sections: dict) -> configparser.ConfigParser:

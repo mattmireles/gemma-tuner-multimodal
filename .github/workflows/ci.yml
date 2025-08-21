@@ -106,3 +106,33 @@ jobs:
         run: |
           whisper-tuner system-check
           whisper-tuner distributed-train --dry-run
+
+  lockfile-check:
+    name: Verify requirements.txt up-to-date
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'arm64'
+          cache: 'pip'
+      - name: Install pip-tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-tools
+      - name: Check lockfile
+        run: |
+          pip-compile pyproject.toml --quiet --no-annotate --no-header --output-file requirements.new.txt
+          python - << 'PY'
+          import sys, difflib
+          a = open('requirements.txt','r',encoding='utf-8').read().splitlines()
+          b = open('requirements.new.txt','r',encoding='utf-8').read().splitlines()
+          if a != b:
+              print('requirements.txt is out of date. Run: pip-compile pyproject.toml --output-file requirements.txt')
+              for l in difflib.unified_diff(a,b,fromfile='requirements.txt',tofile='requirements.new.txt'):
+                  print(l)
+              sys.exit(1)
+          print('Lockfile is up-to-date.')
+          PY

@@ -4,11 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whisper-fine-tuner-macos"
-version = "0.1.0"
+version = "0.2.0"
 description = "Whisper fine-tuning tools with Apple Silicon (MPS) support"
 readme = "README.md"
 authors = [{ name = "Whisper Fine-Tuner Maintainers" }]
 requires-python = ">=3.8"
+keywords = ["whisper", "speech", "asr", "pytorch", "apple silicon", "mps", "distributed"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Operating System :: MacOS",
+  "Operating System :: OS Independent",
+]
 dependencies = [
   # Hugging Face ecosystem (tested compatible set)
   "transformers>=4.53.3",
@@ -66,6 +80,11 @@ all = [
 
 [project.scripts]
 whisper-tuner = "cli_typer:app"
+
+[project.urls]
+Homepage = "https://github.com/mattmireles/whisper"
+Repository = "https://github.com/mattmireles/whisper"
+Issues = "https://github.com/mattmireles/whisper/issues"
 
 [tool.setuptools]
 # Include top-level single-file modules
