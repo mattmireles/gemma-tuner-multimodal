@@ -11,7 +11,8 @@ jobs:
 
       - name: Verify tag matches pyproject.toml
         run: |
-          TAG="${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}"
+          # Workflow disabled - using placeholder since github.event.inputs won't exist
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}"
           VERSION=$(python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode()).get('project',{}).get('version',''))")
           echo "pyproject version: $VERSION, tag: $TAG"
           [[ "v$VERSION" == "$TAG" ]] || { echo "Version mismatch"; exit 1; }
@@ -27,10 +28,12 @@ jobs:
           python -m build
 
       - name: Create GitHub Release
+        # Workflow disabled - this step will never run
+        if: false
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
           body: |
             See CHANGELOG.md for details.
           files: |

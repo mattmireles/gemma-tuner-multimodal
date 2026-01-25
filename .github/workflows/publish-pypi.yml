@@ -11,7 +11,8 @@ jobs:
 
       - name: Verify tag matches pyproject.toml
         run: |
-          TAG="${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}"
+          # Workflow disabled - using placeholder since github.event.inputs won't exist
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}"
           VERSION=$(python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode()).get('project',{}).get('version',''))")
           echo "pyproject version: $VERSION, tag: $TAG"
           [[ "v$VERSION" == "$TAG" ]] || { echo "Version mismatch"; exit 1; }
@@ -28,8 +29,10 @@ jobs:
           twine check dist/*
 
       - name: Publish to PyPI
+        # Workflow disabled - this step will never run
+        if: false
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          TWINE_PASSWORD: ''
         run: |
           twine upload dist/*

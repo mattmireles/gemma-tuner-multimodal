@@ -71,9 +71,10 @@ jobs:
           PY
 
       - name: Optional mini-train smoke (guarded)
-        if: ${{ env.RUN_MINI_TRAIN == '1' }}
+        # Workflow disabled - this step will never run
+        if: false
         env:
-          RUN_MINI_TRAIN: ${{ vars.RUN_MINI_TRAIN || '0' }}
+          RUN_MINI_TRAIN: '0'
         run: |
           python - <<'PY'
           import os, json
