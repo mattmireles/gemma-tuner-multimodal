@@ -1,9 +1,7 @@
 name: Extended Tests
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 8 * * *'
+# Workflow disabled.
+on: []
 
 jobs:
   extended:

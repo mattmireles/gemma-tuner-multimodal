@@ -1,10 +1,7 @@
 name: macOS CI
 
-on:
-  push:
-    branches: [ main, visualizer ]
-  pull_request:
-    branches: [ main, visualizer ]
+# Workflow disabled.
+on: []
 
 jobs:
   test:

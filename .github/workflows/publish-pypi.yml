@@ -1,14 +1,7 @@
 name: Publish to PyPI
 
-on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to publish (e.g., v0.2.0)'
-        required: true
+# Workflow disabled.
+on: []
 
 jobs:
   build-and-publish:

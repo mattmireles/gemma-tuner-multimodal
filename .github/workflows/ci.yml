@@ -1,11 +1,7 @@
 name: CI
 
-# Workflow disabled
-# on:
-#   push:
-#     branches: [ main ]
-#   pull_request:
-#     branches: [ main ]
+# Workflow disabled.
+on: []
 
 jobs:
   lint:

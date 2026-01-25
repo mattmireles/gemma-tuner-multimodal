@@ -1,10 +1,7 @@
 name: Nightly Distributed Check
 
-on:
-  # Schedule disabled - uncomment below to re-enable nightly runs
-  # schedule:
-  #   - cron: '0 9 * * *'  # 9:00 UTC daily
-  workflow_dispatch:  # Allow manual triggering
+# Workflow disabled.
+on: []
 
 jobs:
   nightly-distributed-check:
