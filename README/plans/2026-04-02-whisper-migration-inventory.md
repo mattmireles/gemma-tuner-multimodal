@@ -17,12 +17,13 @@ This inventory freezes the repository boundaries before any code or history move
 | Path or surface | Move to Mamba repo | Delete with ExoGym | Keep in Whisper repo | Needs new home in Whisper repo | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `Mamba-ASR-MPS/` | x |  |  |  | Full standalone product tree; current size about 509 MB |
-| `Mamba-ASR-NVIDIA/` |  |  |  |  | Empty placeholder; remove from Whisper repo during Mamba extraction |
+| `Mamba-ASR-NVIDIA/` | x |  |  |  | Mamba-owned sibling surface; if it remains empty during extraction, drop it instead of recreating it in the new repo |
 | `MambaASR.mlmodelc/` | x |  |  |  | Mamba deployment artifact bundle |
 | `MambaASR.mlpackage/` | x |  |  |  | Mamba Core ML package |
 | `CMHello.swift` | x |  |  |  | Core ML validation utility for `MambaASR` |
 | `cmhello` | x |  |  |  | Built binary for `CMHello.swift`; belongs with Mamba tooling until later cleanup |
 | `README/guides/apple-silicon/Mamba-Apple-Silicon-guide.md` | x |  |  |  | Mamba-specific Apple Silicon guide |
+| `README/guides/coreml/CoreML-ASR-conversion-guide.md` |  |  | x |  | Generic speech/Core ML deployment guide; keep in Whisper and remove any Mamba-only framing during doc cleanup |
 | `README/guides/research/mamba-asr-landscape.md` | x |  |  |  | Mamba research landscape note points users to `Mamba-ASR-MPS/` |
 | `README.md` Mamba sections |  |  |  | x | Replace with pointer to new Mamba repo |
 | `README/guides/README.md` Mamba references |  |  |  | x | Replace/remove entries that point into Mamba material |
@@ -38,6 +39,8 @@ This inventory freezes the repository boundaries before any code or history move
 | `README/specifications/distributed-training-gym.md` |  | x |  |  | No longer true after ExoGym removal |
 | `README/guides/integrations/exolabs-gym.md` |  | x |  |  | No longer true after ExoGym removal |
 | `DISTRIBUTED_TRAINING.md` |  | x |  |  | Obsolete top-level distributed guide |
+| `MIGRATION.md` |  |  | x |  | Keep the migration guide, but remove distributed command references after Phase 2 |
+| `README/specifications/Architecture.md` distributed sections |  |  | x |  | Keep the architecture spec, but remove distributed launcher and ExoGym references after Phase 2 |
 | `.github/workflows/nightly-distributed-check.yml` |  | x |  |  | Workflow exists only for distributed checks |
 | `.github/workflows/ci.yml` distributed test invocations |  | x |  |  | Remove distributed references from surviving CI |
 | `core/` |  |  | x |  | Core Whisper package surface survives |
