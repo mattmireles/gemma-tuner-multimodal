@@ -57,8 +57,6 @@ graph TB
     %% Specialized Utilities
     CLI --> |validation| GemmaPreflight[scripts/gemma_preflight.py<br/>Environment Validation]
     CLI --> |profiling| GemmaProfiler[scripts/gemma_profiler.py<br/>Performance Analysis]
-    CLI --> |distributed| DistributedLauncher[train_distributed.py<br/>Multi-GPU Training]
-    
     %% Model Implementations
     FinetuneOp --> |routes to| WhisperModel[models/whisper/finetune.py<br/>Standard Fine-Tuning]
     FinetuneOp --> |routes to| LoRAModel[models/whisper_lora/finetune.py<br/>LoRA Fine-Tuning]
@@ -492,18 +490,6 @@ The system includes several specialized utilities that extend core functionality
 
 **Integration**: Used for performance baseline establishment and hardware evaluation.
 
-#### Distributed Training Launcher (`train_distributed.py`)
-**Purpose**: Multi-GPU training orchestration with gym strategy integration.
-
-**Key Features**:
-- Single-machine multi-GPU coordination
-- Strategy-based distributed training (AllReduce, DiLoCo)
-- Apple Silicon MPS compatibility with Gloo backend
-- Rank isolation and checkpoint management
-- Seamless integration with existing training pipeline
-
-**Integration**: Optional parallel workflow for accelerated training on multi-GPU systems.
-
 ### AI-First Documentation Patterns
 
 The system implements comprehensive AI-first documentation standards designed for AI developer maintainability:
@@ -541,16 +527,13 @@ The system implements comprehensive AI-first documentation standards designed fo
 
 The following components have been enhanced with AI-first documentation:
 
-- **distributed/trainer.py**: Comprehensive gym strategy integration documentation
 - **scripts/finetune.py**: Enhanced model routing and error handling patterns
-- **train_distributed.py**: Complete distributed training orchestration documentation
 - **scripts/gemma_generate.py**: Detailed inference pipeline and integration examples
 - **utils/gemma_dataset_prep.py**: Comprehensive dataset preparation workflow documentation
 - **scripts/gemma_preflight.py**: Environment validation logic with remediation guidance
 - **scripts/gemma_profiler.py**: Performance profiling methodology and integration points
 - **wizard.py**: Enhanced user experience flow documentation
 - **utils/dataset_prep.py**: Core dataset utilities with cross-file integration details
-- **tests/test_distributed_launcher.py**: Testing strategy and validation approach documentation
 
 #### Benefits of AI-First Documentation
 

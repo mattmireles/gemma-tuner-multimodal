@@ -30,9 +30,3 @@ def test_evaluate_help():
     assert result.exit_code == 0
     assert "Evaluate a fine-tuned Whisper model" in result.stdout
 
-
-def test_distributed_push_code_help():
-    runner = CliRunner()
-    result = runner.invoke(app, ["distributed-push-code", "--help"])
-    assert result.exit_code == 0
-    assert "Synchronize the project directory to all worker nodes" in result.stdout

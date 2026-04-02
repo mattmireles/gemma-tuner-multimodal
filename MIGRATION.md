@@ -18,11 +18,6 @@ This guide maps common legacy commands to the modern `whisper-tuner` CLI.
   - Legacy: `python manage.py list|overview|details|cleanup`
   - New: `whisper-tuner runs list|overview|details|cleanup`
 
-- Distributed checks and training
-  - Legacy: N/A
-  - New: `whisper-tuner distributed-check --hosts-config distributed_hosts.json`
-          `whisper-tuner distributed-train --strategy diloco`
-
 Notes:
 - `main.py` and `manage.py` are deprecated. Temporary wrappers are available:
   - `whisper-tuner legacy main`

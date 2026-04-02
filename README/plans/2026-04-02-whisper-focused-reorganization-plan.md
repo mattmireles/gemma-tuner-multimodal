@@ -6,8 +6,8 @@
 ## Execution Status
 
 - [x] Phase 0 completed
-- [ ] Phase 1 completed
-- [ ] Phase 2 completed
+- [x] Phase 1 completed
+- [x] Phase 2 completed
 - [ ] Phase 3 completed
 - [ ] Phase 4 completed
 
@@ -130,17 +130,23 @@ Phase 0 execution notes are captured in [2026-04-02-whisper-migration-inventory.
 
 **Tasks:**
 
-- [ ] Create the new Mamba repository from `Mamba-ASR-MPS/` using `git subtree split --prefix=Mamba-ASR-MPS` as the default history-preserving extraction method.
-- [ ] Move Mamba-specific docs, scripts, benchmarks, Swift runner code, exports guidance, and model assets ownership into the new repository.
-- [ ] If Mamba depends on cloud-resident data with local compute, duplicate the required cloud streaming components or design-equivalent interfaces into the new Mamba repo instead of silently dropping that capability.
-- [ ] Decide the fate of `Mamba-ASR-NVIDIA/`, `MambaASR.mlmodelc/`, and `MambaASR.mlpackage/`: move them to the new Mamba repo if they are still product assets, otherwise delete them from the Whisper repo.
-- [ ] Add or tighten standalone repo metadata for Mamba, including its own `.gitignore`, README, and packaging/bootstrap story if needed.
-- [ ] Decide whether any intentional large binaries in the new Mamba repo should use Git LFS; do not carry generated exports into git by default just because they existed here.
-- [ ] Make the new repo obviously independent on day one by updating its README title, setup instructions, and default branch metadata as needed.
-- [ ] Remove `Mamba-ASR-MPS/` from this repo after the new repo is validated.
-- [ ] Replace Mamba sections in `README.md` and related guides, including Mamba-specific Apple Silicon and Core ML guidance, with a short pointer to the new repository.
+- [x] Create the new Mamba repository from `Mamba-ASR-MPS/` using `git subtree split --prefix=Mamba-ASR-MPS` as the default history-preserving extraction method.
+- [x] Move Mamba-specific docs, scripts, benchmarks, Swift runner code, exports guidance, and model assets ownership into the new repository.
+- [x] If Mamba depends on cloud-resident data with local compute, duplicate the required cloud streaming components or design-equivalent interfaces into the new Mamba repo instead of silently dropping that capability.
+- [x] Decide the fate of `Mamba-ASR-NVIDIA/`, `MambaASR.mlmodelc/`, and `MambaASR.mlpackage/`: move them to the new Mamba repo if they are still product assets, otherwise delete them from the Whisper repo.
+- [x] Add or tighten standalone repo metadata for Mamba, including its own `.gitignore`, README, and packaging/bootstrap story if needed.
+- [x] Decide whether any intentional large binaries in the new Mamba repo should use Git LFS; do not carry generated exports into git by default just because they existed here.
+- [x] Make the new repo obviously independent on day one by updating its README title, setup instructions, and default branch metadata as needed.
+- [x] Remove `Mamba-ASR-MPS/` from this repo after the new repo is validated.
+- [x] Replace Mamba sections in `README.md` and related guides, including Mamba-specific Apple Silicon and Core ML guidance, with a short pointer to the new repository.
 
 **Verification:** The Whisper repo no longer contains `Mamba-ASR-MPS/`, `Mamba-ASR-NVIDIA/`, or root-level Mamba artifact bundles unless explicitly reclassified; the new Mamba repo can explain how to train and evaluate its pipeline without depending on this repo.
+
+Phase 1 execution notes:
+
+- Standalone repo created locally at `/Users/mm/Documents/GitHub/mamba-asr-mps` from `git subtree split --prefix=Mamba-ASR-MPS`.
+- Mamba-only docs were copied into the standalone repo's `docs/` directory, and `CMHello.swift` moved there under `tools/`.
+- Generated export outputs and compiled Core ML bundles were intentionally removed from git in the new repo and deleted from the Whisper repo instead of being preserved as tracked artifacts.
 
 ---
 
@@ -150,13 +156,18 @@ Phase 0 execution notes are captured in [2026-04-02-whisper-migration-inventory.
 
 **Tasks:**
 
-- [ ] Remove the `gym` submodule cleanly: `git submodule deinit -f gym`, remove the `gym` entry from `.gitmodules`, remove any `.git/config` submodule entry if present, delete `.git/modules/gym` if needed, and delete the `gym/` tree from the Whisper repo.
-- [ ] Delete or retire ExoGym-bound distributed code paths in `distributed/trainer.py`, `distributed/network_trainer.py`, `distributed/worker_entry.py`, `distributed/__init__.py`, `distributed/launcher.py`, `distributed/whisper_wrapper.py`, `train_distributed.py`, and `wizard/runner.py`.
-- [ ] Remove Typer and legacy CLI commands that expose ExoGym-backed distributed flows from `cli_typer.py` and `main.py`.
-- [ ] Delete or explicitly replace distributed test coverage, including `test_distributed.py`, `tests/test_distributed_check.py`, `tests/test_distributed_dry_run.py`, and `tests/test_distributed_launcher.py`.
-- [ ] Remove distributed training docs that are no longer true, including README sections and supporting guides such as `README/specifications/distributed-training-gym.md` and `README/guides/integrations/exolabs-gym.md`.
+- [x] Remove the `gym` submodule cleanly: `git submodule deinit -f gym`, remove the `gym` entry from `.gitmodules`, remove any `.git/config` submodule entry if present, delete `.git/modules/gym` if needed, and delete the `gym/` tree from the Whisper repo.
+- [x] Delete or retire ExoGym-bound distributed code paths in `distributed/trainer.py`, `distributed/network_trainer.py`, `distributed/worker_entry.py`, `distributed/__init__.py`, `distributed/launcher.py`, `distributed/whisper_wrapper.py`, `train_distributed.py`, and `wizard/runner.py`.
+- [x] Remove Typer and legacy CLI commands that expose ExoGym-backed distributed flows from `cli_typer.py` and `main.py`.
+- [x] Delete or explicitly replace distributed test coverage, including `test_distributed.py`, `tests/test_distributed_check.py`, `tests/test_distributed_dry_run.py`, and `tests/test_distributed_launcher.py`.
+- [x] Remove distributed training docs that are no longer true, including README sections and supporting guides such as `README/specifications/distributed-training-gym.md` and `README/guides/integrations/exolabs-gym.md`.
 
 **Verification:** A clean install of the Whisper repo succeeds without `gym`, no code imports `exogym` or `gym.exogym`, and the exposed CLI only references supported Whisper functionality.
+
+Phase 2 execution notes:
+
+- ExoGym dependency and all distributed-launcher implementation files were removed, and the remaining CLI surfaces now skip distributed flows.
+- Distributed tests and CI checks were removed from local test discovery paths and smoke workflows.
 
 ---
 

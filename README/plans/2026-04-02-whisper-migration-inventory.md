@@ -11,6 +11,7 @@ This inventory freezes the repository boundaries before any code or history move
 - Local publish strategy: create the standalone repository locally first; leave `origin` unset during the split so the extraction is not blocked on a remote-creation step.
 - Cloud streaming architecture: keep in the Whisper repo only. No Mamba code currently depends on the GCS/BigQuery streaming path, so duplication is unnecessary in this migration.
 - Gemma product surface: keep in the Whisper repo. Current Gemma code and tests have no `mamba`, `Mamba-ASR`, `exogym`, or `gym.exogym` references.
+- Phase 1 artifact policy: the standalone Mamba repo keeps source and docs, not generated `exports/`, compiled `.mlpackage` / `.mlmodelc` bundles, or built helper binaries.
 
 ## Migration Checklist
 

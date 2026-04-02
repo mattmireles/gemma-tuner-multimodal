@@ -154,6 +154,4 @@ secrets.ini
 credentials.json
 credentials.ini
 distributed_hosts.json
-Mamba-ASR-MPS/checkpoints/
-Mamba-ASR-MPS/logs/
 /temp_configs/

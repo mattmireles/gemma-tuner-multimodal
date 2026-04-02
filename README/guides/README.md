@@ -2,6 +2,8 @@
 
 Long-form reference material for Apple Silicon training, export, and adjacent tooling. Product behavior and roadmap live under [`../specifications/`](../specifications/).
 
+Mamba-specific guides were moved to the standalone `mamba-asr-mps` repository so this guide index stays focused on the Whisper product surface.
+
 ## Apple Silicon (`apple-silicon/`)
 
 | Guide | Description |
@@ -28,10 +30,3 @@ Long-form reference material for Apple Silicon training, export, and adjacent to
 
 | Guide | Description |
 | --- | --- |
-| [`exolabs-gym.md`](integrations/exolabs-gym.md) | EXO Gym for prototyping low-bandwidth / distributed training strategies on macOS. |
-
-## Research notes (`research/`)
-
-| Guide | Description |
-| --- | --- |
-| [`mamba-asr-landscape.md`](research/mamba-asr-landscape.md) | Survey of Mamba vs transformer ASR results (background; see `Mamba-ASR-MPS/` for this repo’s pipeline). |

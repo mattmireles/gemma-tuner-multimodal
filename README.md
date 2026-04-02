@@ -687,51 +687,13 @@ Preprocessing now defaults to using all available CPU cores for Dataset.map() on
 3. **Gradual increase**: Increase batch sizes if no swapping occurs
 4. **Gradient accumulation**: Use to simulate larger batches
 
-### Mamba-ASR Production Training (Apple Silicon)
+### Mamba-ASR moved out
 
-This repository includes a production training pipeline for the Mamba-ASR model under `Mamba-ASR-MPS/`. It trains a ConMamba CTC backbone (V=1024) with a learned 1024→29 projection head for a compact, character-level output used by the Core ML runner.
+The Apple Silicon Mamba-ASR pipeline no longer lives in this repository.
 
-- **Dataset CSV schema (LibriSpeech-style)**: `path,duration,text`
-  - `path`: absolute or relative audio path (wav/flac)
-  - `duration`: seconds (float)
-  - `text`: reference transcript
-
-- **Run training**:
-```bash
-PYTHONPATH="$(pwd)/Mamba-ASR-MPS" \
-python Mamba-ASR-MPS/train.py \
-  --train-csv /path/to/train.csv \
-  --val-csv /path/to/val.csv \
-  --epochs 10 --batch-size 4 --lr 3e-4 --d-model 256 --n-blocks 6
-```
-
-- **Useful flags**:
-  - `--freeze-backbone`: train only the 1024→29 head (fast convergence)
-  - `--checkpoint-dir`: defaults to `Mamba-ASR-MPS/exports/checkpoints`
-  - `--no-post-eval`: skip automatic projection extraction + batch eval
-
-- **Outputs**:
-  - Checkpoints: `Mamba-ASR-MPS/exports/checkpoints/{last.pt,best.pt}`
-  - Learned projection: `Mamba-ASR-MPS/exports/projection_1024x29.csv`
-  - Batch eval reports: `Mamba-ASR-MPS/exports/CoreMLTraces/`
-
-- **Manual post-run (optional)**:
-```bash
-# 1) Extract learned projection from best checkpoint
-python Mamba-ASR-MPS/scripts/extract_projection_from_ckpt.py \
-  --ckpt Mamba-ASR-MPS/exports/checkpoints/best.pt \
-  --w-key proj.weight --b-key proj.bias \
-  --out Mamba-ASR-MPS/exports/projection_1024x29.csv
-
-# 2) Run Core ML batch evaluation (uses learned projection automatically)
-bash Mamba-ASR-MPS/scripts/eval_batch.sh
-```
-
-- **Interpreting final evaluation reports**:
-  - Primary metric: **CER (Character Error Rate)**; lower is better
-  - Report path: `Mamba-ASR-MPS/exports/CoreMLTraces/wer_cer_overview_<model>.md`
-  - Threshold guidance: initial gate `CER ≤ 0.6` for tiny testsets; tighten as models improve
-  - Missing/empty transcripts with `--strict` cause non-zero exit; ensure `exports/testset/{audio,refs}` populated (see `scripts/eval_batch.sh` for expected locations)
+- The standalone repository is named `mamba-asr-mps`.
+- In the current local workspace, it was extracted as a sibling repository next to this repo.
+- Whisper-specific docs in this repository now stay focused on Whisper, Gemma, data prep, evaluation, export, and the guided CLI workflow.
 
 
 ## CI
@@ -746,12 +708,6 @@ A macOS CI workflow runs lint and a small set of fast tests on every PR. See `.g
 ```bash
 # One-line system report (Python, Torch, device, MPS)
 whisper-tuner system-check
-
-# Validate your distributed config without training
-whisper-tuner distributed-check --hosts-config distributed_hosts.json
-
-# CI-safe smoke of distributed flow without SSH
-whisper-tuner distributed-train --dry-run
 ```
 
 ### Reproducible installs
@@ -824,10 +780,6 @@ python cli_typer.py export output/{id}-medium-data3
 
 # Diagnostics
 python cli_typer.py system-check
-
-# Distributed
-python cli_typer.py distributed-check --hosts-config distributed_hosts.json
-python cli_typer.py distributed-train --dry-run
 ```
 
 The legacy `main.py` and scripts remain supported.
@@ -835,84 +787,6 @@ The legacy `main.py` and scripts remain supported.
 ### Migration guide (legacy → Typer CLI)
 
 See `MIGRATION.md` for a concise mapping from old invocations (main.py/manage.py) to the modern `whisper-tuner` commands. The `legacy` command group also provides wrappers: `whisper-tuner legacy main` and `whisper-tuner legacy manage`.
-
-### Distributed Training
-
-This project supports distributed training across multiple Macs, allowing you to train larger models faster. Here's how to set it up:
-
-**1. Create `distributed_hosts.json`**
-
-This file tells the trainer which machines to use. Create a file named `distributed_hosts.json` in your project root:
-
-```json
-{
-  "master": "192.168.1.100",
-  "workers": ["192.168.1.101", "192.168.1.102"],
-  "ssh_user": "your_username",
-  "ssh_key_path": "~/.ssh/id_rsa",
-  "python_env": "/Users/your_username/miniconda3/envs/whisper/bin/python",
-  "project_path": "/Users/your_username/projects/whisper-fine-tuner-macos"
-}
-```
-
-- **master**: The IP address of the main machine.
-- **workers**: A list of IP addresses for the worker machines.
-- **ssh_user**: Your username on the worker machines.
-- **ssh_key_path**: The path to your SSH private key.
-- **python_env**: The path to the Python executable on the worker machines.
-- **project_path**: The absolute path to the project directory on the worker machines.
-
-**2. Set Up SSH Access**
-
-Ensure you have passwordless SSH access from the master to all worker machines. You can set this up by adding your public key to the `~/.ssh/authorized_keys` file on each worker.
-
-**3. Synchronize Your Code**
-
-Before starting a training run, make sure all worker machines have the latest version of your code. Use the `distributed-push-code` command to do this automatically:
-
-```bash
-whisper-tuner distributed-push-code
-```
-
-This command will use `rsync` to copy your project directory to all the workers listed in your `distributed_hosts.json` file.
-
-**4. Run Distributed Training**
-
-Once your hosts are configured and the code is synchronized, you can start a distributed training run:
-
-```bash
-whisper-tuner distributed-train --strategy diloco --model openai/whisper-medium
-```
-
-The trainer will automatically connect to the workers and begin the training process.
-
-### Distributed on one Mac (localhost)
-
-```bash
-cat > distributed_hosts.json <<'JSON'
-{
-  "master": "127.0.0.1",
-  "workers": ["127.0.0.1"],
-  "ssh_user": "$(whoami)",
-  "python_env": "$(which python)",
-  "project_path": "$PWD"
-}
-JSON
-
-# SSH localhost convenience (first time only)
-[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -C "local" -f ~/.ssh/id_ed25519 -N ''
-mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys
-grep -q "$(cat ~/.ssh/id_ed25519.pub)" ~/.ssh/authorized_keys || cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
-ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts
-ssh-keyscan -H localhost >> ~/.ssh/known_hosts
-
-# Validate
-whisper-tuner distributed-check --hosts-config distributed_hosts.json --verbose
-
-# Optional: dry-run smoke
-whisper-tuner distributed-train --dry-run
-```
 
 ## Visualizer Controls
 

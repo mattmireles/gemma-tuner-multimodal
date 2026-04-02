@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide covers common issues for Apple Silicon (MPS) and distributed training.
+This guide covers common issues for Apple Silicon (MPS).
 
 ## Apple Silicon (MPS) Pitfalls
 
@@ -19,35 +19,6 @@ This guide covers common issues for Apple Silicon (MPS) and distributed training
 - Symptom: Frequent out-of-memory or system lag
   - Reduce batch size; enable gradient accumulation.
   - Use attention slicing or gradient checkpointing (note: checkpointing can be unstable on MPS for some models).
-
-## Passwordless localhost SSH (single-machine distributed)
-
-1. Generate a key if you don't have one:
-   ```bash
-   ssh-keygen -t ed25519 -C "local" -f ~/.ssh/id_ed25519 -N ''
-   ```
-2. Authorize it for localhost:
-   ```bash
-   mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys
-   cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-   chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
-   ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts
-   ssh-keyscan -H localhost >> ~/.ssh/known_hosts
-   ```
-3. Minimal `distributed_hosts.json`:
-   ```json
-   {
-     "master": "127.0.0.1",
-     "workers": ["127.0.0.1"],
-     "ssh_user": "$(whoami)",
-     "python_env": "$(which python)",
-     "project_path": "$PWD"
-   }
-   ```
-4. Validate:
-   ```bash
-   whisper-tuner distributed-check --hosts-config distributed_hosts.json --verbose
-   ```
 
 ## Migrating to the Typer CLI
 
