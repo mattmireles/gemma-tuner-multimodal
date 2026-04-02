@@ -9,7 +9,7 @@ description = "Whisper fine-tuning tools with Apple Silicon (MPS) support"
 readme = "README.md"
 authors = [{ name = "Whisper Fine-Tuner Maintainers" }]
 requires-python = ">=3.8"
-keywords = ["whisper", "speech", "asr", "pytorch", "apple silicon", "mps", "distributed"]
+keywords = ["whisper", "speech", "asr", "pytorch", "apple silicon", "mps"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -102,7 +102,6 @@ include = [
   "utils*",
   "scripts*",
   "models*",
-  "distributed*",
   "wizard*",
 ]
 

@@ -65,9 +65,7 @@ jobs:
             tests/test_bootstrap.py \
             tests/test_config_defaults.py \
             tests/test_cli_help.py \
-            tests/test_distributed_check.py \
             tests/test_system_check.py \
-            tests/test_distributed_dry_run.py \
             tests/test_finetune_core_data.py \
             tests/test_finetune_core_trainer.py \
             --junitxml=test-reports/junit-${{ matrix.python-version }}.xml
@@ -102,7 +100,6 @@ jobs:
       - name: CLI smoke
         run: |
           whisper-tuner system-check
-          whisper-tuner distributed-train --dry-run
 
   lockfile-check:
     name: Verify requirements.txt up-to-date
