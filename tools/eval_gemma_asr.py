@@ -41,13 +41,8 @@ try:
 except Exception:
     load_audio_local_or_gcs = None
 
-
-def get_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+# Canonical device selection (MPS > CUDA > CPU) from shared utils
+from utils.device import get_device
 
 
 def build_messages(transcript_hint: Optional[str] = None) -> List[Dict]:

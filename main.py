@@ -512,17 +512,8 @@ def main():
                 profile_config["max_samples"] = args.max_samples
 
             from scripts.blacklist import create_blacklist
-            # Device-safe config normalization for MPS and CPU defaults
-            if device.type == "mps":
-                if profile_config.get("dtype") != "float32":
-                    logger.warning("Overriding dtype to float32 for MPS compatibility")
-                profile_config["dtype"] = "float32"
-                if profile_config.get("attn_implementation") != "eager":
-                    logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility")
-                profile_config["attn_implementation"] = "eager"
-            elif device.type == "cpu":
-                profile_config.setdefault("dtype", "float32")
-                profile_config.setdefault("attn_implementation", "eager")
+            # Device-safe config normalization
+            apply_device_defaults(profile_config)
 
             blacklist_path = create_blacklist(profile_config, run_dir)
 
