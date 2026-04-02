@@ -1,10 +1,10 @@
-import os
 import json
+import os
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 import pytest
+import soundfile as sf
 
 
 def _ensure_tiny_dataset(base_dir: Path) -> None:
@@ -70,7 +70,7 @@ def test_lora_single_step(tmp_path: Path):
         "lora_r": 4,
         "lora_alpha": 8,
         "lora_dropout": 0.05,
-        "lora_target_modules": ["q_proj","k_proj","v_proj","out_proj","fc1","fc2"],
+        "lora_target_modules": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
         "enable_8bit": False,
         "visualize": False,
     }

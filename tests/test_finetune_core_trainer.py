@@ -1,5 +1,6 @@
-import numpy as np
 from types import SimpleNamespace
+
+import numpy as np
 
 
 def test_build_trainer_smoke(monkeypatch):
@@ -9,8 +10,8 @@ def test_build_trainer_smoke(monkeypatch):
     # Minimal stubs
     class _Tok:
         pad_token_id = 0
+
         def pad(self, items, return_tensors="pt"):
-            import torch
             max_len = max(len(x["input_ids"]) for x in items)
             ids = []
             mask = []
@@ -18,13 +19,15 @@ def test_build_trainer_smoke(monkeypatch):
                 seq = x["input_ids"]
                 pad = [self.pad_token_id] * (max_len - len(seq))
                 ids.append(seq + pad)
-                mask.append([1]*len(seq) + [0]*len(pad))
+                mask.append([1] * len(seq) + [0] * len(pad))
             return SimpleNamespace(input_ids=np.array(ids), attention_mask=np.array(mask))
 
     class _FE:
         model_input_names = ["input_features"]
+
         def pad(self, items, return_tensors="pt"):
             import numpy as np
+
             max_len = max(len(x["input_features"]) for x in items)
             feats = []
             for x in items:
@@ -36,6 +39,7 @@ def test_build_trainer_smoke(monkeypatch):
     class _Proc:
         tokenizer = _Tok()
         feature_extractor = _FE()
+
         def batch_decode(self, ids, skip_special_tokens=True):
             return ["hello"] * len(ids)
 
@@ -44,9 +48,7 @@ def test_build_trainer_smoke(monkeypatch):
             self.config = SimpleNamespace()
 
     # Tiny dataset
-    vectorized = {
-        "train": [{"input_features": [[0.0, 0.0]], "labels": [1, 2, 3]}]
-    }
+    vectorized = {"train": [{"input_features": [[0.0, 0.0]], "labels": [1, 2, 3]}]}
 
     # Minimal TrainingArguments-like namespace
     training_args = SimpleNamespace(

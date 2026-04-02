@@ -1,10 +1,10 @@
-import os
 import json
+import os
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 import pytest
+import soundfile as sf
 
 pytest.importorskip("torchcodec", reason="Slow audio tests require torchcodec for dataset audio decoding.")
 
@@ -44,7 +44,7 @@ def test_distillation_single_step(tmp_path: Path):
     profile_config = {
         "model": "distil-tiny-from-medium",  # name not used directly by module
         "base_model": "openai/whisper-tiny",  # student
-        "teacher_model": "whisper-medium",    # will resolve via config.ini to openai/whisper-medium
+        "teacher_model": "whisper-medium",  # will resolve via config.ini to openai/whisper-medium
         "dataset": "test_streaming",
         "text_column": "text_perfect",
         "train_split": "train",

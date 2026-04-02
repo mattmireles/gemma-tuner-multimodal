@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
   # Hugging Face ecosystem (tested compatible set)
   "transformers>=4.53.3",
-  "datasets>=2.18.0",
+  "datasets>=4.0.0",
   "accelerate>=0.27.2",
   "evaluate>=0.4.1",
   "peft>=0.9.0",
@@ -98,4 +98,23 @@ target-version = "py38"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-ignore = []
+# F841: unused variables are common in model code that checks loading without using the result.
+# E741: ambiguous variable names (l, O, I) exist in legacy scientific code; harmless here.
+# E501: line-length enforcement deferred; the codebase has many pre-existing long lines in
+#   docstrings, argparse help strings, and long function calls that cannot be shortened safely.
+# E402: some modules have intentional non-top imports (MPS bootstrap before torch).
+ignore = ["F841", "E741", "E501", "E402"]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy argparse CLI: intentional import ordering (bootstrap before torch) and
+# many long lines in argparse help strings that cannot be practically shortened.
+"whisper_tuner/main.py" = ["I001", "E402", "E501"]
+# Large service/utility modules with pre-existing long lines in docstrings and SQL.
+"whisper_tuner/core/bigquery.py" = ["E501"]
+"whisper_tuner/core/config.py" = ["E501"]
+"whisper_tuner/core/inference.py" = ["E501"]
+"whisper_tuner/models/common/visualizer.py" = ["E501", "E741"]
+"whisper_tuner/models/distil_whisper/finetune.py" = ["E501"]
+"whisper_tuner/wizard/config.py" = ["E501"]
+"whisper_tuner/wizard/estimator.py" = ["E501"]
+"whisper_tuner/cli_typer.py" = ["E501"]

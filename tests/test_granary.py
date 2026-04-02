@@ -13,21 +13,20 @@ ensuring compatibility with existing configuration and dataset loading systems.
 """
 
 import configparser
-import pytest
 import tempfile
-import os
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 
-from whisper_tuner.core.config import load_model_dataset_config, load_profile_config, ConfigConstants
 import pytest
+
+from whisper_tuner.core.config import ConfigConstants, load_model_dataset_config, load_profile_config
 
 # Mark entire module as slow: it imports heavy dependencies and patches HF APIs.
 pytestmark = pytest.mark.slow
 
 # Lazy import heavy deps to avoid failing fast CI when excluded with -m "not slow"
 try:
-    from whisper_tuner.scripts.prepare_granary import validate_granary_config, resolve_granary_audio_path
+    from whisper_tuner.scripts.prepare_granary import resolve_granary_audio_path, validate_granary_config
 except Exception as e:  # pragma: no cover - only triggers in minimal envs
     pytest.skip(f"Granary dependencies unavailable: {e}", allow_module_level=True)
 
@@ -45,30 +44,29 @@ class TestAudioSourceExtraction:
 
     def test_audio_source_extraction_basic(self):
         """Test basic audio source extraction from dataset configuration."""
-        cfg = make_cfg({
-            "DEFAULT": {},
-            "model:whisper-base": {
-                "base_model": "openai/whisper-base",
-                "group": "whisper"
-            },
-            "dataset:granary-en": {
-                "hf_name": "nvidia/Granary",
-                "hf_subset": "en",
-                "local_path": "data/datasets/granary-en",
-                "text_column": "text",
-                "train_split": "train",
-                "validation_split": "validation",
-                "max_label_length": "256",
-                "max_duration": "30.0",
-                "audio_source_voxpopuli": "/path/to/voxpopuli",
-                "audio_source_ytc": "/path/to/ytc",
-                "audio_source_librilight": "/path/to/librilight"
-            },
-            "group:whisper": {}
-        })
-        
+        cfg = make_cfg(
+            {
+                "DEFAULT": {},
+                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "dataset:granary-en": {
+                    "hf_name": "nvidia/Granary",
+                    "hf_subset": "en",
+                    "local_path": "data/datasets/granary-en",
+                    "text_column": "text",
+                    "train_split": "train",
+                    "validation_split": "validation",
+                    "max_label_length": "256",
+                    "max_duration": "30.0",
+                    "audio_source_voxpopuli": "/path/to/voxpopuli",
+                    "audio_source_ytc": "/path/to/ytc",
+                    "audio_source_librilight": "/path/to/librilight",
+                },
+                "group:whisper": {},
+            }
+        )
+
         config = load_model_dataset_config(cfg, "whisper-base", "granary-en")
-        
+
         # Verify audio sources are extracted
         assert "audio_sources" in config
         assert config["audio_sources"]["voxpopuli"] == "/path/to/voxpopuli"
@@ -77,51 +75,49 @@ class TestAudioSourceExtraction:
 
     def test_audio_source_extraction_empty(self):
         """Test behavior when no audio sources are configured."""
-        cfg = make_cfg({
-            "DEFAULT": {},
-            "model:whisper-base": {
-                "base_model": "openai/whisper-base",
-                "group": "whisper"
-            },
-            "dataset:regular-dataset": {
-                "source": "regular-dataset",
-                "text_column": "text",
-                "train_split": "train",
-                "validation_split": "validation",
-                "max_label_length": "256",
-                "max_duration": "30.0"
-            },
-            "group:whisper": {}
-        })
-        
+        cfg = make_cfg(
+            {
+                "DEFAULT": {},
+                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "dataset:regular-dataset": {
+                    "source": "regular-dataset",
+                    "text_column": "text",
+                    "train_split": "train",
+                    "validation_split": "validation",
+                    "max_label_length": "256",
+                    "max_duration": "30.0",
+                },
+                "group:whisper": {},
+            }
+        )
+
         config = load_model_dataset_config(cfg, "whisper-base", "regular-dataset")
-        
+
         # Verify no audio_sources key is added when none exist
         assert "audio_sources" not in config
 
     def test_audio_source_extraction_partial(self):
         """Test audio source extraction with only some sources configured."""
-        cfg = make_cfg({
-            "DEFAULT": {},
-            "model:whisper-base": {
-                "base_model": "openai/whisper-base",
-                "group": "whisper"
-            },
-            "dataset:granary-partial": {
-                "hf_name": "nvidia/Granary",
-                "text_column": "text",
-                "train_split": "train",
-                "validation_split": "validation",
-                "max_label_length": "256",
-                "max_duration": "30.0",
-                "audio_source_voxpopuli": "/path/to/voxpopuli",
-                "regular_config": "value"  # Non audio-source key
-            },
-            "group:whisper": {}
-        })
-        
+        cfg = make_cfg(
+            {
+                "DEFAULT": {},
+                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "dataset:granary-partial": {
+                    "hf_name": "nvidia/Granary",
+                    "text_column": "text",
+                    "train_split": "train",
+                    "validation_split": "validation",
+                    "max_label_length": "256",
+                    "max_duration": "30.0",
+                    "audio_source_voxpopuli": "/path/to/voxpopuli",
+                    "regular_config": "value",  # Non audio-source key
+                },
+                "group:whisper": {},
+            }
+        )
+
         config = load_model_dataset_config(cfg, "whisper-base", "granary-partial")
-        
+
         # Verify only configured audio sources are extracted
         assert "audio_sources" in config
         assert config["audio_sources"]["voxpopuli"] == "/path/to/voxpopuli"
@@ -130,36 +126,35 @@ class TestAudioSourceExtraction:
 
     def test_audio_source_extraction_profile_config(self):
         """Test audio source extraction works through profile configuration loading."""
-        cfg = make_cfg({
-            "DEFAULT": {},
-            "model:whisper-base": {
-                "base_model": "openai/whisper-base",
-                "group": "whisper"
-            },
-            "dataset:granary-en": {
-                "hf_name": "nvidia/Granary",
-                "text_column": "text",
-                "train_split": "train", 
-                "validation_split": "validation",
-                "max_label_length": "256",
-                "max_duration": "30.0",
-                "audio_source_voxpopuli": "/path/to/voxpopuli"
-            },
-            "profile:test-granary": {
-                "model": "whisper-base",
-                "dataset": "granary-en",
-                "per_device_train_batch_size": "16",
-                "num_train_epochs": "3",
-                "logging_steps": "10",
-                "save_steps": "50",
-                "save_total_limit": "2",
-                "gradient_accumulation_steps": "1"
-            },
-            "group:whisper": {}
-        })
-        
+        cfg = make_cfg(
+            {
+                "DEFAULT": {},
+                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "dataset:granary-en": {
+                    "hf_name": "nvidia/Granary",
+                    "text_column": "text",
+                    "train_split": "train",
+                    "validation_split": "validation",
+                    "max_label_length": "256",
+                    "max_duration": "30.0",
+                    "audio_source_voxpopuli": "/path/to/voxpopuli",
+                },
+                "profile:test-granary": {
+                    "model": "whisper-base",
+                    "dataset": "granary-en",
+                    "per_device_train_batch_size": "16",
+                    "num_train_epochs": "3",
+                    "logging_steps": "10",
+                    "save_steps": "50",
+                    "save_total_limit": "2",
+                    "gradient_accumulation_steps": "1",
+                },
+                "group:whisper": {},
+            }
+        )
+
         config = load_profile_config(cfg, "test-granary")
-        
+
         # Verify audio sources are available in profile config
         assert "audio_sources" in config
         assert config["audio_sources"]["voxpopuli"] == "/path/to/voxpopuli"
@@ -177,17 +172,17 @@ class TestGranaryConfigValidation:
             "audio_sources": {
                 "voxpopuli": "/tmp/test/voxpopuli",
                 "ytc": "/tmp/test/ytc",
-                "librilight": "/tmp/test/librilight"
-            }
+                "librilight": "/tmp/test/librilight",
+            },
         }
-        
+
         # Create temporary directories to simulate downloaded corpora
         with tempfile.TemporaryDirectory() as temp_dir:
             for corpus in ["voxpopuli", "ytc", "librilight"]:
                 corpus_path = Path(temp_dir) / corpus
                 corpus_path.mkdir()
                 config["audio_sources"][corpus] = str(corpus_path)
-            
+
             # Should not raise any exceptions
             validate_granary_config(config)
 
@@ -196,11 +191,9 @@ class TestGranaryConfigValidation:
         config = {
             "hf_name": "nvidia/Granary",
             # Missing hf_subset and local_path
-            "audio_sources": {
-                "voxpopuli": "/path/to/voxpopuli"
-            }
+            "audio_sources": {"voxpopuli": "/path/to/voxpopuli"},
         }
-        
+
         with pytest.raises(ValueError, match="Missing required Granary configuration keys"):
             validate_granary_config(config)
 
@@ -210,11 +203,9 @@ class TestGranaryConfigValidation:
             "hf_name": "wrong/dataset",
             "hf_subset": "en",
             "local_path": "data/datasets/granary-en",
-            "audio_sources": {
-                "voxpopuli": "/path/to/voxpopuli"
-            }
+            "audio_sources": {"voxpopuli": "/path/to/voxpopuli"},
         }
-        
+
         with pytest.raises(ValueError, match="Invalid hf_name"):
             validate_granary_config(config)
 
@@ -223,10 +214,10 @@ class TestGranaryConfigValidation:
         config = {
             "hf_name": "nvidia/Granary",
             "hf_subset": "en",
-            "local_path": "data/datasets/granary-en"
+            "local_path": "data/datasets/granary-en",
             # No audio_sources
         }
-        
+
         with pytest.raises(ValueError, match="No audio sources configured"):
             validate_granary_config(config)
 
@@ -239,9 +230,9 @@ class TestGranaryConfigValidation:
             "audio_sources": {
                 "voxpopuli": "/path/to/voxpopuli"
                 # Missing ytc and librilight
-            }
+            },
         }
-        
+
         with pytest.raises(ValueError, match="Missing required audio corpora"):
             validate_granary_config(config)
 
@@ -254,10 +245,10 @@ class TestGranaryConfigValidation:
             "audio_sources": {
                 "voxpopuli": "/nonexistent/path/voxpopuli",
                 "ytc": "/nonexistent/path/ytc",
-                "librilight": "/nonexistent/path/librilight"
-            }
+                "librilight": "/nonexistent/path/librilight",
+            },
         }
-        
+
         with pytest.raises(FileNotFoundError, match="Audio source directory not found"):
             validate_granary_config(config)
 
@@ -269,13 +260,13 @@ class TestPathResolution:
         """Test direct path resolution when file exists at expected location."""
         with tempfile.TemporaryDirectory() as temp_dir:
             audio_sources = {"voxpopuli": temp_dir}
-            
+
             # Create test audio file
             audio_file = Path(temp_dir) / "test_audio.flac"
             audio_file.touch()
-            
+
             result = resolve_granary_audio_path("test_audio.flac", "voxpopuli", audio_sources)
-            
+
             assert result == audio_file
             assert result.exists()
 
@@ -283,15 +274,15 @@ class TestPathResolution:
         """Test path resolution when relative path includes corpus prefix."""
         with tempfile.TemporaryDirectory() as temp_dir:
             audio_sources = {"voxpopuli": temp_dir}
-            
+
             # Create test audio file without corpus prefix in actual path
             audio_file = Path(temp_dir) / "fr" / "audio.flac"
             audio_file.parent.mkdir(parents=True)
             audio_file.touch()
-            
+
             # Relative path includes corpus prefix
             result = resolve_granary_audio_path("voxpopuli/fr/audio.flac", "voxpopuli", audio_sources)
-            
+
             assert result == audio_file
             assert result.exists()
 
@@ -299,14 +290,14 @@ class TestPathResolution:
         """Test path resolution falls back to filename-only matching."""
         with tempfile.TemporaryDirectory() as temp_dir:
             audio_sources = {"librilight": temp_dir}
-            
+
             # Create test audio file with just filename
             audio_file = Path(temp_dir) / "audio_sample.flac"
             audio_file.touch()
-            
+
             # Relative path has complex structure but only filename matters
             result = resolve_granary_audio_path("deep/nested/path/audio_sample.flac", "librilight", audio_sources)
-            
+
             assert result == audio_file
             assert result.exists()
 
@@ -314,27 +305,27 @@ class TestPathResolution:
         """Test path resolution returns None when file cannot be found."""
         with tempfile.TemporaryDirectory() as temp_dir:
             audio_sources = {"ytc": temp_dir}
-            
+
             # Don't create any files
             result = resolve_granary_audio_path("nonexistent.flac", "ytc", audio_sources)
-            
+
             assert result is None
 
     def test_resolve_granary_audio_path_yodas_not_implemented(self):
         """Test YODAS corpus handling (currently returns None with warning)."""
         audio_sources = {"yodas": "/path/to/yodas"}
-        
+
         result = resolve_granary_audio_path("yodas/audio.flac", "yodas", audio_sources)
-        
+
         # Currently not implemented, should return None
         assert result is None
 
     def test_resolve_granary_audio_path_unknown_source(self):
         """Test handling of unknown corpus sources."""
         audio_sources = {"voxpopuli": "/path/to/voxpopuli"}
-        
+
         result = resolve_granary_audio_path("audio.flac", "unknown_corpus", audio_sources)
-        
+
         assert result is None
 
 
@@ -351,11 +342,11 @@ class TestGranaryConfigConstants:
     def test_granary_supported_corpora(self):
         """Test Granary supported corpora definitions."""
         corpora = ConfigConstants.GRANARY_SUPPORTED_CORPORA
-        
+
         # Check all expected corpora are defined
         expected_corpora = {"voxpopuli", "ytc", "librilight", "yodas"}
         assert set(corpora.keys()) == expected_corpora
-        
+
         # Check all have descriptions
         for corpus, description in corpora.items():
             assert isinstance(description, str)
@@ -364,7 +355,7 @@ class TestGranaryConfigConstants:
     def test_granary_minimum_external_corpora(self):
         """Test minimum external corpora requirements."""
         minimum_corpora = ConfigConstants.GRANARY_MINIMUM_EXTERNAL_CORPORA
-        
+
         # Should require the three external downloads (not YODAS)
         expected_minimum = {"voxpopuli", "ytc", "librilight"}
         assert minimum_corpora == expected_minimum
@@ -372,7 +363,7 @@ class TestGranaryConfigConstants:
     def test_granary_required_keys(self):
         """Test Granary required configuration keys."""
         required_keys = ConfigConstants.GRANARY_REQUIRED_KEYS
-        
+
         # Check essential HuggingFace configuration keys
         assert "hf_name" in required_keys
         assert "hf_subset" in required_keys
@@ -391,14 +382,10 @@ class TestGranaryIntegration:
             "hf_name": "nvidia/Granary",
             "hf_subset": "en",
             "local_path": "data/datasets/granary-en",
-            "audio_sources": {
-                "voxpopuli": "/tmp/voxpopuli",
-                "ytc": "/tmp/ytc",
-                "librilight": "/tmp/librilight"
-            }
+            "audio_sources": {"voxpopuli": "/tmp/voxpopuli", "ytc": "/tmp/ytc", "librilight": "/tmp/librilight"},
         }
         mock_load_config.return_value = mock_config
-        
+
         # Mock HuggingFace dataset
         mock_dataset_item = {
             "utt_id": "test_001",
@@ -406,28 +393,28 @@ class TestGranaryIntegration:
             "audio_filepath": "test_audio.flac",
             "answer": "test transcription",
             "source_lang": "en",
-            "duration": 5.0
+            "duration": 5.0,
         }
         mock_dataset = [mock_dataset_item]
         mock_load_dataset.return_value = mock_dataset
-        
+
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create mock audio file and all required corpus directories
             for corpus in ["voxpopuli", "ytc", "librilight"]:
                 corpus_dir = Path(temp_dir) / corpus
                 corpus_dir.mkdir()
                 mock_config["audio_sources"][corpus] = str(corpus_dir)
-            
+
             # Create test audio file in voxpopuli directory
             audio_file = Path(temp_dir) / "voxpopuli" / "test_audio.flac"
             audio_file.touch()
-            
+
             mock_config["local_path"] = temp_dir
-            
+
             # Import and test preparation function
             try:
                 from whisper_tuner.scripts.prepare_granary import prepare_granary
-                
+
                 # Should complete without errors and return manifest path
                 result = prepare_granary("granary-en")
                 assert result is not None
@@ -446,12 +433,12 @@ class TestGranaryIntegration:
         """Test audio source prefix constant is used correctly."""
         prefix = ConfigConstants.GRANARY_AUDIO_SOURCE_PREFIX
         assert prefix == "audio_source_"
-        
+
         # Test prefix recognition in configuration
         test_key = f"{prefix}voxpopuli"
         assert test_key.startswith(prefix)
-        
-        extracted_name = test_key[len(prefix):]
+
+        extracted_name = test_key[len(prefix) :]
         assert extracted_name == "voxpopuli"
 
 
@@ -460,16 +447,12 @@ def test_end_to_end_config_integration():
     """Test end-to-end configuration integration with audio sources."""
     # Create a minimal config that includes audio sources
     cfg_dict = {
-        "DEFAULT": {
-            "num_train_epochs": "3"
-        },
-        "group:whisper": {
-            "dtype": "float32"
-        },
+        "DEFAULT": {"num_train_epochs": "3"},
+        "group:whisper": {"dtype": "float32"},
         "model:whisper-base": {
             "base_model": "openai/whisper-base",
             "group": "whisper",
-            "per_device_train_batch_size": "16"
+            "per_device_train_batch_size": "16",
         },
         "dataset:granary-test": {
             "hf_name": "nvidia/Granary",
@@ -482,22 +465,22 @@ def test_end_to_end_config_integration():
             "max_duration": "30.0",
             "audio_source_voxpopuli": "/path/to/voxpopuli",
             "audio_source_ytc": "/path/to/ytc",
-            "audio_source_librilight": "/path/to/librilight"
-        }
+            "audio_source_librilight": "/path/to/librilight",
+        },
     }
-    
+
     cfg = make_cfg(cfg_dict)
-    
+
     # Test model+dataset loading
     config = load_model_dataset_config(cfg, "whisper-base", "granary-test")
-    
+
     # Verify all configuration is properly merged
     assert config["base_model"] == "openai/whisper-base"
     assert config["hf_name"] == "nvidia/Granary"
     assert config["hf_subset"] == "en"
     assert config["dtype"] == "float32"  # From group
     assert config["per_device_train_batch_size"] == 16  # Type coerced
-    
+
     # Verify audio sources are extracted
     assert "audio_sources" in config
     audio_sources = config["audio_sources"]

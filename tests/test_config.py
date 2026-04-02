@@ -41,40 +41,41 @@ Configuration validation strategy:
 """
 
 import configparser
+
 import pytest
 
-from whisper_tuner.core.config import load_profile_config, _validate_profile_config, ConfigConstants
+from whisper_tuner.core.config import ConfigConstants, _validate_profile_config, load_profile_config
 
 
 def make_cfg(sections: dict) -> configparser.ConfigParser:
     """
     Creates a ConfigParser instance from dictionary-based section definitions.
-    
+
     This utility function provides a clean interface for creating test configuration
     objects from nested dictionaries, enabling concise test data definition and
     repeatable test scenario construction.
-    
+
     Called by:
     - test_validate_profile_defaults_and_types() for profile validation testing
     - test_load_profile_config_missing_profile_raises() for error condition testing
     - Other configuration test functions requiring structured INI data
-    
+
     Dictionary structure transformation:
     - Outer keys become INI section names (e.g., "profile:test", "DEFAULT")
     - Inner dictionaries become key-value pairs within each section
     - All values converted to strings for INI format compatibility
     - Preserves nested structure for complex configuration scenarios
-    
+
     Args:
         sections: Nested dictionary defining INI structure
             Format: {"section_name": {"key": value, ...}, ...}
             Example: {"profile:test": {"model": "whisper-base", "batch_size": 4}}
-    
+
     Returns:
         ConfigParser instance ready for configuration testing
         All values converted to strings for INI compatibility
         Section structure preserved for test validation
-    
+
     Example usage:
         cfg = make_cfg({
             "profile:test": {
@@ -96,28 +97,28 @@ def make_cfg(sections: dict) -> configparser.ConfigParser:
 def test_validate_profile_defaults_and_types():
     """
     Tests profile configuration validation, default application, and type coercion.
-    
+
     This test verifies that the configuration validation system correctly applies
     default values for optional parameters and performs proper type conversion
     from string INI values to appropriate Python types.
-    
+
     Validation behavior tested:
     - Default value application for missing optional configuration keys
     - Type coercion from INI string format to Python native types
     - Required key presence verification without missing key errors
     - Configuration schema enforcement across standard profile requirements
-    
+
     Called by:
     - pytest discovery during automated test suite execution
     - Configuration validation testing during development workflows
     - CI/CD pipelines for configuration system regression testing
-    
+
     Type coercion validation:
     - String "128" → int 128 for max_label_length numeric parameter
-    - String "30.0" → float 30.0 for max_duration floating-point parameter  
+    - String "30.0" → float 30.0 for max_duration floating-point parameter
     - String "true" → bool True for gradient_checkpointing boolean parameter
     - String preservation for text-based configuration parameters
-    
+
     Default value verification:
     - language_mode defaults to "strict" when not explicitly specified
     - Other optional parameters receive appropriate defaults per ConfigConstants
@@ -144,7 +145,7 @@ def test_validate_profile_defaults_and_types():
 
     # Default value application verification
     assert conf["language_mode"] == "strict"
-    
+
     # Type coercion verification for different Python types
     assert isinstance(conf["max_label_length"], int)
     assert isinstance(conf["max_duration"], float)
@@ -154,59 +155,61 @@ def test_validate_profile_defaults_and_types():
 def test_load_profile_config_missing_profile_raises():
     """
     Tests that loading non-existent profiles raises appropriate ValueError exceptions.
-    
+
     This test ensures robust error handling when attempting to load profile
     configurations that don't exist in the provided configuration file. It
     validates that the configuration system fails fast with clear error messages
     rather than silently using incorrect defaults.
-    
+
     Error handling validation:
     - Missing profile section raises ValueError with descriptive message
     - Available profiles are properly identified in configuration
     - Error occurs before any configuration processing or validation
     - Exception provides sufficient context for debugging configuration issues
-    
+
     Called by:
     - pytest discovery during automated error handling validation
     - Configuration system testing for robustness verification
     - Development workflows ensuring proper error condition handling
     - CI/CD pipelines for configuration error detection and reporting
-    
+
     Test scenario:
     - Configuration contains "profile:foo" but not "profile:bar"
     - Attempt to load "bar" profile should fail immediately
     - ValueError exception should be raised with appropriate error message
     - No configuration processing should occur for missing profiles
-    
+
     This validates defensive programming practices and helps prevent
     silent configuration errors that could lead to training failures.
     """
-    cfg = make_cfg({
-        "DEFAULT": {},
-        "profile:foo": {"model": "whisper-small", "dataset": "ds"},
-    })
+    cfg = make_cfg(
+        {
+            "DEFAULT": {},
+            "profile:foo": {"model": "whisper-small", "dataset": "ds"},
+        }
+    )
     with pytest.raises(ValueError):
         load_profile_config(cfg, "bar")
 
 
 def test_load_profile_config_required_keys_enforced():
     # Minimal hierarchical config with missing required key should raise
-    cfg = make_cfg({
-        "DEFAULT": {},
-        "model:whisper-small": {"group": "whisper", "base_model": "openai/whisper-small"},
-        "dataset:dummy": {
-            "source": "dummy_source",
-            "text_column": "text",
-            "max_label_length": "128",
-            "max_duration": "30",
-            "train_split": "train",
-            "validation_split": "validation"
-        },
-        "profile:p": {"model": "whisper-small", "dataset": "dummy"},
-    })
+    cfg = make_cfg(
+        {
+            "DEFAULT": {},
+            "model:whisper-small": {"group": "whisper", "base_model": "openai/whisper-small"},
+            "dataset:dummy": {
+                "source": "dummy_source",
+                "text_column": "text",
+                "max_label_length": "128",
+                "max_duration": "30",
+                "train_split": "train",
+                "validation_split": "validation",
+            },
+            "profile:p": {"model": "whisper-small", "dataset": "dummy"},
+        }
+    )
 
     # Missing training hyperparameters trigger required check
     with pytest.raises(ValueError):
         load_profile_config(cfg, "p")
-
-

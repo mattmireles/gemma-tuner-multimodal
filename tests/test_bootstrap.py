@@ -1,7 +1,7 @@
-import os
-import sys
 import importlib
+import os
 import platform
+import sys
 
 
 def test_bootstrap_sets_mps_env(monkeypatch):
@@ -16,6 +16,7 @@ def test_bootstrap_sets_mps_env(monkeypatch):
     # Reload module to re-run bootstrap side effects
     sys.modules.pop("whisper_tuner.core.bootstrap", None)
     import whisper_tuner.core.bootstrap  # noqa: F401
+
     importlib.reload(whisper_tuner.core.bootstrap)
 
     high = float(os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0"))

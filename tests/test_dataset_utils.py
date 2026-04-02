@@ -1,7 +1,6 @@
 import os
-import tempfile
+
 import pandas as pd
-import pytest
 
 from whisper_tuner.utils.dataset_utils import load_dataset_split
 
@@ -16,11 +15,14 @@ def test_patch_precedence_override_then_protect_then_blacklist(tmp_path):
     # Create minimal dataset files
     data_dir = tmp_path / "data" / "datasets" / "toy"
     os.makedirs(data_dir, exist_ok=True)
-    _write_csv(str(data_dir / "train.csv"), [
-        {"id": 1, "text": "orig1"},
-        {"id": 2, "text": "orig2"},
-        {"id": 3, "text": "orig3"},
-    ])
+    _write_csv(
+        str(data_dir / "train.csv"),
+        [
+            {"id": 1, "text": "orig1"},
+            {"id": 2, "text": "orig2"},
+            {"id": 3, "text": "orig3"},
+        ],
+    )
 
     # Fake config.ini pointing to source "toy_source"
     cfg_path = tmp_path / "config.ini"
@@ -37,17 +39,13 @@ max_duration = 30
     # Patches directory
     patches_root = tmp_path / "data_patches" / "toy_source"
     # Override: change id=1 text to fixed1
-    _write_csv(str(patches_root / "override_text_perfect" / "o.csv"), [
-        {"id": 1, "text": "fixed1", "text_perfect": "fixed1"}
-    ])
+    _write_csv(
+        str(patches_root / "override_text_perfect" / "o.csv"), [{"id": 1, "text": "fixed1", "text_perfect": "fixed1"}]
+    )
     # Protect id=2
-    _write_csv(str(patches_root / "do_not_blacklist" / "p.csv"), [
-        {"id": 2}
-    ])
+    _write_csv(str(patches_root / "do_not_blacklist" / "p.csv"), [{"id": 2}])
     # Blacklist id=2 and id=3 (2 should be rescued)
-    _write_csv(str(patches_root / "delete" / "b.csv"), [
-        {"id": 2}, {"id": 3}
-    ])
+    _write_csv(str(patches_root / "delete" / "b.csv"), [{"id": 2}, {"id": 3}])
 
     # Monkeypatch cwd so dataset_utils reads our config.ini
     cwd = os.getcwd()
@@ -74,10 +72,13 @@ def test_streaming_blacklist_respected(tmp_path):
     # Prepare tiny dataset
     data_dir = tmp_path / "data" / "datasets" / "toy"
     os.makedirs(data_dir, exist_ok=True)
-    _write_csv(str(data_dir / "train.csv"), [
-        {"id": 10, "text": "a"},
-        {"id": 11, "text": "b"},
-    ])
+    _write_csv(
+        str(data_dir / "train.csv"),
+        [
+            {"id": 10, "text": "a"},
+            {"id": 11, "text": "b"},
+        ],
+    )
 
     # config.ini
     cfg_path = tmp_path / "config.ini"
@@ -110,5 +111,3 @@ max_duration = 30
 
     ids = [int(r["id"]) for r in samples]
     assert ids == [10]
-
-

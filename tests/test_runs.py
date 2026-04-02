@@ -3,10 +3,10 @@ import os
 import tempfile
 
 from whisper_tuner.core.runs import (
-    get_next_run_id,
-    create_run_directory,
-    mark_run_as_completed,
     RunConstants,
+    create_run_directory,
+    get_next_run_id,
+    mark_run_as_completed,
 )
 
 
@@ -39,5 +39,3 @@ def test_create_run_directory_and_completion_marker():
             meta = json.load(f)
         assert meta.get("status") == RunConstants.STATUS_COMPLETED
         assert meta.get("end_time") is not None
-
-

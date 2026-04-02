@@ -1,4 +1,4 @@
-from whisper_tuner.core.config import ConfigConstants, _validate_profile_config
+from whisper_tuner.core.config import _validate_profile_config
 
 
 def test_validate_profile_config_applies_fallbacks():
@@ -13,6 +13,7 @@ def test_validate_profile_config_applies_fallbacks():
     }
     _validate_profile_config(conf, ["max_duration", "max_label_length"])
     # Ensure fallbacks are present and coerced types exist
-    assert conf.get("language_mode") in ("strict", "mixed", "override:" + "") or isinstance(conf.get("language_mode"), str)
+    lang_mode = conf.get("language_mode")
+    assert lang_mode in ("strict", "mixed", "override:") or isinstance(lang_mode, str)
     assert isinstance(conf["max_duration"], float)
     assert isinstance(conf["max_label_length"], int)

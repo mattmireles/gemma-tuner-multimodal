@@ -14,13 +14,14 @@ Usage:
       --text-column text \
       --limit 200
 """
+
 from __future__ import annotations
 
 import argparse
 import csv
 import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
@@ -31,7 +32,7 @@ except Exception:
     PeftModel = None  # Optional if no adapters are used
 
 try:
-    from jiwer import wer, cer
+    from jiwer import cer, wer
 except Exception:
     wer = cer = None  # User must install jiwer
 
@@ -77,7 +78,7 @@ def main() -> int:
     if device.type == "mps":
         try:
             x = torch.zeros(1, device=device, dtype=torch.bfloat16)
-            use_bf16 = (x.dtype == torch.bfloat16)
+            use_bf16 = x.dtype == torch.bfloat16
             del x
         except Exception:
             use_bf16 = False

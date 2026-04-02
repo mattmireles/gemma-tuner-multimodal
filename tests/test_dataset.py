@@ -6,11 +6,11 @@ This script uses an older `load_dataset_split` signature. It is disabled by defa
 to keep CI green. To run it manually, set environment variable RUN_LEGACY_DATASET_TEST=1.
 """
 
-import os
-import sys
-import pytest
 import configparser
-import datasets
+import os
+
+import pytest
+
 from whisper_tuner.utils.dataset_utils import load_dataset_split
 
 # Gate behind env var to avoid failing CI by default
@@ -32,7 +32,7 @@ try:
     data_dir = config["dataset"]["data_dir"]
     train_split = config["dataset"]["train_split"]
     dataset_config = config["dataset"]
-    
+
     print(f"Data directory: {data_dir}")
     print(f"Training split: {train_split}")
     print(f"Dataset configuration: {dict(dataset_config)}")
@@ -68,17 +68,17 @@ print("Examining first few samples for validation...")
 # Try to access sample data with error handling
 try:
     print("Accessing first 10 samples...")
-    
+
     # Handle both streaming and regular dataset formats
-    if hasattr(dataset, 'take'):
+    if hasattr(dataset, "take"):
         # Streaming dataset format
         samples = list(dataset.take(10))
     else:
         # Regular dataset format
-        samples = dataset[:10] if len(dataset) >= 10 else dataset[:len(dataset)]
-    
+        samples = dataset[:10] if len(dataset) >= 10 else dataset[: len(dataset)]
+
     for i, sample in enumerate(samples):
-        print(f"\n--- Sample {i+1} ---")
+        print(f"\n--- Sample {i + 1} ---")
         if isinstance(sample, dict):
             for key, value in sample.items():
                 # Truncate long text fields for readability
@@ -89,7 +89,7 @@ try:
                 print(f"  {key}: {display_value}")
         else:
             print(f"  Sample: {sample}")
-            
+
 except Exception as e:
     print(f"Error accessing samples: {str(e)}")
     print("Dataset may be corrupted, have unexpected format, or use different API")

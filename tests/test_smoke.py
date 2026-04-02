@@ -5,6 +5,7 @@ import importlib
 import os
 import sys
 
+
 def test_imports():
     # Ensure project root is on sys.path for module imports
     root = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +16,7 @@ def test_imports():
     importlib.import_module("whisper_tuner.cli_typer")
     importlib.import_module("whisper_tuner.scripts.evaluate")
     importlib.import_module("whisper_tuner.scripts.finetune")
+
 
 if __name__ == "__main__":
     test_imports()

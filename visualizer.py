@@ -2,7 +2,6 @@
 """Compatibility shim for legacy ``visualizer.py`` usage."""
 
 from whisper_tuner.visualizer import *  # noqa: F401,F403
-
 from whisper_tuner.visualizer import app, socketio
 
 if __name__ == "__main__":

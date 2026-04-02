@@ -8,5 +8,3 @@ LLM-first notes:
 - Keep this file minimal to avoid import-time work
 - Cross-file relationships are documented in each submodule
 """
-
-

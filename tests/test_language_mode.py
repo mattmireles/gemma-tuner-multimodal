@@ -1,5 +1,3 @@
-import types
-
 from whisper_tuner.core.inference import generate
 
 
@@ -20,14 +18,18 @@ class DummyModel:
 
     def generate(self, input_features=None, **kwargs):
         self._last_input = input_features
+
         # Return a simple tensor-like object with cpu().numpy()
         class _T:
             def __init__(self):
                 pass
+
             def cpu(self):
                 return self
+
             def numpy(self):
                 return [[1, 2, 3]]
+
         return _T()
 
 
@@ -51,5 +53,3 @@ def test_language_mode_override_sets_ids():
     p = DummyProcessor()
     generate(m, p, input_features=[0.0], language_mode="override:es")
     assert m.generation_config.forced_decoder_ids == [(0, 42)]
-
-
