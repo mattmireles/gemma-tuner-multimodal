@@ -2056,6 +2056,7 @@ def execute_training(profile_config: Dict[str, Any]):
     console.print("[dim]Training started! This may take several hours...[/dim]")
     console.print("[dim]Press Ctrl+C to interrupt (training will be saved at checkpoints)[/dim]")
     
+    keep_config = False
     try:
         # Ask if user wants distributed training; if so, route to distributed launcher
         enable_dist = questionary.confirm(
@@ -2131,24 +2132,28 @@ def execute_training(profile_config: Dict[str, Any]):
         
     except KeyboardInterrupt:
         # User interruption with checkpoint preservation confirmation
+        keep_config = True
         console.print(f"\n[yellow]⚠️ Training interrupted by user[/yellow]")
         console.print(f"[yellow]Progress saved at latest checkpoint[/yellow]")
         console.print(f"[dim]Resume with: python main.py finetune {profile_name} --config {temp_config_path}[/dim]")
-        
+
     except Exception as e:
         # General error recovery with troubleshooting guidance
+        keep_config = True
         console.print(f"\n[red]❌ Training execution failed: {str(e)}[/red]")
         console.print(f"[red]Check your configuration and try again[/red]")
         console.print(f"[dim]Configuration saved at: {temp_config_path}[/dim]")
-        
+
     finally:
         # Temporary file cleanup with error tolerance
         # Clean up temporary configuration to prevent accumulation
-        try:
-            temp_config_path.unlink()
-        except Exception:
-            # Ignore cleanup errors - temporary files will be cleaned up eventually
-            pass
+        # Preserve config file when training was interrupted or failed so user can resume
+        if not keep_config:
+            try:
+                temp_config_path.unlink()
+            except Exception:
+                # Ignore cleanup errors - temporary files will be cleaned up eventually
+                pass
 
 def check_distributed_training():
     """

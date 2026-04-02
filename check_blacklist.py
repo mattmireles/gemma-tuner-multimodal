@@ -42,6 +42,8 @@ effectiveness and helps optimize the patch system for better training
 data quality.
 """
 
+import sys
+
 import pandas as pd
 import glob
 import os
@@ -175,55 +177,56 @@ def print_matching_lines(file1, file2):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
-# === BLACKLIST ANALYSIS WORKFLOW ===
-# This section demonstrates comprehensive blacklist analysis by cross-referencing
-# the latest generated blacklist with all relevant data patch categories.
+if __name__ == "__main__":
+    # === BLACKLIST ANALYSIS WORKFLOW ===
+    # This section demonstrates comprehensive blacklist analysis by cross-referencing
+    # the latest generated blacklist with all relevant data patch categories.
 
-# Discover the most recent blacklist file automatically
-latest_blacklist = find_latest_blacklist_file('output')
+    # Discover the most recent blacklist file automatically
+    latest_blacklist = find_latest_blacklist_file('output')
 
-if latest_blacklist:
-    print(f"Analyzing blacklist file: {latest_blacklist}")
-    print("=" * 60)
-else:
-    print("No blacklist files found in output directory.")
-    exit(1)
-
-# Define data patch files for comprehensive analysis
-# These represent different data quality categories and manual interventions
-patch_files = [
-    # Deletion category: Samples marked for removal
-    'data_patches/data3/delete/data3_prepared - remove - translated.csv',
-    
-    # Protection category: High-quality samples protected from blacklisting
-    'data_patches/data3/do_not_blacklist/blacklist - Keep ground-truth.csv',
-    
-    # Override category: Manually corrected transcriptions
-    'data_patches/data3/override_text_perfect/blacklist - Keep Edited.csv',
-    'data_patches/data3/override_text_perfect/data3_prepared - edited.csv',
-]
-
-print("\n=== CROSS-REFERENCE ANALYSIS RESULTS ===\n")
-
-# Perform cross-reference analysis for each patch category
-for patch_file in patch_files:
-    print(f"\n--- Comparing with: {patch_file} ---")
-    
-    # Check if patch file exists before analysis
-    if os.path.exists(patch_file):
-        print_matching_lines(latest_blacklist, patch_file)
+    if latest_blacklist:
+        print(f"Analyzing blacklist file: {latest_blacklist}")
+        print("=" * 60)
     else:
-        print(f"Warning: Patch file not found: {patch_file}")
-    
-    print("-" * 50)
+        print("No blacklist files found in output directory.")
+        sys.exit(1)
 
-print("\n=== ANALYSIS COMPLETE ===\n")
-print("Summary:")
-print("- Cross-referenced latest blacklist with all patch categories")
-print("- Identified overlaps between blacklisted and protected/corrected samples")
-print("- Results show effectiveness of data quality management system")
-print("\nUse these results to:")
-print("- Validate blacklist generation accuracy")
-print("- Identify potential conflicts in data quality decisions")
-print("- Optimize protection and override strategies")
-print("- Assess impact of manual corrections on training data")
+    # Define data patch files for comprehensive analysis
+    # These represent different data quality categories and manual interventions
+    patch_files = [
+        # Deletion category: Samples marked for removal
+        'data_patches/data3/delete/data3_prepared - remove - translated.csv',
+
+        # Protection category: High-quality samples protected from blacklisting
+        'data_patches/data3/do_not_blacklist/blacklist - Keep ground-truth.csv',
+
+        # Override category: Manually corrected transcriptions
+        'data_patches/data3/override_text_perfect/blacklist - Keep Edited.csv',
+        'data_patches/data3/override_text_perfect/data3_prepared - edited.csv',
+    ]
+
+    print("\n=== CROSS-REFERENCE ANALYSIS RESULTS ===\n")
+
+    # Perform cross-reference analysis for each patch category
+    for patch_file in patch_files:
+        print(f"\n--- Comparing with: {patch_file} ---")
+
+        # Check if patch file exists before analysis
+        if os.path.exists(patch_file):
+            print_matching_lines(latest_blacklist, patch_file)
+        else:
+            print(f"Warning: Patch file not found: {patch_file}")
+
+        print("-" * 50)
+
+    print("\n=== ANALYSIS COMPLETE ===\n")
+    print("Summary:")
+    print("- Cross-referenced latest blacklist with all patch categories")
+    print("- Identified overlaps between blacklisted and protected/corrected samples")
+    print("- Results show effectiveness of data quality management system")
+    print("\nUse these results to:")
+    print("- Validate blacklist generation accuracy")
+    print("- Identify potential conflicts in data quality decisions")
+    print("- Optimize protection and override strategies")
+    print("- Assess impact of manual corrections on training data")
