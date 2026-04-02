@@ -2,7 +2,7 @@
 -- This view adds a synthetic numeric ID column to avoid type inference issues
 -- while preserving all metadata fields including note_id as a STRING
 
-CREATE OR REPLACE VIEW `YOUR_PROJECT_ID.whisper_finetuning.verified_generations_with_audio` AS
+CREATE OR REPLACE VIEW `YOUR_PROJECT_ID.YOUR_DATASET_ID.verified_generations_with_audio` AS
 WITH unioned AS (
   -- truthgen_results_* snapshots
   SELECT
@@ -22,7 +22,7 @@ WITH unioned AS (
     JSON_VALUE(TO_JSON_STRING(t), '$.user_id')                      AS user_id,
     JSON_VALUE(TO_JSON_STRING(t), '$.timestamp')                    AS timestamp,
     CONCAT('truthgen_results_', _TABLE_SUFFIX)                      AS source_table
-  FROM `YOUR_PROJECT_ID.whisper_finetuning.truthgen_results_*` AS t
+  FROM `YOUR_PROJECT_ID.YOUR_DATASET_ID.truthgen_results_*` AS t
 
   UNION ALL
 
@@ -44,7 +44,7 @@ WITH unioned AS (
     JSON_VALUE(TO_JSON_STRING(t), '$.user_id')                      AS user_id,
     JSON_VALUE(TO_JSON_STRING(t), '$.timestamp')                    AS timestamp,
     CONCAT('tt-', _TABLE_SUFFIX)                                    AS source_table
-  FROM `YOUR_PROJECT_ID.whisper_finetuning.tt-*` AS t
+  FROM `YOUR_PROJECT_ID.YOUR_DATASET_ID.tt-*` AS t
 
   UNION ALL
 
@@ -66,7 +66,7 @@ WITH unioned AS (
     JSON_VALUE(TO_JSON_STRING(t), '$.user_id')                      AS user_id,
     JSON_VALUE(TO_JSON_STRING(t), '$.timestamp')                    AS timestamp,
     CONCAT('oasis', _TABLE_SUFFIX)                                  AS source_table
-  FROM `YOUR_PROJECT_ID.whisper_finetuning.oasis*` AS t
+  FROM `YOUR_PROJECT_ID.YOUR_DATASET_ID.oasis*` AS t
 )
 SELECT
   -- Add synthetic numeric ID as first column for compatibility with export tools

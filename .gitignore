@@ -157,3 +157,6 @@ credentials.json
 credentials.ini
 distributed_hosts.json
 /temp_configs/
+
+# Claude Code local settings — machine-specific paths, never commit
+.claude/settings.local.json
