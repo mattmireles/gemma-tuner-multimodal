@@ -153,7 +153,7 @@ class TrainingVisualizer:
                     attention_2d = attention.mean(axis=(0, 1))  # Average over batch and heads
                     self.attention_buffer.append({
                         'layer': layer_name,
-                        'attention': attention_2d.tolist()[:20, :20]  # Limit size for performance
+                        'attention': attention_2d[:20, :20].tolist()  # Limit size for performance
                     })
         return hook
     
