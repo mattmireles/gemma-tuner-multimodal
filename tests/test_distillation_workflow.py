@@ -37,14 +37,16 @@ def _ensure_tiny_dataset(base_dir: Path) -> None:
 
 @pytest.mark.slow
 def test_distillation_single_step(tmp_path: Path):
-    base_dir = Path.cwd()
+    # Use tmp_path (provided by pytest) instead of cwd so test artifacts don't
+    # accumulate in the repo between runs and cleanup is automatic.
+    base_dir = tmp_path
     _ensure_tiny_dataset(base_dir)
 
     # Minimal profile_config for distillation: small student, large teacher, one step
     profile_config = {
         "model": "distil-tiny-from-medium",  # name not used directly by module
         "base_model": "openai/whisper-tiny",  # student
-        "teacher_model": "whisper-medium",  # will resolve via config.ini to openai/whisper-medium
+        "teacher_model": "openai/whisper-medium",  # full HuggingFace ID required; config.ini not used here
         "dataset": "test_streaming",
         "text_column": "text_perfect",
         "train_split": "train",
@@ -61,19 +63,8 @@ def test_distillation_single_step(tmp_path: Path):
         # keep defaults to float32/eager for MPS safety
     }
 
+    # tmp_path is a fresh per-test directory; no manual cleanup needed
     out_dir = base_dir / "output" / "test_distill_workflow"
-    if out_dir.exists():
-        for root, dirs, files in os.walk(out_dir.as_posix(), topdown=False):
-            for name in files:
-                try:
-                    os.remove(os.path.join(root, name))
-                except Exception:
-                    pass
-            for name in dirs:
-                try:
-                    os.rmdir(os.path.join(root, name))
-                except Exception:
-                    pass
     out_dir.mkdir(parents=True, exist_ok=True)
 
     from whisper_tuner.models.distil_whisper.finetune import main as distil_main
