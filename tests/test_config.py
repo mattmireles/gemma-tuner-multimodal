@@ -43,7 +43,7 @@ Configuration validation strategy:
 import configparser
 import pytest
 
-from core.config import load_profile_config, _validate_profile_config, ConfigConstants
+from whisper_tuner.core.config import load_profile_config, _validate_profile_config, ConfigConstants
 
 
 def make_cfg(sections: dict) -> configparser.ConfigParser:

@@ -1,6 +1,6 @@
 import numpy as np
 
-from core.inference import prepare_features, decode_and_score
+from whisper_tuner.core.inference import prepare_features, decode_and_score
 
 
 class DummyFE:

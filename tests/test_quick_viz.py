@@ -3,7 +3,7 @@
 
 import sys
 import time
-from visualizer import start_visualization_server, TrainingVisualizer
+from whisper_tuner.visualizer import start_visualization_server, TrainingVisualizer
 import torch
 
 print("🎆 Testing Whisper Training Visualizer")

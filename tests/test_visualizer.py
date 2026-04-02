@@ -10,7 +10,7 @@ import time
 import random
 import math
 import numpy as np
-from visualizer import TrainingVisualizer, start_visualization_server
+from whisper_tuner.visualizer import TrainingVisualizer, start_visualization_server
 import torch
 
 def simulate_training():

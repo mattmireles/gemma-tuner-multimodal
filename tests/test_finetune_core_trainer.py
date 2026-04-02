@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 def test_build_trainer_smoke(monkeypatch):
     # Lazy import
-    from models.whisper.finetune_core.trainer import build_trainer
+    from whisper_tuner.models.whisper.finetune_core.trainer import build_trainer
 
     # Minimal stubs
     class _Tok:

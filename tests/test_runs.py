@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 
-from core.runs import (
+from whisper_tuner.core.runs import (
     get_next_run_id,
     create_run_directory,
     mark_run_as_completed,

@@ -12,9 +12,9 @@ def test_imports():
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    importlib.import_module("main")
-    importlib.import_module("scripts.evaluate")
-    importlib.import_module("scripts.finetune")
+    importlib.import_module("whisper_tuner.cli_typer")
+    importlib.import_module("whisper_tuner.scripts.evaluate")
+    importlib.import_module("whisper_tuner.scripts.finetune")
 
 if __name__ == "__main__":
     test_imports()

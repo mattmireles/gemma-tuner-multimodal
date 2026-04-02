@@ -1,6 +1,6 @@
 import types
 
-from core.inference import generate
+from whisper_tuner.core.inference import generate
 
 
 class DummyProcessor:
