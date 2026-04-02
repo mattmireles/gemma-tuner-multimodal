@@ -27,7 +27,7 @@ MANIFEST
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+#  before PyStudio builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -46,7 +46,6 @@ nosetests.xml
 coverage.xml
 *.cover
 *.py,cover
-.hypothesis/
 .pytest_cache/
 
 # Translations
@@ -117,7 +116,6 @@ dmypy.json
 .pyre/
 
 # Models and training outputs
-output/
 models/
 *.pt
 *.safetensors
@@ -131,8 +129,11 @@ models/
 experiments.csv
 experiments.db
 distributed_training_result.pt
+output/
 data/audio/
 data/datasets/
+data_patches/
+exports/
 
 # IDE files
 .idea/

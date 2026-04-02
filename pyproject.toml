@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Whisper fine-tuning tools with Apple Silicon (MPS) support"
 readme = "README.md"
 authors = [{ name = "Whisper Fine-Tuner Maintainers" }]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 keywords = ["whisper", "speech", "asr", "pytorch", "apple silicon", "mps"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -17,7 +17,6 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Operating System :: MacOS",
@@ -79,30 +78,17 @@ all = [
 ]
 
 [project.scripts]
-whisper-tuner = "cli_typer:app"
+whisper-tuner = "whisper_tuner.cli_typer:app"
 
 [project.urls]
-Homepage = "https://github.com/mattmireles/whisper"
-Repository = "https://github.com/mattmireles/whisper"
-Issues = "https://github.com/mattmireles/whisper/issues"
-
-[tool.setuptools]
-# Include top-level single-file modules
-py-modules = [
-  "main",
-  "cli_typer",
-  "wft_constants",
-  "visualizer",
-]
+Homepage = "https://github.com/mattmireles/whisper-fine-tuner-macos"
+Repository = "https://github.com/mattmireles/whisper-fine-tuner-macos"
+Issues = "https://github.com/mattmireles/whisper-fine-tuner-macos/issues"
 
 [tool.setuptools.packages.find]
 # Discover regular packages from package directories
 include = [
-  "core*",
-  "utils*",
-  "scripts*",
-  "models*",
-  "wizard*",
+  "whisper_tuner*",
 ]
 
 [tool.ruff]

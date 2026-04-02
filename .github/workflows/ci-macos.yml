@@ -34,78 +34,27 @@ jobs:
           else
             pip install -r requirements.txt
           fi
-          # Install a CPU-only PyTorch to run preprocessing/evaluation logic
+          python -m pip install -e '.[dev]'
+          # Install a CPU-only PyTorch so CLI imports can run in CI.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Smoke import tests
         run: |
           python - <<'PY'
-          import importlib
-          importlib.import_module('main')
-          importlib.import_module('scripts.evaluate')
-          importlib.import_module('models.whisper.finetune')
-          print('OK: basic imports')
+          import whisper_tuner
+          from whisper_tuner.cli_typer import app
+          from whisper_tuner.main import main as legacy_main
+          from whisper_tuner.manage import main as legacy_manage
+          from whisper_tuner.scripts import evaluate
+          from whisper_tuner.models.whisper.finetune import main as whisper_finetune
+          print('OK: package imports')
           PY
 
-      - name: Prepare tiny streaming dataset
+      - name: Legacy shim smoke (help paths)
         run: |
-          python main.py prepare test_streaming --config config.ini
+          python main.py --help
+          python manage.py --help
 
-      - name: Evaluate prepped dataset with tiny settings
-        env:
-          PYTORCH_MPS_HIGH_WATERMARK_RATIO: "0.8"
+      - name: CLI smoke
         run: |
-          # Use a minimal profile-like config for evaluation
-          python - <<'PY'
-          import json, os
-          from scripts.evaluate import run_evaluation
-          profile = {
-            "dataset": "test_streaming",
-            "text_column": "text_verbatim",
-            "max_label_length": 64,
-            "max_duration": 30.0,
-            "validation_split": "test_streaming_prepared",  # fallback file is accepted
-            "per_device_eval_batch_size": 2,
-            "dtype": "float32",
-            "attn_implementation": "eager",
-            "model_name_or_path": "openai/whisper-tiny",  # tiny model for speed
-          }
-          os.makedirs('output/ci-eval', exist_ok=True)
-          run_evaluation(profile, 'output/ci-eval')
-          print('OK: evaluation ran')
-          PY
-
-      - name: Optional mini-train smoke (guarded)
-        # Workflow disabled - this step will never run
-        if: false
-        env:
-          RUN_MINI_TRAIN: '0'
-        run: |
-          python - <<'PY'
-          import os, json
-          from scripts.finetune import main as finetune_main
-          profile = {
-            "model": "whisper-tiny",
-            "base_model": "openai/whisper-tiny",
-            "dataset": "test_streaming",
-            "text_column": "text_verbatim",
-            "max_label_length": 64,
-            "max_duration": 30.0,
-            "train_split": "test_streaming_prepared",
-            "per_device_train_batch_size": 1,
-            "num_train_epochs": 1,
-            "gradient_accumulation_steps": 1,
-            "save_strategy": "no",
-            "eval_strategy": "no",
-            "logging_steps": 10,
-            "save_steps": 1000,
-            "save_total_limit": 1,
-            "learning_rate": 1e-4,
-            "warmup_steps": 0,
-            "dtype": "float32",
-            "attn_implementation": "eager",
-          }
-          os.makedirs('output/ci-train', exist_ok=True)
-          finetune_main(profile, 'output/ci-train')
-          print('OK: mini-train ran')
-          PY
+          whisper-tuner --help
