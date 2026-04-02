@@ -7,4 +7,6 @@ from whisper_tuner.visualizer import app, socketio
 if __name__ == "__main__":
     print("Starting Whisper Training Visualizer in test mode...")
     print("Open http://localhost:8080 in your browser")
-    socketio.run(app, host="0.0.0.0", port=8080, debug=True, allow_unsafe_werkzeug=True)
+    # host="127.0.0.1" instead of "0.0.0.0": only accept connections from localhost.
+    # debug=False: never expose Werkzeug's interactive debugger, even in test mode.
+    socketio.run(app, host="127.0.0.1", port=8080, debug=False, allow_unsafe_werkzeug=True)
