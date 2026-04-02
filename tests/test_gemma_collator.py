@@ -1,6 +1,6 @@
 import types
 import torch
-from models.gemma.finetune import DataCollatorGemmaAudio, GemmaTrainingConstants
+from whisper_tuner.models.gemma.finetune import DataCollatorGemmaAudio, GemmaTrainingConstants
 
 class DummyProcessor:
     def __init__(self):
@@ -24,7 +24,7 @@ def test_collator_produces_labels_and_ids():
         {"audio_path": "/path/b.wav", "text": "world"},
     ]
     # Monkeypatch audio loader to avoid file I/O
-    import models.gemma.finetune as finetune_mod
+    import whisper_tuner.models.gemma.finetune as finetune_mod
     def fake_loader(path, sampling_rate=None):
         return [0.0] * 16000
     finetune_mod.load_audio_local_or_gcs = fake_loader

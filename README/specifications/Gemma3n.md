@@ -199,8 +199,8 @@ export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 ### 2) Preflight & Profiling
 
 ```
-python scripts/gemma_preflight.py
-python scripts/gemma_profiler.py --model google/gemma-3n-E2B-it
+python -m whisper_tuner.scripts.gemma_preflight
+python -m whisper_tuner.scripts.gemma_profiler --model google/gemma-3n-E2B-it
 ```
 
 ### 3) Run the Wizard (LoRA on Gemma)
@@ -214,7 +214,7 @@ python wizard.py
 ### 4) Tiny Overfit Sanity (Optional)
 
 ```
-python scripts/gemma_tiny_overfit.py --profile gemma-lora-test --max-samples 32
+python -m whisper_tuner.scripts.gemma_tiny_overfit --profile gemma-lora-test --max-samples 32
 ```
 
 ### 5) Evaluate (WER/CER)

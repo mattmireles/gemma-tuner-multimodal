@@ -67,7 +67,7 @@ The `scripts/prepare_data.py` script handles the data preparation process, inclu
     *   Update `[dataset_defaults]` with appropriate values.
     *   If you want to keep audio files separated by dataset, create a subdirectory `data/audio/data123/` and update `audio_dir` accordingly.
     *   Configure the `languages` and `language_mode` settings as described in the "Language Handling" section.
-3. **Run `prepare_data.py`:** Execute `python main.py prepare data123 --config config.ini` to prepare the new dataset.
+3. **Run `prepare_data.py`:** Execute `whisper-tuner prepare data123 --config config.ini` to prepare the new dataset.
 4. **Update `finetune.py` (if needed):** If your new dataset requires special handling during finetuning (e.g., different preprocessing steps), you might need to modify the `models/whisper/finetune.py` or `models/distil-whisper/finetune.py` scripts accordingly.
 
 ## Language Handling
@@ -118,7 +118,7 @@ To add a new dataset (e.g., `data123`):
     *   Update `[dataset_defaults]` with appropriate values.
     *   If you want to keep audio files separated by dataset, create a subdirectory `data/audio/data123/` and update `audio_dir` accordingly.
     *   Configure the `languages` and `language_mode` settings as described in the "Language Handling" section.
-4. **Run `prepare_data.py`:** Execute `python main.py prepare data123 --config config.ini` to prepare the new dataset.
+4. **Run `prepare_data.py`:** Execute `whisper-tuner prepare data123 --config config.ini` to prepare the new dataset.
 5. **Update `finetune.py` (if needed):** If your new dataset requires special handling during finetuning (e.g., different preprocessing steps), you might need to modify the `models/whisper/finetune.py` or `models/distil-whisper/finetune.py` scripts accordingly.
 
 ## Dataset Loading
@@ -137,12 +137,12 @@ The `load_dataset_split` function automatically applies overrides and blacklists
 
 ## Dataset Evaluation
 
-You can evaluate a model on a specific dataset using the `main.py evaluate` command. There are two ways to specify the model and dataset:
+You can evaluate a model on a specific dataset using the `whisper-tuner evaluate` command. There are two ways to specify the model and dataset:
 
 1. **Using a profile:**
 
     ```bash
-    python main.py evaluate medium-data3
+    whisper-tuner evaluate medium-data3
     ```
 
     This will evaluate the finetuned model specified in the `medium-data3` profile on the dataset defined in that profile.
@@ -150,7 +150,7 @@ You can evaluate a model on a specific dataset using the `main.py evaluate` comm
 2. **Using a model+dataset combination:**
 
     ```bash
-    python main.py evaluate whisper-medium+data3
+    whisper-tuner evaluate whisper-medium+data3
     ```
 
     This will evaluate the pretrained `whisper-medium` model on the `data3` dataset. The evaluation will use the settings defined in the `[model:whisper-medium]` and `[dataset:data3]` sections of `config.ini`. The results will be saved in the `output/whisper-medium+data3` directory.
@@ -159,5 +159,5 @@ You can evaluate a model on a specific dataset using the `main.py evaluate` comm
 
 ## Notes
 
-*   The `max_train_samples` argument can be used with `main.py finetune` or `main.py evaluate` to limit the number of samples loaded for either training or evaluation.
+*   The `max_train_samples` argument can be used with `whisper-tuner finetune` or `whisper-tuner evaluate` to limit the number of samples loaded for either training or evaluation.
 *   The `speaker_id` column is optional. If it's not present in the original data, the scripts will still work, but speaker-based splitting will not be available.

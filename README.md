@@ -237,7 +237,7 @@ python wizard.py
 ##### Under the Hood
 - Device detection: `utils/device.get_device()`
 - UI: `rich` + `questionary`
-- Training handoff: `main.py finetune` via a temporary config file in `temp_configs/`
+- Training handoff: `whisper-tuner finetune` via a temporary config file in `temp_configs/`
 - Visualizer (optional): enables `visualize=True` which the training pipeline detects
 
 ##### Persisting Your Choices
@@ -334,7 +334,7 @@ Choose the right method for your use case:
 - **Risk-Free**: Original model remains unchanged
 - **Apple Silicon Optimized**: Designed for MPS efficiency
 
-📖 **[Complete LoRA Guide →](README/LoRA.md)**
+📖 **[LoRA Apple Silicon Guide →](README/guides/apple-silicon/LoRA-Apple-Silicon-Guide.md)**
 
 ### 2. Standard Fine-Tuning
 - **Description**: Updates all model parameters during training
@@ -350,7 +350,7 @@ Choose the right method for your use case:
 - **Output**: Compressed student model
 - **Use Case**: Production deployment requiring smaller model size
 
-📖 **[Complete Distillation Guide →](README/Distillation.md)**
+📖 **[Distillation Deep Dive →](README/specifications/distillation-explainer.md)**
 
 ## System Requirements
 
@@ -395,7 +395,7 @@ Tip: If you need a lockfile, use your preferred tool (e.g., `uv` or `pip-tools`)
 
 ### 4. Verify MPS setup
 ```bash
-python scripts/system_check.py
+whisper-tuner system-check
 
 # Or quick check
 python - << 'PY'
@@ -431,10 +431,10 @@ The preparer auto-detects `gs://` URIs and switches to streaming mode. It also v
 # gs://my-bucket/audio/file2.wav,"Training example",2
 
 # Prepare dataset without downloading
-python scripts/prepare_data.py your_dataset --no-download
+whisper-tuner prepare your_dataset --no-download
 
 # Train as normal - audio streams automatically (Typer CLI)
-python cli_typer.py finetune medium-lora-data3
+whisper-tuner finetune medium-lora-data3
 ```
 
 The system automatically detects GCS paths and streams audio on-demand during training.
@@ -447,14 +447,14 @@ Quickstart:
 
 ```bash
 # 1) Environment preflight & a tiny profiler
-python scripts/gemma_preflight.py
-python scripts/gemma_profiler.py --model google/gemma-3n-E2B-it
+python -m whisper_tuner.scripts.gemma_preflight
+python -m whisper_tuner.scripts.gemma_profiler --model google/gemma-3n-E2B-it
 
 # 2) Run the wizard → choose Gemma family → LoRA → E2B (⭐ Recommended)
 python wizard.py
 
 # 3) Optional: tiny overfit sanity (16–64 samples)
-python scripts/gemma_tiny_overfit.py --profile gemma-lora-test --max-samples 32
+python -m whisper_tuner.scripts.gemma_tiny_overfit --profile gemma-lora-test --max-samples 32
 
 # 4) Evaluate (WER/CER) on a validation CSV
 python tools/eval_gemma_asr.py \
@@ -482,12 +482,12 @@ Create a CSV file with columns:
 
 **Standard Mode** (downloads all audio files locally):
 ```bash
-python scripts/prepare_data.py your_dataset
+whisper-tuner prepare your_dataset
 ```
 
 **Streaming Mode** (for large datasets - no local download):
 ```bash
-python scripts/prepare_data.py your_dataset --no-download
+whisper-tuner prepare your_dataset --no-download
 ```
 
 With `--no-download`, audio files are streamed from Google Cloud Storage during training. The loader validates that your CSV contains at least `id` and your configured text column.
@@ -504,28 +504,28 @@ Edit `config.ini` to set:
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
 # Train (Typer CLI)
-python cli_typer.py finetune medium-data3 --json-logging
+whisper-tuner finetune medium-data3 --json-logging
 
 # Or use the installed console command after `pip install .`:
 whisper-tuner finetune medium-data3 --json-logging
 
 # Legacy (still supported)
-python main.py finetune medium-data3
+whisper-tuner finetune medium-data3
 ```
 
 ### 4. Evaluate model
 ```bash
 # Evaluate (Typer CLI)
-python cli_typer.py evaluate medium-data3
-python cli_typer.py evaluate whisper-tiny+test_streaming
+whisper-tuner evaluate medium-data3
+whisper-tuner evaluate whisper-tiny+test_streaming
 
 # Or with console command
 whisper-tuner evaluate medium-data3
 whisper-tuner evaluate whisper-tiny+test_streaming
 
 # Legacy (still supported)
-python main.py evaluate medium-data3
-python scripts/evaluate.py --model_name_or_path output/{id}-medium-data3 --dataset data3
+whisper-tuner evaluate medium-data3
+whisper-tuner evaluate output/{id}-medium-data3 --dataset data3
 ### 5. Export to GGUF (whisper.cpp) and CoreML (Hybrid)
 
 After a successful training run, the system automatically attempts two exports:
@@ -538,8 +538,8 @@ After a successful training run, the system automatically attempts two exports:
 
 Manual export at any time:
 ```bash
-python -m main export-gguf output/{id}-<profile>
-python -m scripts.export_coreml output/{id}-<profile>
+whisper-tuner export output/{id}-<profile>
+python -m whisper_tuner.scripts.export_coreml output/{id}-<profile>
 ```
 
 Expected output files inside the run directory:
@@ -562,10 +562,10 @@ Notes:
 ### 1. Choose a LoRA profile and run training
 ```bash
 # Start with small model (recommended for testing)
-python cli_typer.py finetune small-lora-data3
+whisper-tuner finetune small-lora-data3
 
 # Scale up to medium for better performance
-python cli_typer.py finetune medium-lora-data3
+whisper-tuner finetune medium-lora-data3
 
 # For Apple Silicon - enable fallback initially
 export PYTORCH_ENABLE_MPS_FALLBACK=1
@@ -581,10 +581,10 @@ output/run-001-small-lora-data3/
 
 ### 3. Evaluate your LoRA model
 ```bash
-python scripts/evaluate.py --model_name_or_path output/run-001-small-lora-data3 --dataset data3
+whisper-tuner evaluate output/run-001-small-lora-data3 --dataset data3
 ```
 
-**Need more control?** See the **[Complete LoRA Guide](README/LoRA.md)** for:
+**Need more control?** See the **[LoRA Apple Silicon Guide](README/guides/apple-silicon/LoRA-Apple-Silicon-Guide.md)** for:
 - Parameter tuning strategies
 - 8-bit quantization setup
 - Multiple adapter management
@@ -601,7 +601,7 @@ For datasets too large to fit in memory, enable streaming mode:
 streaming_enabled = true
 
 # Or via command line (Typer):
-python cli_typer.py finetune large-dataset-streaming
+whisper-tuner finetune large-dataset-streaming
 ```
 
 **Streaming Mode Features:**
@@ -630,7 +630,7 @@ Built-in support for the world's largest public speech dataset with optimized pr
 python wizard.py  # Select "Setup NVIDIA Granary Dataset"
 
 # Direct preparation
-python main.py prepare-granary --profile granary-en
+whisper-tuner prepare-granary granary-en
 
 # With streaming for memory efficiency
 [dataset:granary-streaming]
@@ -765,24 +765,24 @@ Use the Typer CLI for a friendlier interface that delegates to the same core mod
 
 ```bash
 # Prepare data
-python cli_typer.py prepare data3
+whisper-tuner prepare data3
 
 # Prepare NVIDIA Granary dataset
-python cli_typer.py prepare-granary granary-en
+whisper-tuner prepare-granary granary-en
 
 # Train
-python cli_typer.py finetune medium-data3 --json-logging
+whisper-tuner finetune medium-data3 --json-logging
 
 # Evaluate
-python cli_typer.py evaluate medium-data3
-python cli_typer.py evaluate whisper-tiny+test_streaming
+whisper-tuner evaluate medium-data3
+whisper-tuner evaluate whisper-tiny+test_streaming
 
 # Export (HF/SafeTensors model dir)
 # Exports the model directory as-is with SafeTensors (no GGML/CT2 conversion)
-python cli_typer.py export output/{id}-medium-data3
+whisper-tuner export output/{id}-medium-data3
 
 # Diagnostics
-python cli_typer.py system-check
+whisper-tuner system-check
 ```
 
 The legacy `main.py` and scripts remain supported.
@@ -881,7 +881,7 @@ For ultimate control over performance and model size, you can go beyond pre-defi
 The distillation script supports command-line arguments to define the student's architecture. For example, to create a student with a powerful encoder from `whisper-large-v2` but a tiny, custom 2-layer decoder, you could run:
 
 ```bash
-python models/distil-whisper/finetune.py \
+python -m whisper_tuner.models.distil_whisper.finetune \
   --model_name_or_path openai/whisper-small \
   --teacher_model_name_or_path openai/whisper-large-v2 \
   --student_decoder_layers 2 \
@@ -909,16 +909,16 @@ kl_weight = 0.5        # Weight balancing KL divergence vs cross-entropy loss
 2. **Run distillation training using profiles**:
 ```bash
 # Create a distilled whisper-small from whisper-large-v2 teacher
-python cli_typer.py finetune distil-small-from-large
+whisper-tuner finetune distil-small-from-large
 
 # Or create a distilled whisper-medium from whisper-large-v2 teacher  
-python cli_typer.py finetune distil-medium-from-large
+whisper-tuner finetune distil-medium-from-large
 ```
 
 Alternatively, run distillation directly:
 ```bash
 # Create a distilled whisper-small from whisper-large-v2 teacher
-python models/distil-whisper/finetune.py \
+python -m whisper_tuner.models.distil_whisper.finetune \
   --model_name_or_path openai/whisper-small \
   --teacher_model_name_or_path openai/whisper-large-v2 \
   --dataset_name your-dataset \
@@ -966,10 +966,9 @@ Distillation requires loading both teacher and student models simultaneously:
 
 ## Advanced Usage
 
-### Multi-GPU Training (CUDA only)
-```bash
-torchrun --nproc_per_node=2 cli_typer.py finetune large-v2-data3
-```
+### Multi-GPU / Distributed Guidance (external)
+This repository keeps the shipped training surface focused on single-node Whisper workflows.
+For distributed or multi-process experiments, use your platform scheduler/launcher and invoke the same profile command in a supported external workflow.
 
 ### Custom Configurations
 Create new profiles in `config.ini`:

@@ -174,20 +174,20 @@ def eval_step_with_save(split="eval"):
 
 ```bash
 # Basic pseudo-labeling
-python scripts/pseudo_label.py \
+python -m whisper_tuner.scripts.pseudo_label \
     --model_name_or_path openai/whisper-base \
     --dataset_name my_audio_dataset \
     --output_dir output/pseudo_labels
 
 # With fine-tuned model
-python scripts/pseudo_label.py \
+python -m whisper_tuner.scripts.pseudo_label \
     --model_name_or_path output/1-whisper-base-custom/checkpoint-best \
     --dataset_name unlabeled_audio \
     --dataset_split_name train+validation \
     --output_dir output/pseudo_labels
 
 # Multilingual with language override
-python scripts/pseudo_label.py \
+python -m whisper_tuner.scripts.pseudo_label \
     --model_name_or_path openai/whisper-large-v3 \
     --dataset_name multilingual_audio \
     --language es \
@@ -339,26 +339,26 @@ dataloader = accelerator.prepare(dataloader)
 ### 1. Distillation Workflow
 ```python
 # Generate teacher predictions for distillation
-python scripts/pseudo_label.py \
+python -m whisper_tuner.scripts.pseudo_label \
     --model_name_or_path teacher_model \
     --dataset_name training_data \
     --output_dir teacher_predictions
 
 # Use in distillation training
-python main.py finetune distil-whisper-profile \
+whisper-tuner finetune distil-whisper-profile \
     --teacher_predictions teacher_predictions
 ```
 
 ### 2. Dataset Augmentation
 ```python
 # Generate labels for unlabeled data
-python scripts/pseudo_label.py \
+python -m whisper_tuner.scripts.pseudo_label \
     --model_name_or_path best_model \
     --dataset_name unlabeled_audio \
     --output_dir augmented_data
 
 # Combine with original training data
-python scripts/prepare_data.py \
+whisper-tuner prepare \
     --original_data data/train.csv \
     --pseudo_labels augmented_data/train.csv \
     --output combined_train.csv
@@ -367,13 +367,13 @@ python scripts/prepare_data.py \
 ### 3. Iterative Refinement
 ```python
 # Round 1: Initial pseudo-labeling
-python scripts/pseudo_label.py --model_name_or_path whisper-base
+python -m whisper_tuner.scripts.pseudo_label --model_name_or_path whisper-base
 
 # Round 2: Fine-tune on pseudo-labels
-python main.py finetune whisper-pseudo-round1
+whisper-tuner finetune whisper-pseudo-round1
 
 # Round 3: Re-label with improved model
-python scripts/pseudo_label.py --model_name_or_path output/whisper-pseudo-round1
+python -m whisper_tuner.scripts.pseudo_label --model_name_or_path output/whisper-pseudo-round1
 
 # Continue iterations...
 ```

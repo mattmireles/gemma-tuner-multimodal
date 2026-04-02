@@ -69,7 +69,7 @@ You can directly implement these custom architectures using the following argume
 To build the model for the "Resource-Constrained Deployment" scenario, you would run:
 
 ```bash
-python models/distil-whisper/finetune.py \
+python -m whisper_tuner.models.distil_whisper.finetune \
   --model_name_or_path openai/whisper-small \
   --teacher_model_name_or_path openai/whisper-large-v2 \
   --student_decoder_layers 2 \

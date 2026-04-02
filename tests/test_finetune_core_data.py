@@ -5,7 +5,7 @@ from datasets import Dataset, DatasetDict
 
 def test_preprocess_datasets_minimal(monkeypatch):
     # Lazy import to allow monkeypatch
-    from models.whisper.finetune_core import data as data_mod
+    from whisper_tuner.models.whisper.finetune_core import data as data_mod
 
     # Stub audio loader to avoid real IO
     monkeypatch.setattr(

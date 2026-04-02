@@ -217,13 +217,13 @@ Train adapters one at a time for different domains:
 
 ```bash
 # Medical domain
-python main.py finetune medical-lora-data
+whisper-tuner finetune medical-lora-data
 
 # Legal domain  
-python main.py finetune legal-lora-data
+whisper-tuner finetune legal-lora-data
 
 # Conversational domain
-python main.py finetune conversation-lora-data
+whisper-tuner finetune conversation-lora-data
 ```
 
 #### Parallel Training Strategy
@@ -231,13 +231,13 @@ Train multiple adapters simultaneously (requires sufficient memory):
 
 ```bash
 # Terminal 1
-python main.py finetune medical-lora-data --output_dir output/medical
+whisper-tuner finetune medical-lora-data --output_dir output/medical
 
 # Terminal 2
-python main.py finetune legal-lora-data --output_dir output/legal
+whisper-tuner finetune legal-lora-data --output_dir output/legal
 
 # Terminal 3  
-python main.py finetune conversation-lora-data --output_dir output/conversation
+whisper-tuner finetune conversation-lora-data --output_dir output/conversation
 ```
 
 ### Adapter Loading and Switching
@@ -295,15 +295,15 @@ Start conservative and scale up:
 
 ```bash
 # Step 1: Verify training works
-python main.py finetune small-lora-test --override per_device_train_batch_size=4
+whisper-tuner finetune small-lora-test --override per_device_train_batch_size=4
 
 # Step 2: Find optimal batch size
-python main.py finetune small-lora-test --override per_device_train_batch_size=8
-python main.py finetune small-lora-test --override per_device_train_batch_size=16
-python main.py finetune small-lora-test --override per_device_train_batch_size=24
+whisper-tuner finetune small-lora-test --override per_device_train_batch_size=8
+whisper-tuner finetune small-lora-test --override per_device_train_batch_size=16
+whisper-tuner finetune small-lora-test --override per_device_train_batch_size=24
 
 # Step 3: Use gradient accumulation if needed
-python main.py finetune small-lora-test --override per_device_train_batch_size=16 --override gradient_accumulation_steps=2
+whisper-tuner finetune small-lora-test --override per_device_train_batch_size=16 --override gradient_accumulation_steps=2
 ```
 
 #### Memory Monitoring
@@ -312,7 +312,7 @@ Monitor memory pressure during training:
 
 ```bash
 # Terminal 1: Start training
-python main.py finetune medium-lora-data3
+whisper-tuner finetune medium-lora-data3
 
 # Terminal 2: Monitor memory
 watch -n 1 'memory_pressure && echo "---" && top -l 1 -s 0 | grep "python"'
@@ -370,7 +370,7 @@ pip install bitsandbytes
 **Solution**: Enable CPU fallback temporarily:
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
-python main.py finetune your-lora-profile
+whisper-tuner finetune your-lora-profile
 ```
 
 #### Issue: Training Extremely Slow on Apple Silicon

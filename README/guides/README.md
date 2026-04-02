@@ -4,6 +4,11 @@ Long-form reference material for Apple Silicon training, export, and adjacent to
 
 Mamba-specific guides were moved to the standalone `mamba-asr-mps` repository so this guide index stays focused on the Whisper product surface.
 
+The following files now house all documentation artifacts currently migrated into the root-level folder:
+- [`../specifications/visualizer-readme.md`](../specifications/visualizer-readme.md)
+- [`../specifications/distillation-explainer.md`](../specifications/distillation-explainer.md)
+- [`../specifications/bigquery_view_fix.sql`](../specifications/bigquery_view_fix.sql)
+
 ## Apple Silicon (`apple-silicon/`)
 
 | Guide | Description |
@@ -25,8 +30,3 @@ Mamba-specific guides were moved to the standalone `mamba-asr-mps` repository so
 | --- | --- |
 | [`coreml-hybrid-whispercpp.md`](whisper/coreml-hybrid-whispercpp.md) | Whisper encoder on ANE via Core ML + decoder in whisper.cpp; environment and pitfalls. |
 | [`gguf-export-and-coreml-deployment.md`](whisper/gguf-export-and-coreml-deployment.md) | End-to-end GGUF export, hybrid deployment, quantization, and validation playbook. |
-
-## Integrations (`integrations/`)
-
-| Guide | Description |
-| --- | --- |

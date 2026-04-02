@@ -356,15 +356,15 @@ max_samples = 1000  # For testing
 
 ```bash
 # Generate blacklist for profile
-python main.py blacklist whisper-base-profile
+whisper-tuner blacklist whisper-base-profile
 
 # With custom thresholds
-python main.py blacklist whisper-base-profile \
+whisper-tuner blacklist whisper-base-profile \
     --wer_threshold 60.0 \
     --validation_wer_threshold 70.0
 
 # Limited samples for testing
-python main.py blacklist whisper-base-profile \
+whisper-tuner blacklist whisper-base-profile \
     --max_samples 100
 ```
 
@@ -398,16 +398,16 @@ def load_dataset_split(split, dataset_config, patches_dir):
 
 ```bash
 # Round 1: Initial training
-python main.py finetune whisper-base-profile
+whisper-tuner finetune whisper-base-profile
 
 # Round 2: Generate blacklist
-python main.py blacklist whisper-base-profile
+whisper-tuner blacklist whisper-base-profile
 
 # Round 3: Retrain without outliers
-python main.py finetune whisper-base-profile-v2
+whisper-tuner finetune whisper-base-profile-v2
 
 # Round 4: Re-evaluate quality
-python main.py blacklist whisper-base-profile-v2
+whisper-tuner blacklist whisper-base-profile-v2
 ```
 
 ## Best Practices
@@ -433,7 +433,7 @@ Establish systematic review workflows:
 
 ```python
 # 1. Generate initial blacklist
-python main.py blacklist profile
+whisper-tuner blacklist profile
 
 # 2. Export high-WER samples for review
 blacklist_df = pd.read_csv("blacklist.csv")
@@ -580,15 +580,15 @@ for i in range(0, len(dataset), chunk_size):
 ### 1. With Training Pipeline
 ```python
 # Automatic blacklist application during training
-python main.py prepare dataset_name
-python main.py blacklist whisper-profile
-python main.py finetune whisper-profile  # Automatically excludes blacklisted
+whisper-tuner prepare dataset_name
+whisper-tuner blacklist whisper-profile
+whisper-tuner finetune whisper-profile  # Automatically excludes blacklisted
 ```
 
 ### 2. With Evaluation
 ```python
 # Evaluate only on high-quality samples
-python main.py evaluate whisper-profile \
+whisper-tuner evaluate whisper-profile \
     --exclude_blacklist \
     --min_quality_threshold 90
 ```

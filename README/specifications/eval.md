@@ -77,9 +77,9 @@ Located in `models/whisper/finetune.py`, this function is the heart of the evalu
 #### 3. `load_best_model_at_end`
 When this parameter is set to `True` (which is our default), the `Seq2SeqTrainer` will keep track of the evaluation metric you've specified (`metric_for_best_model`, which defaults to `"wer"`). After training is complete, it will automatically load the weights from the checkpoint that achieved the best score on that metric. This ensures that the final model in the output directory is the best one, not just the last one.
 
-### Standalone Evaluation (`main.py evaluate`) and Gemma Utility
+### Standalone Evaluation (`whisper-tuner evaluate`) and Gemma Utility
 A separate workflow for post-training analysis.
-*   **Command**: `python main.py evaluate <path_to_model_dir> --dataset <dataset_name>`
+*   **Command**: `whisper-tuner evaluate <path_to_model_dir> --dataset <dataset_name>`
 *   **Gemma ASR Utility**: For Gemma 3n audio LoRA runs, a dedicated helper is available:
   ```bash
   python tools/eval_gemma_asr.py \

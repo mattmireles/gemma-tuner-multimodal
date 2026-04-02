@@ -37,12 +37,12 @@ except Exception:
 
 # Shared audio loader to support local files and GCS
 try:
-    from utils.dataset_prep import load_audio_local_or_gcs
+    from whisper_tuner.utils.dataset_prep import load_audio_local_or_gcs
 except Exception:
     load_audio_local_or_gcs = None
 
 # Canonical device selection (MPS > CUDA > CPU) from shared utils
-from utils.device import get_device
+from whisper_tuner.utils.device import get_device
 
 
 def build_messages(transcript_hint: Optional[str] = None) -> List[Dict]:

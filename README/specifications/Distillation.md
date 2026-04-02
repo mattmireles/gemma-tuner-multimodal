@@ -254,7 +254,7 @@ num_train_epochs = 3
 ### Workflow 3: CLI Direct Invocation
 
 ```bash
-python main.py finetune \
+whisper-tuner finetune \
     --profile distil-small-from-large \
     --override teacher_model=whisper-large-v3 \
     --override temperature=5.0
@@ -446,13 +446,13 @@ graph TD
 
 ```bash
 # Check memory usage during training
-PYTORCH_DEBUG_MPS_ALLOCATOR=1 python main.py finetune --profile distil-test
+PYTORCH_DEBUG_MPS_ALLOCATOR=1 whisper-tuner finetune --profile distil-test
 
 # Enable CPU fallback for unsupported ops
-PYTORCH_ENABLE_MPS_FALLBACK=1 python main.py finetune --profile distil-test
+PYTORCH_ENABLE_MPS_FALLBACK=1 whisper-tuner finetune --profile distil-test
 
 # Limit memory usage on MPS
-PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.7 python main.py finetune --profile distil-test
+PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.7 whisper-tuner finetune --profile distil-test
 ```
 
 ## Future Enhancements

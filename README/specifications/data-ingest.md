@@ -584,7 +584,7 @@ Data retention rate:      96.5%
 
 ### BigQuery Export Example
 ```python
-from core.bigquery import build_query_and_export
+from whisper_tuner.core.bigquery import build_query_and_export
 
 dataset_dir = build_query_and_export(
     project_id="my-project",
@@ -602,7 +602,7 @@ dataset_dir = build_query_and_export(
 
 ### Local Dataset Loading
 ```python
-from utils.dataset_utils import load_dataset_split
+from whisper_tuner.utils.dataset_utils import load_dataset_split
 
 dataset, source = load_dataset_split(
     split="train",
@@ -615,7 +615,7 @@ dataset, source = load_dataset_split(
 
 ### Audio Processing
 ```python
-from utils.dataset_prep import load_audio_local_or_gcs
+from whisper_tuner.utils.dataset_prep import load_audio_local_or_gcs
 
 audio = load_audio_local_or_gcs(
     path_or_audio="gs://bucket/audio.wav",

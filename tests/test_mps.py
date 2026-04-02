@@ -110,7 +110,7 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.device import get_device, verify_mps_setup, get_device_info, get_memory_stats
+from whisper_tuner.utils.device import get_device, verify_mps_setup, get_device_info, get_memory_stats
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 def test_device_detection():
@@ -406,7 +406,7 @@ def test_system_check():
     print("=" * 60)
     
     try:
-        from scripts.system_check import main as system_check_main
+        from whisper_tuner.scripts.system_check import main as system_check_main
         system_check_main()
     except Exception as e:
         print(f"Error running system check: {e}")

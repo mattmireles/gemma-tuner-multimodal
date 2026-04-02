@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from cli_typer import app
+from whisper_tuner.cli_typer import app
 
 
 def test_system_check_help_and_run():

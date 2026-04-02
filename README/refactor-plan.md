@@ -67,7 +67,7 @@
   - **CLI ergonomics**
     - Clearer help text and defaults using `ArgumentDefaultsHelpFormatter`.
     - New flags: `--json_logging`, `--log_file` (non-breaking). Existing commands unchanged.
-    - Acceptance: `python main.py -h` is cleaner; behavior preserved.
+    - Acceptance: `whisper-tuner -h` is cleaner; behavior preserved.
   - **Visualizer polish**
     - Emission throttle wired: `viz_update_steps` (defaults to `logging_steps`).
     - Frontend auto-reconnect/backoff added; server logs hardened.

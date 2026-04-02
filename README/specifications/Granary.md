@@ -94,7 +94,7 @@ This is the core of the implementation. This script will be robust, user-friendl
     from datasets import load_dataset
     from tqdm import tqdm
 
-    from core.config import load_profile_config # Or equivalent
+    from whisper_tuner.core.config import load_profile_config # Or equivalent
 
     def prepare_granary(profile_name):
         """
@@ -195,7 +195,7 @@ This is critical for user success.
 
 The integration will be considered complete when an engineer can successfully:
 1.  Configure a new `[dataset:granary-en]` section in `config.ini` with local paths to downloaded audio.
-2.  Run `python main.py prepare-granary --profile granary-en` and have it successfully generate a `_prepared.csv` file without errors.
+2.  Run `whisper-tuner prepare-granary granary-en` and have it successfully generate a `_prepared.csv` file without errors.
 3.  Launch a training run using a profile that points to this new dataset, and have the training start successfully, loading data from the prepared manifest.
 4.  All new code is accompanied by relevant unit tests and documentation.
 

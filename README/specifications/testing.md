@@ -292,13 +292,13 @@ Post-training evaluation provides detailed analysis and cross-dataset testing.
 
 ```bash
 # Evaluate trained model on its validation set
-python main.py evaluate <profile_name>
+whisper-tuner evaluate <profile_name>
 
 # Evaluate on different dataset
-python main.py evaluate <profile_name> --dataset <other_dataset>
+whisper-tuner evaluate <profile_name> --dataset <other_dataset>
 
 # Direct model evaluation
-python main.py evaluate <model_path> --dataset <dataset_name>
+whisper-tuner evaluate <model_path> --dataset <dataset_name>
 ```
 
 #### Evaluation Process
@@ -500,7 +500,7 @@ When tests fail:
 
 2. **Verify Environment**:
    ```bash
-   python scripts/system_check.py
+   whisper-tuner system-check
    ```
 
 3. **Run Minimal Test**:
@@ -530,7 +530,7 @@ Maintain performance baselines for regression detection:
 ### Pre-Training Checklist
 - [ ] Run smoke tests: `python tests/test_smoke.py`
 - [ ] Verify device: `python tests/test_mps.py` (on Mac)
-- [ ] Check dataset: `python main.py prepare <dataset>`
+- [ ] Check dataset: `whisper-tuner prepare <dataset>`
 - [ ] Validate config: Review `config.ini` profile
 - [ ] Test single batch: Run with `--max_samples 10`
 
@@ -582,7 +582,7 @@ ModuleNotFoundError: No module named 'main'
 FileNotFoundError: validation.csv not found
 ```
 **Solution**:
-- Run data preparation: `python main.py prepare <dataset>`
+- Run data preparation: `whisper-tuner prepare <dataset>`
 - Check data/datasets/<dataset>/ directory
 - Verify train/validation split was created
 

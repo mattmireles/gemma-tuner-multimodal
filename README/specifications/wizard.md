@@ -78,7 +78,7 @@ wizard.py
 ├── configure_method_specifics()    # Method-specific settings
 ├── show_confirmation_screen()      # Final review & approval
 └── execute_training()              # Subprocess execution
-    └── main.py finetune           # Actual training execution
+    └── whisper-tuner finetune           # Actual training execution
 ```
 
 ## User Experience Design
@@ -467,7 +467,7 @@ Configuration Workflow:
 
 ```bash
 # Generated command
-python main.py finetune \
+whisper-tuner finetune \
     --profile wizard_20240114_143022 \
     --config /tmp/wizard_configs/config_20240114_143022.ini
 ```
@@ -668,7 +668,7 @@ Guidance Patterns:
 
 ```python
 Integration Flow:
-wizard.py → config generation → main.py finetune → training
+wizard.py → config generation → whisper-tuner finetune → training
 
 Benefits:
 - Subprocess isolation

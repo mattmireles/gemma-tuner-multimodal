@@ -255,8 +255,8 @@ User Flow:
 
 ```python
 # In training script
-from visualizer import init_visualizer, start_visualization_server
-from models.common.visualizer import VisualizerTrainerCallback
+from whisper_tuner.visualizer import init_visualizer, start_visualization_server
+from whisper_tuner.models.common.visualizer import VisualizerTrainerCallback
 
 # Initialize
 viz = init_visualizer(model, device)

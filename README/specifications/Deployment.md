@@ -134,7 +134,7 @@ CoreML provides the best performance on Apple devices by leveraging the Apple Ne
 
 ```bash
 # Export your trained model to CoreML format
-python main.py export-coreml output/47-wizard_20250812_175449
+python -m whisper_tuner.scripts.export_coreml output/47-wizard_20250812_175449
 
 # This creates:
 # output/47-wizard_20250812_175449/coreml/whisper-encoder.mlmodelc
@@ -284,7 +284,7 @@ The project includes a unified inference module that handles audio processing, l
 import sys
 sys.path.append('/path/to/whisper-fine-tuner-macos')
 
-from core.inference import prepare_features, generate, decode_and_score
+from whisper_tuner.core.inference import prepare_features, generate, decode_and_score
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 import torch
 

@@ -19,7 +19,7 @@ This guide maps common legacy commands to the modern `whisper-tuner` CLI.
   - New: `whisper-tuner runs list|overview|details|cleanup`
 
 Notes:
-- `main.py` and `manage.py` are deprecated. Temporary wrappers are available:
+- `main.py` and `manage.py` are compatibility shims. Temporary wrappers are available:
   - `whisper-tuner legacy main`
   - `whisper-tuner legacy manage`
 - Configuration remains in `config.ini`. Toggles like `gradient_checkpointing` and

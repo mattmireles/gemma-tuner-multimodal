@@ -11,7 +11,7 @@ import sys
 import pytest
 import configparser
 import datasets
-from utils.dataset_utils import load_dataset_split
+from whisper_tuner.utils.dataset_utils import load_dataset_split
 
 # Gate behind env var to avoid failing CI by default
 if os.environ.get("RUN_LEGACY_DATASET_TEST") != "1":

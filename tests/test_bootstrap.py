@@ -14,9 +14,9 @@ def test_bootstrap_sets_mps_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
     # Reload module to re-run bootstrap side effects
-    sys.modules.pop("core.bootstrap", None)
-    import core.bootstrap  # noqa: F401
-    importlib.reload(core.bootstrap)
+    sys.modules.pop("whisper_tuner.core.bootstrap", None)
+    import whisper_tuner.core.bootstrap  # noqa: F401
+    importlib.reload(whisper_tuner.core.bootstrap)
 
     high = float(os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0"))
     low = float(os.environ.get("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0"))

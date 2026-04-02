@@ -106,7 +106,7 @@ The system provides two user interfaces: a direct CLI for experienced users and 
 The CLI serves as the primary entry point, implementing a hierarchical command structure:
 
 ```
-python main.py <operation> <profile_or_target> [options]
+whisper-tuner <operation> <profile_or_target> [options]
 ```
 
 **Command Routing Architecture:**
@@ -369,7 +369,7 @@ The operation dispatch system implements a lazy-loading pattern that dramaticall
 ```python
 def finetune(profile_config: Dict, output_dir: str):
     # Import only when operation is called
-    from scripts.finetune import main as finetune_main
+    from whisper_tuner.scripts.finetune import main as finetune_main
     finetune_main(profile_config, output_dir)
 ```
 
@@ -402,11 +402,11 @@ The finetune operation includes intelligent model routing:
 ```python
 # In scripts/finetune.py
 if has_lora_config(profile_config):
-    from models.whisper_lora.finetune import main
+    from whisper_tuner.models.whisper_lora.finetune import main
 elif has_teacher_model(profile_config):
-    from models.distil_whisper.finetune import main
+    from whisper_tuner.models.distil_whisper.finetune import main
 else:
-    from models.whisper.finetune import main
+    from whisper_tuner.models.whisper.finetune import main
 
 main(profile_config, output_dir)
 ```

@@ -128,7 +128,7 @@ audio_source_librilight = /path/to/downloaded/librilight/audio
 Run the Granary preparation script to validate audio files and create training manifest:
 
 ```bash
-python main.py prepare-granary --profile granary-en
+whisper-tuner prepare-granary granary-en
 ```
 
 **What the preparation script does:**
@@ -174,7 +174,7 @@ learning_rate = 1e-5
 Then run training:
 
 ```bash
-python main.py finetune whisper-base-granary
+whisper-tuner finetune whisper-base-granary
 ```
 
 ### 🔧 Advanced Configuration
@@ -368,7 +368,7 @@ audio_source_librilight = /path/to/librilight
 
 ```bash
 export LOG_JSON=0  # Disable JSON logging for readability
-python main.py prepare-granary --profile granary-en --log_file granary_debug.log
+whisper-tuner prepare-granary granary-en --log_file granary_debug.log
 ```
 
 **Validate individual corpus paths:**

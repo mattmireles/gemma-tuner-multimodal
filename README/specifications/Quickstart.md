@@ -67,7 +67,7 @@ pip install -r requirements.txt
 Run the system check to ensure everything is configured correctly:
 
 ```bash
-python scripts/system_check.py
+whisper-tuner system-check
 ```
 
 You should see output similar to:
@@ -357,7 +357,7 @@ id,audio_path,text
 - **Solution**: Use LoRA instead of standard fine-tuning, or choose a smaller model
 
 **Issue**: Training is very slow
-- **Solution**: Ensure you're using GPU (MPS/CUDA), not CPU. Check with `python scripts/system_check.py`
+- **Solution**: Ensure you're using GPU (MPS/CUDA), not CPU. Check with `whisper-tuner system-check`
 
 **Issue**: Model not improving (loss not decreasing)
 - **Solution**: Try a higher learning rate (5e-5 or 1e-4) or more training epochs
