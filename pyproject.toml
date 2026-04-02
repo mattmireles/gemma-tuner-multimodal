@@ -104,6 +104,7 @@ include = [
   "scripts*",
   "models*",
   "distributed*",
+  "wizard*",
 ]
 
 [tool.ruff]
