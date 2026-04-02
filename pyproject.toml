@@ -89,7 +89,6 @@ Issues = "https://github.com/mattmireles/whisper/issues"
 [tool.setuptools]
 # Include top-level single-file modules
 py-modules = [
-  "wizard",
   "main",
   "cli_typer",
   "wft_constants",
@@ -114,4 +113,3 @@ target-version = "py38"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = []
-
