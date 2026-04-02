@@ -1,7 +1,8 @@
 name: Publish to PyPI
 
-# Workflow disabled.
-on: []
+# No automatic runs; trigger manually when publishing to PyPI.
+on:
+  workflow_dispatch:
 
 jobs:
   build-and-publish:

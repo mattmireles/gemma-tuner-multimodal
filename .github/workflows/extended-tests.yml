@@ -1,7 +1,8 @@
 name: Extended Tests
 
-# Workflow disabled.
-on: []
+# No automatic runs; trigger manually for a full (slow) test pass.
+on:
+  workflow_dispatch:
 
 jobs:
   extended:

@@ -1,7 +1,12 @@
 name: CI
 
-# Workflow disabled.
-on: []
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   lint:
@@ -94,7 +99,8 @@ jobs:
       - name: Typer import
         run: |
           python - << 'PY'
-          import core.bootstrap, cli_typer
+          import core.bootstrap
+          import cli_typer
           print('cli import OK')
           PY
       - name: CLI smoke

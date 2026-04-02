@@ -1,7 +1,8 @@
 name: Release
 
-# Workflow disabled.
-on: []
+# No automatic runs; trigger manually from the Actions tab when cutting a release.
+on:
+  workflow_dispatch:
 
 jobs:
   build-and-release:

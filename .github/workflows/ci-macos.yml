@@ -1,7 +1,12 @@
 name: macOS CI
 
-# Workflow disabled.
-on: []
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
@@ -104,5 +109,3 @@ jobs:
           finetune_main(profile, 'output/ci-train')
           print('OK: mini-train ran')
           PY
-
-
