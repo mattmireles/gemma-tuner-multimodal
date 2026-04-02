@@ -19,6 +19,8 @@ A comprehensive framework for fine-tuning OpenAI's Whisper models with native Ap
 - 📊 **NVIDIA Granary Dataset**: Built-in support for the world's largest public speech dataset (~643k hours, 25 languages) with optimized preparation and validation
 - 💎 **Gemma 3n (Google) Audio LoRA on MPS**: Fine-tune Gemma 3n's audio capability via HF Transformers + PEFT on Apple Silicon; fully integrated into the wizard
 
+**Documentation:** Field guides (MPS, Core ML, Whisper export) live in [`README/guides/README.md`](README/guides/README.md). Product specs live in [`README/specifications/`](README/specifications/).
+
 ## Architecture Overview
 
 The Whisper Fine-Tuner framework is built on a modular, platform-agnostic architecture that seamlessly adapts to Apple Silicon, NVIDIA CUDA, and CPU environments while providing sophisticated data quality management and multiple training paradigms.

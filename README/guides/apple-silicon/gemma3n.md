@@ -1,5 +1,7 @@
 # Gemma 3n on Apple Silicon: A Developer's Field Guide
 
+Product integration and CLI behavior: [`../../specifications/Gemma3n.md`](../../specifications/Gemma3n.md).
+
 This guide provides a condensed overview of the Gemma 3n architecture, with a practical focus on fine-tuning and deployment on Apple Silicon hardware.
 
 ---

@@ -1,5 +1,7 @@
 # Gemma 3n Multimodal Fine-Tuning Product Specification
 
+Related: condensed developer notes — [`../guides/apple-silicon/gemma3n.md`](../guides/apple-silicon/gemma3n.md).
+
 ## Executive Summary
 
 This document outlines the integration of Google's Gemma 3n, a state-of-the-art open multimodal model, into the Whisper Fine-Tuner framework. This extension enables users to perform parameter-efficient fine-tuning (PEFT) on Gemma 3n's audio capabilities, leveraging the framework's existing Apple Silicon (MPS) optimizations. The core of this project involves engineering a robust data pipeline to accommodate Gemma's unique audio processing requirements and extending the CLI wizard to provide a seamless, guided user experience for this new model family.
