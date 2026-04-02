@@ -90,7 +90,7 @@ from typing import Optional
 
 import typer
 
-from wft_constants import FileSystem, OperationTimeouts, LoggingDefaults
+from wft_constants import FileSystem, LoggingDefaults
 from core.logging import init_logging, add_file_handler
 from core.config import load_profile_config, load_model_dataset_config
 from core.runs import (
@@ -123,15 +123,6 @@ class DefaultPaths:
     DISTRIBUTED_HOSTS_CONFIG = "distributed_hosts.json"
     DEFAULT_OUTPUT_DIR = FileSystem.OUTPUT_DIR_DEFAULT
     DEFAULT_CONFIG_FILE = "config.ini"
-
-class PlatformOptimizations:
-    """Platform-specific optimization constants for Apple Silicon (MPS) and distributed training."""
-    # Apple Silicon MPS considerations documented in distributed training functions:
-    # - Unified memory architecture requires different memory pressure management
-    # - MPS operations have different performance characteristics than CUDA
-    # - Mixed precision training has specific Apple Silicon optimizations
-    # See distributed_check() function for detailed MPS compatibility validation
-
 
 # CLI Application Instance with Enhanced Help
 # Creates the main Typer application that coordinates all subcommands
