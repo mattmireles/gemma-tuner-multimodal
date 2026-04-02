@@ -199,6 +199,11 @@ def _ensure_tiny_dataset(base_dir: Path) -> None:
         with train_csv.open("w") as f:
             f.write(f"{TestConstants.ID_COLUMN},{TestConstants.AUDIO_PATH_COLUMN},{TestConstants.TEXT_COLUMN}\n")
             f.write(f"1,{wav_path.as_posix()},{TestConstants.TEST_TRANSCRIPTION}\n")
+    validation_csv = ds_dir / TestConstants.VALIDATION_CSV_FILENAME
+    if not validation_csv.exists():
+        with validation_csv.open("w") as f:
+            f.write(f"{TestConstants.ID_COLUMN},{TestConstants.AUDIO_PATH_COLUMN},{TestConstants.TEXT_COLUMN}\n")
+            f.write(f"1,{wav_path.as_posix()},{TestConstants.TEST_TRANSCRIPTION}\n")
 
 
 @pytest.mark.slow
@@ -303,7 +308,7 @@ def test_sft_single_step(tmp_path: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Invoke the standard fine-tuning entrypoint
-    from models.whisper.finetune import main as sft_main
+    from whisper_tuner.models.whisper.finetune import main as sft_main
 
     sft_main(profile_config, out_dir.as_posix())
 

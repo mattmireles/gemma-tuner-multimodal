@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from cli_typer import app
+from whisper_tuner.cli_typer import app
 
 
 def test_root_help():
@@ -21,12 +21,11 @@ def test_finetune_help():
     runner = CliRunner()
     result = runner.invoke(app, ["finetune", "--help"])
     assert result.exit_code == 0
-    assert "Fine-tune a Whisper model" in result.stdout
+    assert "Execute model fine-tuning" in result.stdout
 
 
 def test_evaluate_help():
     runner = CliRunner()
     result = runner.invoke(app, ["evaluate", "--help"])
     assert result.exit_code == 0
-    assert "Evaluate a fine-tuned Whisper model" in result.stdout
-
+    assert "Evaluate fine-tuned Whisper models" in result.stdout

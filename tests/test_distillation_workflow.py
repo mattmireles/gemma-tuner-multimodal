@@ -6,6 +6,8 @@ import numpy as np
 import soundfile as sf
 import pytest
 
+pytest.importorskip("torchcodec", reason="Slow audio tests require torchcodec for dataset audio decoding.")
+
 
 def _ensure_tiny_dataset(base_dir: Path) -> None:
     ds_dir = base_dir / "data" / "datasets" / "test_streaming"
@@ -24,6 +26,11 @@ def _ensure_tiny_dataset(base_dir: Path) -> None:
     train_csv = ds_dir / "train.csv"
     if not train_csv.exists():
         with train_csv.open("w") as f:
+            f.write("id,audio_path,text_perfect\n")
+            f.write(f"1,{wav_path.as_posix()},hello world\n")
+    validation_csv = ds_dir / "validation.csv"
+    if not validation_csv.exists():
+        with validation_csv.open("w") as f:
             f.write("id,audio_path,text_perfect\n")
             f.write(f"1,{wav_path.as_posix()},hello world\n")
 
@@ -69,7 +76,7 @@ def test_distillation_single_step(tmp_path: Path):
                     pass
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    from models.distil_whisper.finetune import main as distil_main
+    from whisper_tuner.models.distil_whisper.finetune import main as distil_main
 
     distil_main(profile_config, out_dir.as_posix())
 

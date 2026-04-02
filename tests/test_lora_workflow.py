@@ -26,6 +26,11 @@ def _ensure_tiny_dataset(base_dir: Path) -> None:
         with train_csv.open("w") as f:
             f.write("id,audio_path,text_perfect\n")
             f.write(f"1,{wav_path.as_posix()},hello world\n")
+    validation_csv = ds_dir / "validation.csv"
+    if not validation_csv.exists():
+        with validation_csv.open("w") as f:
+            f.write("id,audio_path,text_perfect\n")
+            f.write(f"1,{wav_path.as_posix()},hello world\n")
 
 
 @pytest.mark.slow
@@ -86,7 +91,7 @@ def test_lora_single_step(tmp_path: Path):
                     pass
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    from models.whisper_lora.finetune import main as lora_main
+    from whisper_tuner.models.whisper_lora.finetune import main as lora_main
 
     lora_main(profile_config, out_dir.as_posix())
 
