@@ -1,7 +1,15 @@
 # Whisper-Focused Repository Reorganization Plan
 
 **Date:** 2026-04-02
-**Status:** Planned
+**Status:** In Progress
+
+## Execution Status
+
+- [x] Phase 0 completed
+- [ ] Phase 1 completed
+- [ ] Phase 2 completed
+- [ ] Phase 3 completed
+- [ ] Phase 4 completed
 
 ## Executive Summary
 
@@ -100,17 +108,19 @@ Two implementation choices are fixed up front:
 
 **Tasks:**
 
-- [ ] Inventory all Mamba-owned files under `Mamba-ASR-MPS/` plus the adjacent Mamba surface: `Mamba-ASR-NVIDIA/`, `MambaASR.mlmodelc/`, `MambaASR.mlpackage/`, and Mamba-specific docs and scripts.
-- [ ] Inventory all ExoGym-dependent files, including `.gitmodules`, `gym/`, `distributed/`, `train_distributed.py`, `test_distributed.py`, `wizard/runner.py`, tests, docs, and CLI commands.
-- [ ] Record current Whisper workflows that must survive unchanged: `cli_typer.py`, `core/`, `models/`, `utils/`, `scripts/`, `wizard/`, and relevant tests.
-- [ ] Inventory the cloud streaming architecture explicitly, including GCS audio loading, streaming dataset handling, BigQuery import/export flow, and any model-specific streaming hooks.
-- [ ] Inventory loose root-level files and assign each one to `keep`, `move`, `delete`, or `relocate`: `CMHello.swift`, `cmhello/`, `verified_generations_with_audio_VIEW_fixed.sql`, `visualizer.py`, `VISUALIZER_README.md`, and `explainer.md`.
-- [ ] Inventory docs beyond the root README, including `README/specifications/distributed-training-gym.md`, `README/guides/integrations/exolabs-gym.md`, and `README/guides/apple-silicon/Mamba-Apple-Silicon-guide.md`.
-- [ ] Confirm Gemma code paths and tests do not depend on Mamba or ExoGym, and explicitly mark Gemma as `keep in Whisper repo` if clean.
-- [ ] Decide whether the new Mamba repo needs a duplicated copy of the cloud streaming architecture or only documentation pointing to the Whisper implementation.
-- [ ] Decide the target name and remote for the new Mamba repository before moving code.
+- [x] Inventory all Mamba-owned files under `Mamba-ASR-MPS/` plus the adjacent Mamba surface: `Mamba-ASR-NVIDIA/`, `MambaASR.mlmodelc/`, `MambaASR.mlpackage/`, and Mamba-specific docs and scripts.
+- [x] Inventory all ExoGym-dependent files, including `.gitmodules`, `gym/`, `distributed/`, `train_distributed.py`, `test_distributed.py`, `wizard/runner.py`, tests, docs, and CLI commands.
+- [x] Record current Whisper workflows that must survive unchanged: `cli_typer.py`, `core/`, `models/`, `utils/`, `scripts/`, `wizard/`, and relevant tests.
+- [x] Inventory the cloud streaming architecture explicitly, including GCS audio loading, streaming dataset handling, BigQuery import/export flow, and any model-specific streaming hooks.
+- [x] Inventory loose root-level files and assign each one to `keep`, `move`, `delete`, or `relocate`: `CMHello.swift`, `cmhello/`, `verified_generations_with_audio_VIEW_fixed.sql`, `visualizer.py`, `VISUALIZER_README.md`, and `explainer.md`.
+- [x] Inventory docs beyond the root README, including `README/specifications/distributed-training-gym.md`, `README/guides/integrations/exolabs-gym.md`, and `README/guides/apple-silicon/Mamba-Apple-Silicon-guide.md`.
+- [x] Confirm Gemma code paths and tests do not depend on Mamba or ExoGym, and explicitly mark Gemma as `keep in Whisper repo` if clean.
+- [x] Decide whether the new Mamba repo needs a duplicated copy of the cloud streaming architecture or only documentation pointing to the Whisper implementation.
+- [x] Decide the target name and remote for the new Mamba repository before moving code.
 
 **Verification:** A migration checklist exists with four columns: `move to Mamba repo`, `delete with ExoGym`, `keep in Whisper repo`, and `needs new home in Whisper repo`, and the cloud streaming architecture is listed as either `keep` or `duplicate`.
+
+Phase 0 execution notes are captured in [2026-04-02-whisper-migration-inventory.md](./2026-04-02-whisper-migration-inventory.md).
 
 ---
 

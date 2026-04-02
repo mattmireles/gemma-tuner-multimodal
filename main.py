@@ -532,14 +532,6 @@ def main():
     else:
         logger.error(f"Invalid operation: {args.operation}")
 
-def get_latest_run_directory(base_dir):
-    """Finds the latest run directory based on timestamps in the directory names."""
-    run_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.startswith("20")]
-    if not run_dirs:
-        return None
-    run_dirs.sort(reverse=True)
-    return os.path.join(base_dir, run_dirs[0])
-
 if __name__ == "__main__":
     # Entry point for command-line execution
     # Device detection and optimization setup occurs at module import time
