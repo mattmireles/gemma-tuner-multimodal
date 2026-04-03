@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Setup script for Apple Silicon (MPS) environment
 #
 # IMPORTANT: Environment variables exported by this script only persist in the
@@ -83,7 +84,7 @@ echo ""
 echo "Next steps:"
 echo "1. Review the system check output above"
 echo "2. Configure your training in config.ini"
-echo "3. Run: python main.py finetune <your-profile>"
+echo "3. Run: whisper-tuner finetune <your-profile>"
 echo ""
 echo "Tips:"
 echo "- Batch sizes: M1/M2 Pro (2-4), Max (4-6), Ultra (4-6)"
