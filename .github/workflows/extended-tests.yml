@@ -32,7 +32,7 @@ jobs:
           HF_HUB_DISABLE_TELEMETRY: '1'
         run: |
           mkdir -p test-reports
-          pytest -q -m "slow or not slow" --junitxml=test-reports/junit-extended.xml
+          pytest -q --junitxml=test-reports/junit-extended.xml
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

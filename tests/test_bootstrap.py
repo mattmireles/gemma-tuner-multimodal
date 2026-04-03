@@ -15,11 +15,13 @@ def test_bootstrap_sets_mps_env(monkeypatch):
 
     # Reload module to re-run bootstrap side effects
     sys.modules.pop("whisper_tuner.core.bootstrap", None)
-    import whisper_tuner.core.bootstrap  # noqa: F401
+    import whisper_tuner.core.bootstrap
 
     importlib.reload(whisper_tuner.core.bootstrap)
 
     high = float(os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0"))
     low = float(os.environ.get("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0"))
 
+    assert high == 0.9, f"Expected high watermark 0.9, got {high}"
+    assert low == 0.7, f"Expected low watermark 0.7, got {low}"
     assert 0.0 < low < high < 1.0

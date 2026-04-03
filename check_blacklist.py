@@ -185,8 +185,12 @@ if __name__ == "__main__":
     # This section demonstrates comprehensive blacklist analysis by cross-referencing
     # the latest generated blacklist with all relevant data patch categories.
 
+    # Anchor all relative paths to the directory containing this script so the
+    # analysis works regardless of the caller's working directory.
+    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
     # Discover the most recent blacklist file automatically
-    latest_blacklist = find_latest_blacklist_file("output")
+    latest_blacklist = find_latest_blacklist_file(os.path.join(_SCRIPT_DIR, "output"))
 
     if latest_blacklist:
         print(f"Analyzing blacklist file: {latest_blacklist}")
@@ -197,14 +201,15 @@ if __name__ == "__main__":
 
     # Define data patch files for comprehensive analysis
     # These represent different data quality categories and manual interventions
+    # Paths are anchored to _SCRIPT_DIR so they resolve correctly from any cwd.
     patch_files = [
         # Deletion category: Samples marked for removal
-        "data_patches/data3/delete/data3_prepared - remove - translated.csv",
+        os.path.join(_SCRIPT_DIR, "data_patches/data3/delete/data3_prepared - remove - translated.csv"),
         # Protection category: High-quality samples protected from blacklisting
-        "data_patches/data3/do_not_blacklist/blacklist - Keep ground-truth.csv",
+        os.path.join(_SCRIPT_DIR, "data_patches/data3/do_not_blacklist/blacklist - Keep ground-truth.csv"),
         # Override category: Manually corrected transcriptions
-        "data_patches/data3/override_text_perfect/blacklist - Keep Edited.csv",
-        "data_patches/data3/override_text_perfect/data3_prepared - edited.csv",
+        os.path.join(_SCRIPT_DIR, "data_patches/data3/override_text_perfect/blacklist - Keep Edited.csv"),
+        os.path.join(_SCRIPT_DIR, "data_patches/data3/override_text_perfect/data3_prepared - edited.csv"),
     ]
 
     print("\n=== CROSS-REFERENCE ANALYSIS RESULTS ===\n")

@@ -12,10 +12,13 @@ class DummyProcessor:
         self.sampling_rate = 16000
 
     def __call__(self, messages=None, audios=None, return_tensors=None, padding=None, text=None):
-        # Return minimal tensors to mimic processor output
+        # Return minimal tensors to mimic processor output.
+        # Attention mask includes zeros at the end to exercise PAD-masking logic.
         batch = len(messages) if messages is not None else len(text)
-        input_ids = torch.ones((batch, 5), dtype=torch.long)
+        input_ids = torch.zeros((batch, 5), dtype=torch.long)
         attention_mask = torch.ones((batch, 5), dtype=torch.long)
+        # Set last two positions to zero to simulate padding
+        attention_mask[:, -2:] = 0
         return {"input_ids": input_ids, "attention_mask": attention_mask}
 
 
@@ -39,5 +42,5 @@ def test_collator_produces_labels_and_ids():
     assert out["labels"].shape == out["input_ids"].shape
     # Ensure PAD becomes IGNORE id where applicable
     mask_zeros = out["attention_mask"] == 0
-    if mask_zeros.any():
-        assert (out["labels"][mask_zeros] == GemmaTrainingConstants.IGNORE_TOKEN_ID).all()
+    assert mask_zeros.any(), "Test expects some zero entries in attention_mask"
+    assert (out["labels"][mask_zeros] == GemmaTrainingConstants.IGNORE_TOKEN_ID).all()

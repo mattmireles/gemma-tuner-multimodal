@@ -1,5 +1,12 @@
 #!/bin/bash
 # Setup script for Apple Silicon (MPS) environment
+#
+# IMPORTANT: Environment variables exported by this script only persist in the
+# current shell session. To make them permanent, either:
+#   1. Source this script:  source setup_mps.sh
+#   2. Add the exports to your shell profile (~/.zshrc or ~/.bashrc):
+#        export PYTORCH_ENABLE_MPS_FALLBACK=1
+#        export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.9
 
 echo "🍎 Whisper Fine-Tuner - Apple Silicon Setup"
 echo "=========================================="
@@ -36,12 +43,14 @@ echo ""
 echo "Setting MPS environment variables..."
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.9
-export SDPA_ALLOW_FLASH_ATTN=1
 
 echo "✅ Environment variables set:"
 echo "   PYTORCH_ENABLE_MPS_FALLBACK=1 (for compatibility)"
 echo "   PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.9 (90% memory limit)"
-echo "   SDPA_ALLOW_FLASH_ATTN=1 (Flash Attention 2 enabled - reduces memory by ~28%)"
+echo ""
+echo "⚠️  These exports only persist in the current shell session."
+echo "   To make them permanent, add the exports to ~/.zshrc (or ~/.bashrc),"
+echo "   or run this script with: source setup_mps.sh"
 
 # Install dependencies
 echo ""
@@ -65,7 +74,7 @@ else:
 # Run system check
 echo ""
 echo "Running system check..."
-python3 scripts/system_check.py
+python3 -m whisper_tuner.scripts.system_check
 
 echo ""
 echo "=========================================="
@@ -78,7 +87,7 @@ echo "3. Run: python main.py finetune <your-profile>"
 echo ""
 echo "Tips:"
 echo "- Batch sizes: M1/M2 Pro (2-4), Max (4-6), Ultra (4-6)"
-echo "- Flash Attention 2 is enabled (28% less memory usage)"
+echo "- Flash Attention 2 is not supported on MPS; use sdpa attention instead"
 echo "- Monitor Activity Monitor for memory usage"
 echo "- Remove PYTORCH_ENABLE_MPS_FALLBACK=1 after testing"
 echo "- Use fp16 (not bf16) for best MPS performance"

@@ -105,15 +105,22 @@ import sys
 import pytest
 import torch
 
-# Set environment variable for initial testing
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from whisper_tuner.utils.device import get_device, get_device_info, get_memory_stats, verify_mps_setup
+
+
+@pytest.fixture(autouse=True)
+def _mps_fallback_env(monkeypatch):
+    """
+    Sets PYTORCH_ENABLE_MPS_FALLBACK=1 for the duration of each test, then
+    restores the original environment. Using monkeypatch ensures cleanup even
+    if a test fails, and avoids polluting the session for unrelated tests.
+    """
+    monkeypatch.setenv("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 
 def test_device_detection():
@@ -155,21 +162,26 @@ def test_device_detection():
 
     This test must pass for subsequent MPS-specific tests to be meaningful.
     """
-    print("=" * 60)
-    print("Testing Device Detection")
-    print("=" * 60)
-
+    # Device detection must return a valid torch.device
     device = get_device()
-    print(f"Detected device: {device}")
+    assert device is not None, "get_device() returned None"
+    assert isinstance(device, torch.device), f"Expected torch.device, got {type(device)}"
+    assert device.type in ("mps", "cuda", "cpu"), f"Unexpected device type: {device.type}"
 
+    # MPS setup verification must return a (bool, str) tuple
     mps_available, mps_message = verify_mps_setup()
-    print(f"MPS setup: {mps_message}")
+    assert isinstance(mps_available, bool), f"Expected bool, got {type(mps_available)}"
+    assert isinstance(mps_message, str), f"Expected str, got {type(mps_message)}"
+    assert len(mps_message) > 0, "MPS diagnostic message must not be empty"
 
+    # Device info must return a populated dict with required keys
     device_info = get_device_info()
-    for key, value in device_info.items():
-        print(f"{key}: {value}")
-
-    print()
+    assert isinstance(device_info, dict), f"Expected dict, got {type(device_info)}"
+    assert "device" in device_info, "device_info missing 'device' key"
+    assert "device_type" in device_info, "device_info missing 'device_type' key"
+    assert device_info["device_type"] == device.type, (
+        f"device_info type '{device_info['device_type']}' != detected device type '{device.type}'"
+    )
 
 
 @pytest.mark.slow
@@ -223,45 +235,36 @@ def test_model_loading():
     - Memory allocation exceeds available unified memory
     - Float16 precision not supported on target hardware
 
-    Returns:
-        bool: True if model loading successful, False otherwise
-
     Error handling:
-    - Catches and reports specific model loading exceptions
-    - Provides diagnostic information for troubleshooting
-    - Continues test suite execution even if this test fails
+    - Exceptions propagate to pytest so failures are visible
+    - Assertions verify device placement and memory stats
     """
-    print("=" * 60)
-    print("Testing Model Loading")
-    print("=" * 60)
-
     device = get_device()
 
-    # Test with a small model first
     model_name = "openai/whisper-tiny"
-    print(f"Loading {model_name}...")
 
-    try:
-        processor = WhisperProcessor.from_pretrained(model_name)
-        model = WhisperForConditionalGeneration.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16 if device.type in ["cuda", "mps"] else torch.float32,
-            attn_implementation="sdpa",  # Using sdpa instead of flash_attention_2
-            low_cpu_mem_usage=True,
-        ).to(device)
+    processor = WhisperProcessor.from_pretrained(model_name)
+    assert processor is not None, "WhisperProcessor.from_pretrained returned None"
 
-        print(f"✓ Model loaded successfully on {device}")
+    model = WhisperForConditionalGeneration.from_pretrained(
+        model_name,
+        torch_dtype=torch.float16 if device.type in ["cuda", "mps"] else torch.float32,
+        attn_implementation="sdpa",
+        low_cpu_mem_usage=True,
+    ).to(device)
 
-        # Check memory usage
-        mem_stats = get_memory_stats()
-        print(f"Memory stats: {mem_stats}")
+    assert model is not None, "WhisperForConditionalGeneration.from_pretrained returned None"
 
-    except Exception as e:
-        print(f"✗ Error loading model: {e}")
-        return False
+    # Verify model is on the expected device
+    first_param = next(model.parameters())
+    assert first_param.device.type == device.type, (
+        f"Model parameter on {first_param.device}, expected {device}"
+    )
 
-    print()
-    return True
+    # Verify memory stats are retrievable after loading a model
+    mem_stats = get_memory_stats()
+    assert isinstance(mem_stats, dict), f"Expected dict from get_memory_stats, got {type(mem_stats)}"
+    assert "device" in mem_stats, "Memory stats missing 'device' key"
 
 
 @pytest.mark.slow
@@ -319,9 +322,6 @@ def test_inference():
     - Memory efficiency during computation
     - MPS kernel selection and optimization
 
-    Returns:
-        bool: True if all operations successful, False otherwise
-
     Common failure modes:
     - Specific operations not implemented in MPS backend
     - Numerical precision issues with float16 on Apple Silicon
@@ -331,39 +331,44 @@ def test_inference():
     This test validates that the core computational patterns used in
     Whisper inference will work reliably on the target MPS device.
     """
-    print("=" * 60)
-    print("Testing Inference")
-    print("=" * 60)
-
     device = get_device()
 
-    try:
-        # Create dummy input
-        batch_size = 2
-        feature_size = 80
-        sequence_length = 3000  # 30 seconds at 100Hz
+    batch_size = 2
+    feature_size = 80
+    sequence_length = 3000  # 30 seconds at 100Hz
 
-        dummy_input = torch.randn(batch_size, feature_size, sequence_length).to(device)
-        print(f"Created dummy input tensor: {dummy_input.shape} on {device}")
+    dummy_input = torch.randn(batch_size, feature_size, sequence_length).to(device)
+    assert dummy_input.device.type == device.type, (
+        f"Input tensor on {dummy_input.device}, expected {device}"
+    )
 
-        # Test a simple operation
-        with torch.no_grad():
-            # Simulate mel spectrogram processing
-            output = torch.nn.functional.conv1d(dummy_input, torch.randn(512, feature_size, 10).to(device), padding=5)
-            print(f"✓ Convolution operation successful: output shape {output.shape}")
+    with torch.no_grad():
+        # Simulate mel spectrogram processing via 1-D convolution
+        conv_weight = torch.randn(512, feature_size, 10).to(device)
+        output = torch.nn.functional.conv1d(dummy_input, conv_weight, padding=5)
 
-            # Test attention-like operation
-            attention_weights = torch.softmax(torch.randn(batch_size, 100, 100).to(device), dim=-1)
-            values = torch.randn(batch_size, 100, 64).to(device)
-            attention_output = torch.bmm(attention_weights, values)
-            print(f"✓ Attention operation successful: output shape {attention_output.shape}")
+        assert output.shape == (batch_size, 512, sequence_length + 1), (
+            f"Unexpected conv1d output shape: {output.shape}"
+        )
+        assert output.device.type == device.type, (
+            f"Conv output on {output.device}, expected {device}"
+        )
+        assert torch.isfinite(output).all(), "Conv1d output contains NaN or Inf"
 
-    except Exception as e:
-        print(f"✗ Error during inference: {e}")
-        return False
+        # Simulate attention mechanism: softmax + batch matmul
+        attention_weights = torch.softmax(
+            torch.randn(batch_size, 100, 100).to(device), dim=-1
+        )
+        values = torch.randn(batch_size, 100, 64).to(device)
+        attention_output = torch.bmm(attention_weights, values)
 
-    print()
-    return True
+        assert attention_output.shape == (batch_size, 100, 64), (
+            f"Unexpected attention output shape: {attention_output.shape}"
+        )
+        assert attention_output.device.type == device.type, (
+            f"Attention output on {attention_output.device}, expected {device}"
+        )
+        assert torch.isfinite(attention_output).all(), "Attention output contains NaN or Inf"
 
 
 def test_system_check():
@@ -403,18 +408,11 @@ def test_system_check():
     This test ensures that the entire system is properly configured
     for Whisper fine-tuning, not just the MPS components.
     """
-    print("=" * 60)
-    print("Running System Check")
-    print("=" * 60)
+    from whisper_tuner.scripts.system_check import main as system_check_main
 
-    try:
-        from whisper_tuner.scripts.system_check import main as system_check_main
-
-        system_check_main()
-    except Exception as e:
-        print(f"Error running system check: {e}")
-
-    print()
+    # Let any exception from system_check_main propagate to pytest so
+    # failures are visible rather than silently swallowed.
+    system_check_main()
 
 
 def main():
@@ -474,9 +472,8 @@ def main():
     if get_device().type == "mps":
         print("✓ MPS device detected! Running MPS-specific tests...\n")
 
-        success = test_model_loading()
-        if success:
-            test_inference()
+        test_model_loading()
+        test_inference()
 
         test_system_check()
 
@@ -498,6 +495,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # Entry point for MPS migration validation
-    # Sets up MPS fallback environment variable for initial testing
+    # Entry point for MPS migration validation.
+    # When run as a script (not via pytest), set the fallback env var directly
+    # since pytest fixtures do not apply.
+    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
     main()

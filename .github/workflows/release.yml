@@ -1,8 +1,10 @@
 name: Release
 
-# No automatic runs; trigger manually from the Actions tab when cutting a release.
+# Fires when a version tag (e.g. v0.1.0) is pushed.
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 # Release job needs write access to create a GitHub Release.
 permissions:
@@ -15,9 +17,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Verify tag matches pyproject.toml
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          # Workflow disabled - using placeholder since github.event.inputs won't exist
-          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}"
           VERSION=$(python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode()).get('project',{}).get('version',''))")
           echo "pyproject version: $VERSION, tag: $TAG"
           [[ "v$VERSION" == "$TAG" ]] || { echo "Version mismatch"; exit 1; }
@@ -33,12 +35,10 @@ jobs:
           python -m build
 
       - name: Create GitHub Release
-        # Workflow disabled - this step will never run
-        if: false
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe  # v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           body: |
             See CHANGELOG.md for details.
           files: |

@@ -54,7 +54,6 @@ Regression prevention:
 """
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -120,10 +119,6 @@ class TestConstants:
     # Platform-specific settings
     MPS_GRADIENT_CHECKPOINTING = False  # Disabled due to MPS double-backward issues
     DEFAULT_GRADIENT_CHECKPOINTING = False  # Default for other platforms
-
-    # Cleanup settings
-    CLEANUP_RETRY_ATTEMPTS = 3  # Number of attempts for file cleanup
-    CLEANUP_RETRY_DELAY = 0.1  # Seconds between cleanup attempts
 
 
 def _ensure_tiny_dataset(base_dir: Path) -> None:
@@ -224,14 +219,11 @@ def test_sft_single_step(tmp_path: Path):
     - _ensure_tiny_dataset() for synthetic data generation (line 32)
     - models/whisper/finetune.py:main() for training execution (line 83)
     - json.load() for results validation (line 90)
-    - os.walk() for directory cleanup (line 68)
-
     Test workflow:
     1. Create synthetic dataset with single audio sample
     2. Configure minimal training parameters
     3. Execute supervised fine-tuning
     4. Validate training results JSON
-    5. Clean up output directory
 
     Args:
         tmp_path (Path): pytest fixture providing temporary directory
@@ -241,9 +233,8 @@ def test_sft_single_step(tmp_path: Path):
         - JSON can be parsed successfully
 
     Side effects:
-        - Creates synthetic dataset in project directory
-        - Creates output directory with training artifacts
-        - Attempts cleanup of output directory (best-effort)
+        - Creates synthetic dataset under tmp_path (auto-cleaned by pytest)
+        - Creates output directory with training artifacts under tmp_path
 
     Platform-specific behavior:
         - MPS: Gradient checkpointing disabled
@@ -252,12 +243,11 @@ def test_sft_single_step(tmp_path: Path):
 
     Known issues:
         - MPS gradient checkpointing causes double-backward errors
-        - Directory cleanup may fail on Windows (file locks)
 
     Example execution:
         >>> pytest tests/test_sft_workflow.py::test_sft_single_step -v
     """
-    base_dir = Path.cwd()
+    base_dir = tmp_path
     _ensure_tiny_dataset(base_dir)
 
     # Minimal profile_config targeting whisper-tiny and our tiny dataset
@@ -291,20 +281,7 @@ def test_sft_single_step(tmp_path: Path):
         "visualize": False,
     }
 
-    out_dir = base_dir / "output" / "test_sft_workflow"
-    if out_dir.exists():
-        # best-effort cleanup to avoid interference between runs
-        for root, dirs, files in os.walk(out_dir.as_posix(), topdown=False):
-            for name in files:
-                try:
-                    os.remove(os.path.join(root, name))
-                except Exception:
-                    pass
-            for name in dirs:
-                try:
-                    os.rmdir(os.path.join(root, name))
-                except Exception:
-                    pass
+    out_dir = tmp_path / "output" / "test_sft_workflow"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Invoke the standard fine-tuning entrypoint

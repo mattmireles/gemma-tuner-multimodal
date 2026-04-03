@@ -1,8 +1,10 @@
 name: Publish to PyPI
 
-# No automatic runs; trigger manually when publishing to PyPI.
+# Fires when a version tag (e.g. v0.1.0) is pushed.
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 # Minimal permissions — GITHUB_TOKEN can only read repo contents.
 permissions:
@@ -15,9 +17,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Verify tag matches pyproject.toml
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          # Workflow disabled - using placeholder since github.event.inputs won't exist
-          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}"
           VERSION=$(python -c "import tomllib,sys;print(tomllib.loads(open('pyproject.toml','rb').read().decode()).get('project',{}).get('version',''))")
           echo "pyproject version: $VERSION, tag: $TAG"
           [[ "v$VERSION" == "$TAG" ]] || { echo "Version mismatch"; exit 1; }
@@ -34,8 +36,6 @@ jobs:
           twine check dist/*
 
       - name: Publish to PyPI
-        # Workflow disabled - this step will never run
-        if: false
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}

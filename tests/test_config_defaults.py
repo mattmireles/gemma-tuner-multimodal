@@ -14,6 +14,6 @@ def test_validate_profile_config_applies_fallbacks():
     _validate_profile_config(conf, ["max_duration", "max_label_length"])
     # Ensure fallbacks are present and coerced types exist
     lang_mode = conf.get("language_mode")
-    assert lang_mode in ("strict", "mixed", "override:") or isinstance(lang_mode, str)
+    assert lang_mode == "strict"
     assert isinstance(conf["max_duration"], float)
     assert isinstance(conf["max_label_length"], int)

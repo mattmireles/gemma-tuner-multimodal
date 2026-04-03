@@ -96,6 +96,7 @@ def test_build_trainer_smoke(monkeypatch):
             self.model = model
             self.train_dataset = train_dataset
             self.eval_dataset = eval_dataset
+            self.data_collator = data_collator
 
     trainer = build_trainer(
         training_args=training_args,
@@ -112,3 +113,8 @@ def test_build_trainer_smoke(monkeypatch):
     # Must have attributes Trainer typically has
     assert hasattr(trainer, "args")
     assert trainer.train_dataset is not None
+    # data_collator must be set and be the correct type
+    from whisper_tuner.models.common.collators import DataCollatorWhisperStrict
+
+    assert trainer.data_collator is not None
+    assert isinstance(trainer.data_collator, DataCollatorWhisperStrict)

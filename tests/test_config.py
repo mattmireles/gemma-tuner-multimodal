@@ -188,7 +188,7 @@ def test_load_profile_config_missing_profile_raises():
             "profile:foo": {"model": "whisper-small", "dataset": "ds"},
         }
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"not found in config"):
         load_profile_config(cfg, "bar")
 
 
@@ -211,5 +211,5 @@ def test_load_profile_config_required_keys_enforced():
     )
 
     # Missing training hyperparameters trigger required check
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"Missing required config keys"):
         load_profile_config(cfg, "p")
