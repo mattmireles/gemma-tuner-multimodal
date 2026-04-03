@@ -24,7 +24,7 @@ classifiers = [
 ]
 dependencies = [
   # Hugging Face ecosystem (tested compatible set)
-  "transformers>=4.53.3",
+  "transformers>=4.46.0,<5.0.0",
   "datasets>=4.0.0",
   "accelerate>=0.27.2",
   "evaluate>=0.4.1",
@@ -45,18 +45,8 @@ dependencies = [
 
   # CLI and interaction
   "typer>=0.9.0",
-  "rich>=13.0.0,<14.0.0",
+  "rich>=13.0.0",
   "questionary>=2.0.0,<3.0.0",
-
-  # Visualization (optional at runtime but included for convenience)
-  "flask>=2.3.0,<3.0.0",
-  "flask-socketio>=5.3.0,<6.0.0",
-  "python-socketio>=5.9.0,<6.0.0",
-
-  # Cloud storage / BigQuery
-  "google-cloud-storage>=2.10.0",
-  "google-cloud-bigquery>=3.11.0",
-  "db-dtypes>=1.4.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -75,7 +65,7 @@ viz = [
   "python-socketio>=5.9.0,<6.0.0",
 ]
 all = [
-  "whisper-fine-tuner-macos[gcp,viz]",
+  "whisper-fine-tuner-macos[dev,gcp,viz]",
 ]
 
 [project.scripts]
@@ -94,7 +84,7 @@ include = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
