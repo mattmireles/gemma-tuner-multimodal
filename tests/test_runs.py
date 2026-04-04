@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 
-from whisper_tuner.core.runs import (
+from gemma_tuner.core.runs import (
     RunConstants,
     create_run_directory,
     get_next_run_id,

@@ -1,7 +1,7 @@
 import json
 import os
 
-from whisper_tuner.core.run_queries import RunQuery, build_overview, cleanup_runs, get_run_details, list_runs
+from gemma_tuner.core.run_queries import RunQuery, build_overview, cleanup_runs, get_run_details, list_runs
 
 
 def _write_metadata(path, metadata):

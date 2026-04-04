@@ -12,7 +12,7 @@ import time
 
 import torch
 
-from whisper_tuner.visualizer import TrainingVisualizer, start_visualization_server
+from gemma_tuner.visualizer import TrainingVisualizer, start_visualization_server
 
 
 def simulate_training():

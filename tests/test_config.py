@@ -44,7 +44,7 @@ import configparser
 
 import pytest
 
-from whisper_tuner.core.config import ConfigConstants, _validate_profile_config, load_profile_config
+from gemma_tuner.core.config import ConfigConstants, _validate_profile_config, load_profile_config
 
 
 def make_cfg(sections: dict) -> configparser.ConfigParser:

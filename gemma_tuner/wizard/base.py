@@ -1,0 +1,460 @@
+"""
+Shared constants, types, and utility functions for the wizard package.
+
+This module contains the foundational building blocks that all wizard submodules
+depend on: named constants (WizardConstants), training method definitions
+(TrainingMethod), model specification tables (ModelSpecs), and pure utility
+functions that do not require any UI interaction (Rich console, questionary).
+
+Extracted from the original monolithic wizard.py so that submodules can
+    from gemma_tuner.wizard.base import WizardConstants, TrainingMethod, ModelSpecs, ...
+without pulling in the entire wizard graph.
+
+Why these items live here:
+- WizardConstants: Referenced by nearly every wizard submodule for magic-number-free code.
+- TrainingMethod / ModelSpecs: Shared data tables consumed by model selection,
+  estimation, configuration generation, and confirmation screens.
+- _infer_num_mel_bins(): Pure function used during distillation compatibility checks.
+- get_device_info(): Hardware detection used by welcome screen, model selection,
+  training estimation, and confirmation screen.
+- detect_datasets(): Dataset discovery used by the dataset selection step.
+
+UI singletons (console, apple_style) are also defined here because every
+submodule needs them and they must live in a single location to avoid
+duplicate Rich Console instances.
+"""
+
+from pathlib import Path
+from typing import Any, Dict, List
+
+import questionary
+from rich.console import Console
+
+# Import existing utilities
+from gemma_tuner.utils.device import get_device
+
+# ---------------------------------------------------------------------------
+# Shared UI singletons — used by every wizard submodule
+# ---------------------------------------------------------------------------
+
+console = Console()
+
+apple_style = questionary.Style(
+    [
+        ("qmark", "fg:#ff9500 bold"),
+        ("question", "bold"),
+        ("answer", "fg:#007aff bold"),
+        ("pointer", "fg:#ff9500 bold"),
+        ("highlighted", "fg:#007aff bold"),
+        ("selected", "fg:#34c759 bold"),
+        ("instruction", "fg:#8e8e93"),
+        ("text", ""),
+    ]
+)
+
+
+class WizardConstants:
+    """Named constants for wizard configuration, user interface, and training estimation."""
+
+    # Progressive Disclosure Timing Constants
+    # These control the pacing of the Steve Jobs-inspired progressive disclosure UI
+    ANIMATION_DELAY = 0.5  # Seconds between progressive UI reveals
+    CONFIRMATION_WAIT = 2.0  # Seconds to display confirmation messages
+    WELCOME_SCREEN_PAUSE = 1.0  # Seconds to display welcome screen animations
+
+    # Training Estimation Constants
+    # Used for calculating realistic training time and memory requirements
+    BASE_SAMPLES_ESTIMATE = 100000  # Baseline sample count for time calculations
+    SAMPLES_PER_FILE = 10  # Average samples per dataset file (rough estimate)
+    MEMORY_SAFETY_BUFFER = 0.8  # Use only 80% of available memory (20% safety margin)
+    HOURS_TO_MINUTES_CUTOFF = 1.0  # Show minutes instead of hours below this threshold
+
+    # Apple Silicon Performance Multipliers
+    # Device-specific optimization factors for training time estimation
+    MPS_PERFORMANCE_MULTIPLIER = 1.0  # Apple Silicon baseline (unified memory architecture)
+    CUDA_PERFORMANCE_MULTIPLIER = 0.7  # NVIDIA GPUs typically 30% faster than Apple Silicon
+    CPU_PERFORMANCE_MULTIPLIER = 3.0  # CPU training is ~3x slower than Apple Silicon MPS
+
+    # Audio Processing
+    # Default audio sample rate for Gemma audio tower (USM-based)
+    DEFAULT_SAMPLING_RATE = 16000
+
+    # Legacy mel bin constants (kept for wizard estimator compatibility)
+    MEL_BINS_LARGE_V3 = 128
+    MEL_BINS_STANDARD = 80
+
+    # Dataset Detection Patterns
+    # File extensions and patterns for automatic dataset discovery
+    AUDIO_EXTENSIONS = ["*.wav", "*.mp3", "*.flac", "*.m4a"]
+    DATASET_FILES_PATTERN = "*.csv"
+    SKIP_DIRECTORIES = {".cache", "__pycache__", ".git", ".DS_Store"}
+
+    # Configuration Generation Constants
+    # Defaults for wizard-generated training profiles
+    DEFAULT_LORA_DROPOUT = 0.1  # Standard LoRA dropout rate
+    DEFAULT_DISTILLATION_ALPHA = 0.5  # Balance between hard and soft targets
+    DEFAULT_TEMPERATURE_RANGE = (2.0, 10.0)  # Conservative to aggressive distillation
+    RECOMMENDED_TEMPERATURE = 5.0  # Balanced distillation temperature
+
+    # LoRA Configuration Presets
+    # Pre-defined LoRA rank configurations with smart alpha defaults
+    LORA_RANK_OPTIONS = [
+        {"rank": 4, "description": "Ultra lightweight", "alpha": 8},
+        {"rank": 8, "description": "Lightweight", "alpha": 16},
+        {"rank": 16, "description": "Balanced ⭐ Recommended", "alpha": 32},
+        {"rank": 32, "description": "High capacity", "alpha": 64},
+        {"rank": 64, "description": "Maximum capacity", "alpha": 128},
+    ]
+
+    # BigQuery Import Constants
+    # Default settings for BigQuery dataset import workflow
+    DEFAULT_BQ_LIMIT = 1000  # Default row limit for BQ exports
+    BQ_SAMPLING_OPTIONS = ["random", "first"]  # Available sampling strategies
+
+    # Common HuggingFace Dataset Presets
+    # Curated list of popular datasets for training
+    RECOMMENDED_HF_DATASETS = [
+        {"name": "mozilla-foundation/common_voice_13_0", "description": "Common Voice multilingual dataset"},
+        {"name": "openslr/librispeech_asr", "description": "LibriSpeech English ASR dataset"},
+        {"name": "facebook/voxpopuli", "description": "VoxPopuli multilingual dataset"},
+    ]
+
+
+class TrainingMethod:
+    """
+    Training method configurations with smart defaults and resource estimation multipliers.
+
+    This class defines the three primary fine-tuning approaches supported by the wizard,
+    each with carefully calibrated resource requirements and quality expectations based
+    on extensive Apple Silicon benchmarking and community feedback.
+
+    Used by:
+    - select_training_method() for method selection UI (line 300)
+    - estimate_training_time() for resource planning calculations (line 885)
+    - generate_profile_config() for configuration generation (line 998)
+    - show_confirmation_screen() for final configuration display (line 926)
+
+    Design philosophy:
+    - Conservative memory estimates to prevent OOM errors
+    - Realistic time estimates based on Apple Silicon benchmarks
+    - Quality ratings help users understand trade-offs
+    - Progressive disclosure hides complexity from beginners
+
+    Memory multipliers account for:
+    - Standard: Full model parameters + gradients + optimizer states
+    - LoRA: Reduced adapter parameters but same base model memory
+    - Distillation: Teacher model + student model + additional computation
+
+    Time multipliers reflect:
+    - LoRA: Faster convergence due to fewer parameters
+    - Distillation: Additional forward passes through teacher model
+    - Apple Silicon unified memory architecture optimizations
+    """
+
+    STANDARD = {
+        "key": "standard",
+        "name": "🚀 Standard Fine-Tune (SFT)",
+        "description": "Full model fine-tuning for best accuracy",
+        "memory_multiplier": 1.0,  # Baseline memory requirements
+        "time_multiplier": 1.0,  # Baseline training time
+        "quality": "highest",  # Maximum achievable quality
+    }
+
+    LORA = {
+        "key": "lora",
+        "name": "🎨 LoRA Fine-Tune",
+        "description": "Memory-efficient parameter-efficient fine-tuning",
+        "memory_multiplier": 0.4,  # ~60% memory savings through adapter architecture
+        "time_multiplier": 0.8,  # 20% faster due to fewer parameters to update
+        "quality": "high",  # 95-98% of standard fine-tuning quality
+    }
+
+    DISTILLATION = {
+        "key": "distillation",
+        "name": "🧠 Knowledge Distillation",
+        "description": "Train smaller models from larger teacher models",
+        "memory_multiplier": 1.2,  # 20% overhead for teacher model inference
+        "time_multiplier": 1.5,  # 50% longer due to teacher forward passes
+        "quality": "good",  # Quality depends on teacher-student gap
+    }
+
+
+class ModelSpecs:
+    """Model specifications for estimation calculations."""
+
+    MODELS = {
+        # Gemma 3n Models
+        "gemma-3n-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 10.0, "hf_id": "google/gemma-3n-E2B-it"},
+        "gemma-3n-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 18.0, "hf_id": "google/gemma-3n-E4B-it"},
+    }
+
+
+def _infer_num_mel_bins(model_name_or_key: Any) -> int:
+    """
+    Determines expected mel spectrogram bins for Gemma model compatibility checking.
+
+    This helper function is critical for distillation workflows where teacher and student
+    models must have matching mel bin configurations. Gemma models use different mel
+    bin counts depending on their generation and architecture.
+
+    Called by:
+    - configure_method_specifics() for teacher-student mel bin compatibility (line 718)
+    - Custom hybrid model validation during distillation setup
+    - Model architecture verification before training begins
+
+    Calls to:
+    - Python string operations for model name parsing and normalization
+    - Exception handling for robust input type conversion
+
+    Architecture compatibility rules:
+    - Gemma large-v3: Uses 128 mel bins (newer architecture)
+    - All other Gemma models: Use 80 mel bins (standard architecture)
+    - Custom models: Inherit from their base model architecture
+    - Mixed architectures: Require explicit compatibility validation
+
+    Input handling patterns:
+    - String model names: Direct parsing for architecture detection
+    - Tuples: Extract first element (common from model selection returns)
+    - None/empty values: Graceful degradation to standard 80 mel bins
+    - Invalid types: Defensive string conversion with exception handling
+
+    Args:
+        model_name_or_key: Model identifier in various formats:
+            - str: "gemma-3n-e4b-it", "google/gemma-3n-e4b-it", etc.
+            - tuple: (model_name, config_dict) from selection functions
+            - Any: Defensive handling for edge cases
+
+    Returns:
+        int: Number of mel bins expected by the model:
+            - 128 for large-v3 variants (modern architecture)
+            - 80 for all other models (standard architecture)
+
+    Example:
+        mel_bins = _infer_num_mel_bins("gemma-3n-e4b-it")  # Returns 128
+        mel_bins = _infer_num_mel_bins("gemma-3n-e4b-it")      # Returns 80
+        mel_bins = _infer_num_mel_bins(("gemma-3n", {}))  # Returns 80
+    """
+    # Robust input normalization for various input types and formats
+    # Handles tuples from model selection functions and defensive type conversion
+    value: Any = model_name_or_key
+    if isinstance(value, tuple) and value:
+        value = value[0]  # Extract model name from (model, config) tuples
+
+    # Defensive string conversion with exception handling for edge cases
+    try:
+        key = (value or "").lower()
+    except Exception:
+        key = str(value or "").lower()
+
+    # Architecture detection: large-v3 uses modern 128-bin architecture
+    if "large-v3" in key:
+        return WizardConstants.MEL_BINS_LARGE_V3
+
+    # All other models use standard 80-bin architecture
+    return WizardConstants.MEL_BINS_STANDARD
+
+
+def get_device_info() -> Dict[str, Any]:
+    """
+    Comprehensive device detection and performance profiling for training estimation.
+
+    This function provides detailed hardware analysis to enable accurate training time
+    and memory requirements estimation. It handles the three primary training platforms
+    (Apple Silicon MPS, NVIDIA CUDA, CPU) with platform-specific optimizations.
+
+    Called by:
+    - show_welcome_screen() for system status display (line 185)
+    - select_model() for memory constraint filtering (line 322)
+    - estimate_training_time() for performance multiplier application (line 885)
+    - show_confirmation_screen() for final hardware verification (line 926)
+
+    Calls to:
+    - utils/device.py:get_device() for PyTorch device detection and MPS availability
+    - psutil.virtual_memory() for system memory analysis and availability calculation
+    - Platform-specific optimization lookup for performance multiplier determination
+
+    Device-specific optimizations:
+
+    Apple Silicon (MPS):
+    - Unified memory architecture: CPU and GPU share same RAM pool
+    - Performance multiplier: 1.0 (baseline for Apple-optimized training)
+    - Memory efficiency: Excellent due to unified memory and Metal optimization
+    - Thermal management: Integrated SoC design with shared thermal envelope
+
+    NVIDIA CUDA:
+    - Discrete GPU memory: Separate VRAM pool with high-bandwidth access
+    - Performance multiplier: 0.7 (typically 30% faster than Apple Silicon)
+    - Memory efficiency: Good with dedicated VRAM but transfer overhead
+    - Scalability: Multi-GPU support and advanced optimization libraries
+
+    CPU Fallback:
+    - System RAM: Uses main memory with cache hierarchy optimization
+    - Performance multiplier: 3.0 (significantly slower due to lack of parallel compute)
+    - Memory efficiency: Poor due to lack of specialized ML compute units
+    - Compatibility: Universal fallback for any hardware configuration
+
+    Memory calculation considerations:
+    - Total memory: Physical RAM available to the system
+    - Available memory: Currently unused memory (accounting for OS and other processes)
+    - Safety buffer: Reserve 20% of available memory to prevent system instability
+    - Swap/virtual memory: Not considered due to severe performance penalties
+
+    Returns:
+        Dict containing comprehensive device information:
+        {
+            "type": PyTorch device type ("mps", "cuda", "cpu"),
+            "name": Full device identifier string,
+            "display_name": Human-readable device description,
+            "total_memory_gb": Total system memory in GB,
+            "available_memory_gb": Currently available memory in GB,
+            "performance_multiplier": Relative training speed factor vs Apple Silicon
+        }
+
+    Example:
+        device_info = get_device_info()
+        if device_info["available_memory_gb"] > 16:
+            # Sufficient memory for large model training
+            enable_large_models = True
+        training_hours *= device_info["performance_multiplier"]
+    """
+    # Primary device detection using shared utility with MPS availability checking
+    device = get_device()
+
+    # System memory analysis for training capacity planning
+    # Uses psutil for cross-platform memory statistics
+    import psutil
+
+    memory_stats = psutil.virtual_memory()
+    total_memory_gb = memory_stats.total / (1024**3)
+    available_memory_gb = memory_stats.available / (1024**3)
+
+    # Base device information structure
+    device_info = {
+        "type": device.type,
+        "name": str(device),
+        "total_memory_gb": total_memory_gb,
+        "available_memory_gb": available_memory_gb,
+    }
+
+    # Platform-specific optimization and performance characteristics
+    if device.type == "mps":
+        device_info["display_name"] = f"Apple Silicon ({device})"
+        device_info["performance_multiplier"] = WizardConstants.MPS_PERFORMANCE_MULTIPLIER
+
+        # Apple Silicon specific optimizations
+        device_info["unified_memory"] = True
+        device_info["memory_bandwidth"] = "High"  # 68-400+ GB/s depending on chip
+        device_info["thermal_design"] = "Integrated SoC"
+
+    elif device.type == "cuda":
+        device_info["display_name"] = f"NVIDIA GPU ({device})"
+        device_info["performance_multiplier"] = WizardConstants.CUDA_PERFORMANCE_MULTIPLIER
+
+        # NVIDIA CUDA specific optimizations
+        device_info["unified_memory"] = False
+        device_info["memory_bandwidth"] = "Very High"  # 500-900+ GB/s for high-end cards
+        device_info["thermal_design"] = "Discrete GPU"
+
+    else:
+        device_info["display_name"] = f"CPU ({device})"
+        device_info["performance_multiplier"] = WizardConstants.CPU_PERFORMANCE_MULTIPLIER
+
+        # CPU fallback characteristics
+        device_info["unified_memory"] = True  # Shared with system
+        device_info["memory_bandwidth"] = "Moderate"  # 50-100 GB/s typical
+        device_info["thermal_design"] = "Traditional CPU"
+
+    return device_info
+
+
+def detect_datasets() -> List[Dict[str, Any]]:
+    """Auto-detect available datasets under data/datasets plus curated sources.
+
+    We intentionally scan only the immediate children of `data/datasets` to avoid
+    treating the parent `data/` directory or the `datasets/` folder itself as a dataset.
+    """
+    datasets: List[Dict[str, Any]] = []
+
+    # Prefer canonical layout: data/datasets/<name>
+    # Anchored to project root so this works regardless of cwd.
+    _project_root = Path(__file__).resolve().parent.parent.parent
+    root = _project_root / "data" / "datasets"
+    if root.exists():
+        for subdir in sorted([p for p in root.iterdir() if p.is_dir()]):
+            # Skip hidden and cache directories
+            if subdir.name.startswith(".") or subdir.name in {".cache", "__pycache__"}:
+                continue
+
+            # Look for CSV files (common dataset format)
+            csv_files = list(subdir.glob("*.csv"))
+            if csv_files:
+                datasets.append(
+                    {
+                        "name": subdir.name,
+                        "type": "local_csv",
+                        "path": str(subdir),
+                        "files": len(csv_files),
+                        "description": f"Local dataset with {len(csv_files)} CSV files",
+                    }
+                )
+
+            # Look for audio files recursively inside this dataset folder
+            audio_extensions = ["*.wav", "*.mp3", "*.flac", "*.m4a"]
+            audio_files: List[Path] = []
+            for ext in audio_extensions:
+                audio_files.extend(subdir.glob(f"**/{ext}"))
+            if audio_files:
+                datasets.append(
+                    {
+                        "name": subdir.name,
+                        "type": "local_audio",
+                        "path": str(subdir),
+                        "files": len(audio_files),
+                        "description": f"Local audio dataset with {len(audio_files)} files",
+                    }
+                )
+
+    # Add BigQuery import option (virtual source)
+    datasets.append(
+        {
+            "name": "Import from Google BigQuery",
+            "type": "bigquery_import",
+            "description": "Query BQ, export surgical slice to _prepared.csv",
+        }
+    )
+
+    # Add Granary dataset setup option
+    datasets.append(
+        {
+            "name": "Setup NVIDIA Granary Dataset",
+            "type": "granary_setup",
+            "description": "🚀 Large-scale multilingual dataset (~643k hours across 25 languages)",
+        }
+    )
+
+    # Add common Hugging Face datasets
+    hf_datasets = [
+        {
+            "name": "mozilla-foundation/common_voice_13_0",
+            "type": "huggingface",
+            "description": "Common Voice multilingual dataset",
+        },
+        {"name": "openslr/librispeech_asr", "type": "huggingface", "description": "LibriSpeech English ASR dataset"},
+        {"name": "facebook/voxpopuli", "type": "huggingface", "description": "VoxPopuli multilingual dataset"},
+    ]
+
+    datasets.extend(hf_datasets)
+
+    # Add custom dataset option
+    datasets.append({"name": "custom", "type": "custom", "description": "I'll specify my dataset path manually"})
+
+    # Ensure the BigQuery import option appears first in the wizard list
+    # without changing the relative order of the remaining entries.
+    bigquery_first: List[Dict[str, Any]] = []
+    others: List[Dict[str, Any]] = []
+    for item in datasets:
+        if item.get("type") == "bigquery_import":
+            bigquery_first.append(item)
+        else:
+            others.append(item)
+    return bigquery_first + others

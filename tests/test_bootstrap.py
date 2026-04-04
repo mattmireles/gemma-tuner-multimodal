@@ -3,7 +3,7 @@ import os
 import platform
 import sys
 
-from whisper_tuner.wft_constants import MemoryLimits
+from gemma_tuner.constants import MemoryLimits
 
 
 def test_bootstrap_sets_mps_env(monkeypatch):
@@ -16,10 +16,10 @@ def test_bootstrap_sets_mps_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
     # Reload module to re-run bootstrap side effects
-    sys.modules.pop("whisper_tuner.core.bootstrap", None)
-    import whisper_tuner.core.bootstrap
+    sys.modules.pop("gemma_tuner.core.bootstrap", None)
+    import gemma_tuner.core.bootstrap
 
-    importlib.reload(whisper_tuner.core.bootstrap)
+    importlib.reload(gemma_tuner.core.bootstrap)
 
     high = float(os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0"))
     low = float(os.environ.get("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0"))

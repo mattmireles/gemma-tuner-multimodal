@@ -19,14 +19,14 @@ from unittest.mock import patch
 
 import pytest
 
-from whisper_tuner.core.config import ConfigConstants, load_model_dataset_config, load_profile_config
+from gemma_tuner.core.config import ConfigConstants, load_model_dataset_config, load_profile_config
 
 # Mark entire module as slow: it imports heavy dependencies and patches HF APIs.
 pytestmark = pytest.mark.slow
 
 # Lazy import heavy deps to avoid failing fast CI when excluded with -m "not slow"
 try:
-    from whisper_tuner.scripts.prepare_granary import resolve_granary_audio_path, validate_granary_config
+    from gemma_tuner.scripts.prepare_granary import resolve_granary_audio_path, validate_granary_config
 except Exception as e:  # pragma: no cover - only triggers in minimal envs
     pytest.skip(f"Granary dependencies unavailable: {e}", allow_module_level=True)
 
@@ -373,8 +373,8 @@ class TestGranaryConfigConstants:
 class TestGranaryIntegration:
     """Integration tests for the complete Granary workflow."""
 
-    @patch("whisper_tuner.scripts.prepare_granary.load_dataset")
-    @patch("whisper_tuner.scripts.prepare_granary.load_profile_config")
+    @patch("gemma_tuner.scripts.prepare_granary.load_dataset")
+    @patch("gemma_tuner.scripts.prepare_granary.load_profile_config")
     def test_prepare_granary_basic_workflow(self, mock_load_config, mock_load_dataset):
         """Test basic Granary preparation workflow with mocked dependencies."""
         # Mock configuration loading
@@ -413,7 +413,7 @@ class TestGranaryIntegration:
 
             # Import and test preparation function
             try:
-                from whisper_tuner.scripts.prepare_granary import prepare_granary
+                from gemma_tuner.scripts.prepare_granary import prepare_granary
 
                 # Should complete without errors and return manifest path
                 result = prepare_granary("granary-en")

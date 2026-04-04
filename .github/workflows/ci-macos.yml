@@ -44,12 +44,12 @@ jobs:
       - name: Smoke import tests
         run: |
           python - <<'PY'
-          import whisper_tuner
-          from whisper_tuner.cli_typer import app
-          from whisper_tuner.main import main as legacy_main
-          from whisper_tuner.manage import main as legacy_manage
-          from whisper_tuner.scripts import evaluate
-          from whisper_tuner.models.whisper.finetune import main as whisper_finetune
+          import gemma_tuner
+          from gemma_tuner.cli_typer import app
+          from gemma_tuner.main import main as legacy_main
+          from gemma_tuner.manage import main as legacy_manage
+          from gemma_tuner.scripts import evaluate
+          from gemma_tuner.models.whisper.finetune import main as whisper_finetune
           print('OK: package imports')
           PY
 
@@ -60,4 +60,4 @@ jobs:
 
       - name: CLI smoke
         run: |
-          whisper-tuner --help
+          gemma-macos-tuner --help

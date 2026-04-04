@@ -1,4 +1,4 @@
-from whisper_tuner.core.config import _validate_profile_config
+from gemma_tuner.core.config import _validate_profile_config
 
 
 def test_validate_profile_config_applies_fallbacks():

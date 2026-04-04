@@ -5,7 +5,7 @@ import sys
 
 import torch
 
-from whisper_tuner.visualizer import TrainingVisualizer, start_visualization_server
+from gemma_tuner.visualizer import TrainingVisualizer, start_visualization_server
 
 print("🎆 Testing Whisper Training Visualizer")
 print("=" * 50)

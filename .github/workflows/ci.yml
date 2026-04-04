@@ -103,12 +103,12 @@ jobs:
       - name: Typer import
         run: |
           python - <<'PY'
-          import whisper_tuner
-          import whisper_tuner.cli_typer
-          import whisper_tuner.main
-          import whisper_tuner.core.bootstrap
+          import gemma_tuner
+          import gemma_tuner.cli_typer
+          import gemma_tuner.main
+          import gemma_tuner.core.bootstrap
           print('cli import OK')
           PY
       - name: CLI smoke
         run: |
-          whisper-tuner system-check
+          gemma-macos-tuner system-check

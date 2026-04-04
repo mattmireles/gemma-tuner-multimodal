@@ -9,7 +9,7 @@ set -euo pipefail
 #        export PYTORCH_ENABLE_MPS_FALLBACK=1
 #        export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.9
 
-echo "🍎 Whisper Fine-Tuner - Apple Silicon Setup"
+echo "🍎 Gemma macOS Tuner - Apple Silicon Setup"
 echo "=========================================="
 
 # Check if running on macOS
@@ -75,7 +75,7 @@ else:
 # Run system check
 echo ""
 echo "Running system check..."
-python3 -m whisper_tuner.scripts.system_check
+python3 -m gemma_tuner.scripts.system_check
 
 echo ""
 echo "=========================================="
@@ -84,7 +84,7 @@ echo ""
 echo "Next steps:"
 echo "1. Review the system check output above"
 echo "2. Configure your training in config.ini"
-echo "3. Run: whisper-tuner finetune <your-profile>"
+echo "3. Run: gemma-macos-tuner finetune <your-profile>"
 echo ""
 echo "Tips:"
 echo "- Batch sizes: M1/M2 Pro (2-4), Max (4-6), Ultra (4-6)"

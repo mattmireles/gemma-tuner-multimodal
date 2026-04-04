@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from whisper_tuner.utils.dataset_utils import load_dataset_split
+from gemma_tuner.utils.dataset_utils import load_dataset_split
 
 
 def _write_csv(path, rows):

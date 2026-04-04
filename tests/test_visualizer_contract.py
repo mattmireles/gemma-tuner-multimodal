@@ -2,7 +2,7 @@ from pathlib import Path
 
 import torch
 
-from whisper_tuner.visualization.events import build_training_event
+from gemma_tuner.visualization.events import build_training_event
 
 
 def test_visualizer_template_uses_local_assets_only():

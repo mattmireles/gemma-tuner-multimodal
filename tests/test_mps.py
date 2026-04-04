@@ -110,7 +110,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-from whisper_tuner.utils.device import get_device, get_device_info, get_memory_stats, verify_mps_setup
+from gemma_tuner.utils.device import get_device, get_device_info, get_memory_stats, verify_mps_setup
 
 
 @pytest.fixture(autouse=True)
@@ -408,7 +408,7 @@ def test_system_check():
     This test ensures that the entire system is properly configured
     for Whisper fine-tuning, not just the MPS components.
     """
-    from whisper_tuner.scripts.system_check import main as system_check_main
+    from gemma_tuner.scripts.system_check import main as system_check_main
 
     # Let any exception from system_check_main propagate to pytest so
     # failures are visible rather than silently swallowed.

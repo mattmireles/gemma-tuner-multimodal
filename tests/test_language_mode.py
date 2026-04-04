@@ -1,4 +1,4 @@
-from whisper_tuner.core.inference import generate
+from gemma_tuner.core.inference import generate
 
 
 class DummyProcessor:

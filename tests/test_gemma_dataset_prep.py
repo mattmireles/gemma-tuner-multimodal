@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from whisper_tuner.utils.gemma_dataset_prep import _build_messages, prepare_gemma_jsonl
+from gemma_tuner.utils.gemma_dataset_prep import _build_messages, prepare_gemma_jsonl
 
 
 def test_prepare_gemma_jsonl_writes_records(tmp_path: Path):

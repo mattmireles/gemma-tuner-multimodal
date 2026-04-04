@@ -1,7 +1,7 @@
 import configparser
 
-from whisper_tuner.wizard import config as wizard_config
-from whisper_tuner.wizard import config_store, granary
+from gemma_tuner.wizard import config as wizard_config
+from gemma_tuner.wizard import config_store, granary
 
 
 def test_add_dataset_to_config_sets_required_defaults(tmp_path, monkeypatch):

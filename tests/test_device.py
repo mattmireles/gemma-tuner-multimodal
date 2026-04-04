@@ -1,12 +1,12 @@
 import logging
 from unittest.mock import patch
 
-from whisper_tuner.utils.device import apply_device_defaults
+from gemma_tuner.utils.device import apply_device_defaults
 
 
 def test_apply_device_defaults_mps_warnings(caplog):
     """Verify that warnings are issued for suboptimal MPS settings."""
-    with patch("whisper_tuner.utils.device.get_device") as mock_get_device:
+    with patch("gemma_tuner.utils.device.get_device") as mock_get_device:
         # Simulate running on an MPS device
         mock_get_device.return_value.type = "mps"
 

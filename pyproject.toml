@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "whisper-fine-tuner-macos"
-version = "0.2.0"
-description = "Whisper fine-tuning tools with Apple Silicon (MPS) support"
+name = "gemma-macos-tuner"
+version = "0.3.0"
+description = "Gemma fine-tuning tools with Apple Silicon (MPS) support"
 readme = "README.md"
-authors = [{ name = "Whisper Fine-Tuner Maintainers" }]
+authors = [{ name = "Gemma macOS Tuner Maintainers" }]
 requires-python = ">=3.10"
-keywords = ["whisper", "speech", "asr", "pytorch", "apple silicon", "mps"]
+keywords = ["gemma", "multimodal", "fine-tuning", "pytorch", "apple silicon", "mps"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -65,21 +65,21 @@ viz = [
   "python-socketio>=5.9.0,<6.0.0",
 ]
 all = [
-  "whisper-fine-tuner-macos[dev,gcp,viz]",
+  "gemma-macos-tuner[dev,gcp,viz]",
 ]
 
 [project.scripts]
-whisper-tuner = "whisper_tuner.cli_typer:app"
+gemma-macos-tuner = "gemma_tuner.cli_typer:app"
 
 [project.urls]
-Homepage = "https://github.com/mattmireles/whisper-fine-tuner-macos"
-Repository = "https://github.com/mattmireles/whisper-fine-tuner-macos"
-Issues = "https://github.com/mattmireles/whisper-fine-tuner-macos/issues"
+Homepage = "https://github.com/mattmireles/gemma-macos-fine-tuner"
+Repository = "https://github.com/mattmireles/gemma-macos-fine-tuner"
+Issues = "https://github.com/mattmireles/gemma-macos-fine-tuner/issues"
 
 [tool.setuptools.packages.find]
 # Discover regular packages from package directories
 include = [
-  "whisper_tuner*",
+  "gemma_tuner*",
 ]
 
 [tool.ruff]
@@ -98,13 +98,12 @@ ignore = ["F841", "E741", "E501", "E402"]
 [tool.ruff.lint.per-file-ignores]
 # Legacy argparse CLI: intentional import ordering (bootstrap before torch) and
 # many long lines in argparse help strings that cannot be practically shortened.
-"whisper_tuner/main.py" = ["I001", "E402", "E501"]
+"gemma_tuner/main.py" = ["I001", "E402", "E501"]
 # Large service/utility modules with pre-existing long lines in docstrings and SQL.
-"whisper_tuner/core/bigquery.py" = ["E501"]
-"whisper_tuner/core/config.py" = ["E501"]
-"whisper_tuner/core/inference.py" = ["E501"]
-"whisper_tuner/models/common/visualizer.py" = ["E501", "E741"]
-"whisper_tuner/models/distil_whisper/finetune.py" = ["E501"]
-"whisper_tuner/wizard/config.py" = ["E501"]
-"whisper_tuner/wizard/estimator.py" = ["E501"]
-"whisper_tuner/cli_typer.py" = ["E501"]
+"gemma_tuner/core/bigquery.py" = ["E501"]
+"gemma_tuner/core/config.py" = ["E501"]
+"gemma_tuner/core/inference.py" = ["E501"]
+"gemma_tuner/models/common/visualizer.py" = ["E501", "E741"]
+"gemma_tuner/wizard/config.py" = ["E501"]
+"gemma_tuner/wizard/estimator.py" = ["E501"]
+"gemma_tuner/cli_typer.py" = ["E501"]
