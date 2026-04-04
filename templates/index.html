@@ -6,16 +6,16 @@
     <title>🎆 Whisper Training Visualizer - Watch AI Learn</title>
     
     <!-- Socket.IO for real-time communication -->
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="{{ asset_paths.socketio }}"></script>
     
     <!-- Three.js for 3D graphics -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="{{ asset_paths.threejs }}"></script>
     
     <!-- Chart.js for 2D plots -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ asset_paths.chartjs }}"></script>
     
     <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ asset_paths.fontawesome_css }}">
     
     <style>
         * {

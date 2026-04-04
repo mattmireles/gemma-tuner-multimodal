@@ -3,6 +3,8 @@ import os
 import platform
 import sys
 
+from whisper_tuner.wft_constants import MemoryLimits
+
 
 def test_bootstrap_sets_mps_env(monkeypatch):
     # Simulate Apple Silicon environment
@@ -22,6 +24,8 @@ def test_bootstrap_sets_mps_env(monkeypatch):
     high = float(os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0"))
     low = float(os.environ.get("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0"))
 
-    assert high == 0.9, f"Expected high watermark 0.9, got {high}"
+    assert high == MemoryLimits.MPS_DEFAULT_FRACTION, (
+        f"Expected high watermark {MemoryLimits.MPS_DEFAULT_FRACTION}, got {high}"
+    )
     assert low == 0.7, f"Expected low watermark 0.7, got {low}"
     assert 0.0 < low < high < 1.0

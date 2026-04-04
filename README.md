@@ -137,6 +137,7 @@ data_patches/{source}/
 **Real-Time Visualization** (`whisper_tuner/visualizer.py`):
 - **Flask + SocketIO Backend**: Streams training metrics to web interface
 - **PyTorch Hook Integration**: Extracts gradients, attention weights, and activations
+- **Offline Frontend Assets**: Vendored Socket.IO, Three.js, Chart.js, and icon assets are served locally
 - **WebGL Frontend**: GPU-accelerated 3D visualizations with Three.js
 - **Performance Buffering**: Prevents visualization from impacting training speed
 
@@ -150,10 +151,9 @@ data_patches/{source}/
 **Architecture Integration**:
 ```python
 # Training script integration
-if args.visualize:
-    visualizer = TrainingVisualizer(model, device)
-    visualizer.start_server()
-    trainer.add_callback(visualizer.get_callback())
+if profile_config.get("visualize"):
+    start_visualization_server()
+    trainer.add_callback(VisualizerTrainerCallback(update_every_steps=50))
 ```
 
 #### 6. Wizard CLI (Interactive Guided Training)
