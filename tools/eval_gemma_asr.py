@@ -59,9 +59,9 @@ def build_messages(transcript_hint: Optional[str] = None) -> List[Dict]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Gemma 3n ASR evaluation (WER/CER)")
+    ap = argparse.ArgumentParser(description="Gemma ASR evaluation (WER/CER)")
     ap.add_argument("--csv", required=True, help="Validation CSV with audio_path and reference text")
-    ap.add_argument("--model", default="google/gemma-3n-E2B-it", help="Base Gemma model id")
+    ap.add_argument("--model", default="google/gemma-4-E2B-it", help="Base Gemma model id")
     ap.add_argument("--adapters", help="Path to LoRA adapters (optional)")
     ap.add_argument("--text-column", default="text", help="Reference transcript column name")
     ap.add_argument("--limit", type=int, default=0, help="Max rows to evaluate (0 = all)")

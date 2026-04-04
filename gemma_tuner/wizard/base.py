@@ -140,6 +140,9 @@ class ModelSpecs:
         # Gemma 3n Models
         "gemma-3n-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 10.0, "hf_id": "google/gemma-3n-E2B-it"},
         "gemma-3n-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 18.0, "hf_id": "google/gemma-3n-E4B-it"},
+        # Gemma 4 Models
+        "gemma-4-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 9.0, "hf_id": "google/gemma-4-E2B-it"},
+        "gemma-4-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 16.0, "hf_id": "google/gemma-4-E4B-it"},
     }
 
 

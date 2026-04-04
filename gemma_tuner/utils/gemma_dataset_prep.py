@@ -94,20 +94,20 @@ Custom column mapping:
       --csv data/datasets/custom/data.csv \
       --out data/datasets/custom/formatted.jsonl \
       --text-column transcript \
-      --model-id google/gemma-3n-E2B-it
+      --model-id google/gemma-4-E2B-it
 
 Single sample validation:
   python utils/gemma_dataset_prep.py --validate \
       --audio test_files/sample.wav \
       --text "hello world example" \
-      --model-id google/gemma-3n-E2B-it
+      --model-id google/gemma-4-E2B-it
 
 Batch validation across multiple samples:
   for audio in test_files/*.wav; do
     python utils/gemma_dataset_prep.py --validate \
         --audio "$audio" \
         --text "validation text" \
-        --model-id google/gemma-3n-E2B-it
+        --model-id google/gemma-4-E2B-it
   done
 
 Design Principles:
@@ -148,10 +148,10 @@ except Exception:
 
 
 class GemmaDatasetPrepConstants:
-    """Named constants for Gemma 3n dataset preparation and validation."""
+    """Named constants for Gemma dataset preparation and validation."""
 
     # Default Configuration
-    DEFAULT_MODEL_ID = "google/gemma-3n-E2B-it"  # Standard Gemma 3n multimodal model
+    DEFAULT_MODEL_ID = "google/gemma-4-E2B-it"  # Default Gemma multimodal model
     DEFAULT_TEXT_COLUMN = "text"  # Default transcript column name
 
     # Required CSV Columns
@@ -519,7 +519,7 @@ def validate_single_sample(audio_path: str, text: str, model_id: str) -> None:
 
     Example Usage:
         # Basic validation
-        validate_single_sample("test.wav", "hello world", "google/gemma-3n-E2B-it")
+        validate_single_sample("test.wav", "hello world", "google/gemma-4-E2B-it")
 
         # Custom model validation
         validate_single_sample("audio.flac", "transcript", "custom/gemma-model")

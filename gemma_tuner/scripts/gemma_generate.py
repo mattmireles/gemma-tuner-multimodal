@@ -62,7 +62,7 @@ Usage Examples:
 
 Basic transcription with fine-tuned adapter:
   python scripts/gemma_generate.py \
-      --model google/gemma-3n-E2B-it \
+      --model google/gemma-4-E2B-it \
       --adapter output/gemma-finetune/checkpoint-1000 \
       --wav test_audio.wav
 
@@ -75,7 +75,7 @@ Custom base model with local adapter:
 Batch processing integration:
   for audio in *.wav; do
     python scripts/gemma_generate.py \
-        --model google/gemma-3n-E2B-it \
+        --model google/gemma-4-E2B-it \
         --adapter best_checkpoint \
         --wav "$audio"
   done
@@ -110,10 +110,10 @@ from transformers import AutoModelForCausalLM, AutoProcessor
 
 
 class GemmaInferenceConstants:
-    """Named constants for Gemma 3n inference configuration and optimization."""
+    """Named constants for Gemma inference configuration and optimization."""
 
     # Device Detection and Optimization
-    DEFAULT_MODEL_ID = "google/gemma-3n-E2B-it"  # Default Gemma model for inference
+    DEFAULT_MODEL_ID = "google/gemma-4-E2B-it"  # Default Gemma model for inference
 
     # Device Selection Priority
     # MPS > CUDA > CPU for optimal performance across hardware platforms
@@ -224,7 +224,7 @@ def main(model_id: str, adapter_path: str, wav_path: str):
 
     Example Usage:
         # Basic transcription
-        main("google/gemma-3n-E2B-it", "checkpoints/best_model", "audio.wav")
+        main("google/gemma-4-E2B-it", "checkpoints/best_model", "audio.wav")
 
         # Custom model with local paths
         main("/models/gemma-custom", "/adapters/speech-lora", "sample.flac")
