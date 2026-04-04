@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 try:
     from gemma_tuner.constants import MemoryLimits
 except ImportError:
+
     class MemoryLimits:
         MPS_DEFAULT_FRACTION = 0.8
         CUDA_DEFAULT_FRACTION = 0.9
@@ -33,14 +34,16 @@ except ImportError:
 
 class MPSMemoryConstants:
     """Constants used for MPS memory pressure monitoring."""
-    BYTES_TO_GB = 1024 ** 3
-    MEMORY_PRESSURE_WARNING_THRESHOLD = 85   # percent
+
+    BYTES_TO_GB = 1024**3
+    MEMORY_PRESSURE_WARNING_THRESHOLD = 85  # percent
     MEMORY_PRESSURE_CRITICAL_THRESHOLD = 90  # percent
 
 
 # ---------------------------------------------------------------------------
 # Device selection
 # ---------------------------------------------------------------------------
+
 
 @functools.lru_cache(maxsize=1)
 def get_device() -> torch.device:
@@ -128,6 +131,7 @@ def apply_device_defaults(profile_config: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Memory management
 # ---------------------------------------------------------------------------
+
 
 def probe_bfloat16(device: torch.device) -> bool:
     """
@@ -284,6 +288,7 @@ def check_memory_pressure() -> bool:
 # ---------------------------------------------------------------------------
 # Diagnostics
 # ---------------------------------------------------------------------------
+
 
 def get_env_info() -> dict[str, Any]:
     """Return a snapshot of the current environment (versions, device)."""

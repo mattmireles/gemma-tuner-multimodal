@@ -70,7 +70,6 @@ class MemoryLimits:
     """Conservative CUDA memory fraction for multi-process scenarios."""
 
 
-
 # ===== TRAINING CONFIGURATION CONSTANTS =====
 
 
@@ -407,7 +406,6 @@ class Evaluation:
     # Evaluation Batch Size
     EVAL_BATCH_SIZE_DEFAULT = 16
     """Default batch size for evaluation (16 samples)."""
-
 
 
 # ===== VISUALIZATION CONSTANTS =====

@@ -257,9 +257,7 @@ def test_model_loading():
 
     # Verify model is on the expected device
     first_param = next(model.parameters())
-    assert first_param.device.type == device.type, (
-        f"Model parameter on {first_param.device}, expected {device}"
-    )
+    assert first_param.device.type == device.type, f"Model parameter on {first_param.device}, expected {device}"
 
     # Verify memory stats are retrievable after loading a model
     mem_stats = get_memory_stats()
@@ -338,27 +336,19 @@ def test_inference():
     sequence_length = 3000  # 30 seconds at 100Hz
 
     dummy_input = torch.randn(batch_size, feature_size, sequence_length).to(device)
-    assert dummy_input.device.type == device.type, (
-        f"Input tensor on {dummy_input.device}, expected {device}"
-    )
+    assert dummy_input.device.type == device.type, f"Input tensor on {dummy_input.device}, expected {device}"
 
     with torch.no_grad():
         # Simulate mel spectrogram processing via 1-D convolution
         conv_weight = torch.randn(512, feature_size, 10).to(device)
         output = torch.nn.functional.conv1d(dummy_input, conv_weight, padding=5)
 
-        assert output.shape == (batch_size, 512, sequence_length + 1), (
-            f"Unexpected conv1d output shape: {output.shape}"
-        )
-        assert output.device.type == device.type, (
-            f"Conv output on {output.device}, expected {device}"
-        )
+        assert output.shape == (batch_size, 512, sequence_length + 1), f"Unexpected conv1d output shape: {output.shape}"
+        assert output.device.type == device.type, f"Conv output on {output.device}, expected {device}"
         assert torch.isfinite(output).all(), "Conv1d output contains NaN or Inf"
 
         # Simulate attention mechanism: softmax + batch matmul
-        attention_weights = torch.softmax(
-            torch.randn(batch_size, 100, 100).to(device), dim=-1
-        )
+        attention_weights = torch.softmax(torch.randn(batch_size, 100, 100).to(device), dim=-1)
         values = torch.randn(batch_size, 100, 64).to(device)
         attention_output = torch.bmm(attention_weights, values)
 

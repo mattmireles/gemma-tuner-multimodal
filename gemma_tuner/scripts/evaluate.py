@@ -54,7 +54,6 @@ DEFAULT_BATCH_SIZE = 16  # Default batch size for evaluation
 logger = logging.getLogger(__name__)
 
 
-
 def run_evaluation(profile_config, output_dir):
     """
     Executes comprehensive model evaluation with metrics calculation and reporting.
@@ -325,7 +324,9 @@ def run_evaluation(profile_config, output_dir):
                                 for p in generated_parts:
                                     if p.shape[-1] < max_seq_len:
                                         pad_width = max_seq_len - p.shape[-1]
-                                        p = np.pad(p, ((0, pad_width),), constant_values=processor.tokenizer.pad_token_id)
+                                        p = np.pad(
+                                            p, ((0, pad_width),), constant_values=processor.tokenizer.pad_token_id
+                                        )
                                     padded_parts.append(p)
                                 generated_tokens = np.stack(padded_parts)
 

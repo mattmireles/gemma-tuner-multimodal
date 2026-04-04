@@ -74,8 +74,7 @@ def _resolve_config_path(explicit_path: str | None = None) -> Path:
         if p.exists():
             return p
         raise FileNotFoundError(
-            f"Config not found at GEMMA_TUNER_CONFIG={env_path!r}. "
-            "Check that the path is correct and the file exists."
+            f"Config not found at GEMMA_TUNER_CONFIG={env_path!r}. Check that the path is correct and the file exists."
         )
 
     # Priority 3: CWD fallback — legacy behavior for running from project root
@@ -310,7 +309,6 @@ def export(model_path_or_profile: str) -> None:
     from gemma_tuner.scripts.export import export_model_dir
 
     export_model_dir(model_path_or_profile)
-
 
 
 def blacklist(profile_config: Dict, run_dir: str) -> None:

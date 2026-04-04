@@ -422,9 +422,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
         # Parallel Audio Processing Execution
         # Launch concurrent download and conversion tasks
         if "audio_url" not in df.columns:
-            raise ValueError(
-                f"Expected 'audio_url' column in dataset CSV but found columns: {list(df.columns)}"
-            )
+            raise ValueError(f"Expected 'audio_url' column in dataset CSV but found columns: {list(df.columns)}")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
@@ -563,9 +561,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
                 "(streaming mode). Filter will pass all rows unmodified.",
                 max_duration,
             )
-        df_duration_filtered = df_lang_filtered[
-            df_lang_filtered["duration"] <= max_duration
-        ]
+        df_duration_filtered = df_lang_filtered[df_lang_filtered["duration"] <= max_duration]
     else:
         df_duration_filtered = df_lang_filtered
     # Final Column Selection and Cleanup

@@ -196,9 +196,7 @@ def generate(
         forced_ids = None
     elif language_mode == "strict":
         if batch_language and batch_language != "??":
-            forced_ids = processor.get_decoder_prompt_ids(
-                language=batch_language, task="transcribe"
-            )
+            forced_ids = processor.get_decoder_prompt_ids(language=batch_language, task="transcribe")
         else:
             forced_ids = None
     elif language_mode.startswith("override:") or forced_language:

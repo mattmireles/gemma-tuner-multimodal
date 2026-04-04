@@ -72,7 +72,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-from datetime import datetime
 from typing import Optional
 
 import typer
@@ -516,9 +515,8 @@ def blacklist(
     run_dir = create_run_directory(output_dir, profile, run_id, "blacklist")
     add_file_handler(log_file or os.path.join(run_dir, LoggingDefaults.RUN_LOG_FILENAME), json_format=json_logging)
 
-    finetuning_run_dir = (
-        find_latest_completed_finetuning_run(output_dir, profile)
-        or find_latest_finetuning_run(output_dir, profile)
+    finetuning_run_dir = find_latest_completed_finetuning_run(output_dir, profile) or find_latest_finetuning_run(
+        output_dir, profile
     )
     if not finetuning_run_dir:
         raise FileNotFoundError(f"No completed fine-tuning run found for profile '{profile}'.")
@@ -965,8 +963,6 @@ def _load_config(path: str):
     cfg = configparser.ConfigParser()
     cfg.read(resolved)
     return cfg
-
-
 
 
 def _build_run_query(**filters) -> RunQuery:

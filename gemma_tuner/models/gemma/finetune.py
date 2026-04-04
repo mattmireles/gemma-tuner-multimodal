@@ -57,7 +57,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 import torch
 from datasets import Dataset as HFDataset
@@ -74,12 +74,11 @@ from transformers.utils import logging as hf_logging
 
 from gemma_tuner.models.common.collators import DataCollatorGemmaAudio
 from gemma_tuner.models.common.results import persist_training_results
+from gemma_tuner.models.common.utils import install_kw_filter
 from gemma_tuner.models.gemma.constants import (
-    AudioProcessingConstants,
     GemmaTrainingConstants,
     GemmaValidationConstants,
 )
-from gemma_tuner.models.common.utils import install_kw_filter
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 from gemma_tuner.utils.device import empty_cache, get_device
 
@@ -379,6 +378,7 @@ def main(profile_config: Dict, output_dir: str):
         if isinstance(ds, HFDataset):
             return ds
         from datasets import IterableDataset as _IterableDataset
+
         if isinstance(ds, _IterableDataset):
             raise ValueError(
                 "Streaming IterableDataset is not supported for Gemma SFT. "

@@ -330,7 +330,7 @@ def load_audio_local_or_gcs(
             # Exponential backoff between retries (skip sleep on the first attempt).
             # Sleeping 2**attempt seconds: attempt 1 → 2 s, attempt 2 → 4 s, etc.
             if attempt > 0:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
             try:
                 bucket = gcs_client.bucket(bucket_name)
                 blob = bucket.blob(blob_name)
@@ -344,8 +344,7 @@ def load_audio_local_or_gcs(
                 last_err = e
                 continue
         raise AudioLoadError(
-            f"Failed to load audio from GCS '{path_or_audio}' after {retries} retries. "
-            f"Last error: {last_err}"
+            f"Failed to load audio from GCS '{path_or_audio}' after {retries} retries. Last error: {last_err}"
         ) from last_err
 
     # Local file path
@@ -353,9 +352,7 @@ def load_audio_local_or_gcs(
         audio = librosa.load(path_or_audio, sr=sampling_rate)[0]
         return audio.astype(DatasetPrepConstants.NUMPY_FLOAT32_DTYPE)
     except Exception as e:
-        raise AudioLoadError(
-            f"Failed to load audio from local path '{path_or_audio}': {e}"
-        ) from e
+        raise AudioLoadError(f"Failed to load audio from local path '{path_or_audio}': {e}") from e
 
 
 def encode_labels(tokenizer, text: str, max_len: int = DatasetPrepConstants.MAX_TOKEN_LENGTH_DEFAULT):

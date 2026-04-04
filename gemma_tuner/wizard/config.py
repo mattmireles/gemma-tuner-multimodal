@@ -376,6 +376,7 @@ def generate_profile_config(
         # has not been completed first.
         if not dataset.get("prepared", False):
             import logging as _logging
+
             _logging.getLogger(__name__).warning(
                 "Granary dataset '%s' is configured but not yet prepared. "
                 "Run `gemma-macos-tuner prepare-granary %s` before starting training, "
@@ -387,10 +388,12 @@ def generate_profile_config(
         profile_config["train_dataset_path"] = dataset["path"]
         # Check for a sibling eval CSV (e.g. data_eval.csv or data_validation.csv)
         import logging as _logging
+
         _ds_path = dataset["path"]
         _eval_path = None
         try:
             from pathlib import Path as _Path
+
             _p = _Path(_ds_path)
             for _suffix in (f"{_p.stem}_eval.csv", f"{_p.stem}_validation.csv"):
                 _candidate = _p.parent / _suffix

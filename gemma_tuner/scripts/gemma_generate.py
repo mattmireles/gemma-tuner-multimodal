@@ -275,9 +275,7 @@ def main(model_id: str, adapter_path: str, wav_path: str):
     if sr != GemmaInferenceConstants.TARGET_SAMPLING_RATE:
         import librosa
 
-        audio = librosa.resample(
-            audio, orig_sr=sr, target_sr=GemmaInferenceConstants.TARGET_SAMPLING_RATE
-        )
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=GemmaInferenceConstants.TARGET_SAMPLING_RATE)
 
     # Construct multimodal chat message using Gemma 3n template
     # This format is required for proper multimodal inference

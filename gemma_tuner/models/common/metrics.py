@@ -119,14 +119,10 @@ def build_wer_metrics(
     """
 
     # --- load metrics (offline-safe) ---
-    wer_metric = _load_metric(
-        MetricConstants.WER_METRIC_NAME, local_files_only=local_files_only
-    )
+    wer_metric = _load_metric(MetricConstants.WER_METRIC_NAME, local_files_only=local_files_only)
     cer_metric: Any = None
     if include_cer:
-        cer_metric = _load_metric(
-            MetricConstants.CER_METRIC_NAME, local_files_only=local_files_only
-        )
+        cer_metric = _load_metric(MetricConstants.CER_METRIC_NAME, local_files_only=local_files_only)
 
     # Decoder defaults to the tokenizer when not explicitly provided.
     _decoder = decoder if decoder is not None else tokenizer
@@ -162,9 +158,7 @@ def build_wer_metrics(
         # --- Replace -100 padding with pad_token_id for decoding ---
         # Copy labels so the original array is not mutated across eval calls.
         label_ids = label_ids.copy()
-        label_ids[label_ids == MetricConstants.LABEL_PADDING_TOKEN] = (
-            tokenizer.pad_token_id
-        )
+        label_ids[label_ids == MetricConstants.LABEL_PADDING_TOKEN] = tokenizer.pad_token_id
 
         # --- Decode to strings ---
         pred_str = _decoder.batch_decode(pred_ids, skip_special_tokens=True)
@@ -176,23 +170,15 @@ def build_wer_metrics(
             label_str = [normalizer(r).strip() for r in label_str]
 
         # --- Compute WER ---
-        wer_value = wer_metric.compute(
-            predictions=pred_str, references=label_str
-        )
+        wer_value = wer_metric.compute(predictions=pred_str, references=label_str)
         results: Dict[str, float] = {
-            MetricConstants.WER_METRIC_NAME: float(
-                MetricConstants.PERCENTAGE_SCALE * wer_value
-            )
+            MetricConstants.WER_METRIC_NAME: float(MetricConstants.PERCENTAGE_SCALE * wer_value)
         }
 
         # --- Optionally compute CER ---
         if cer_metric is not None:
-            cer_value = cer_metric.compute(
-                predictions=pred_str, references=label_str
-            )
-            results[MetricConstants.CER_METRIC_NAME] = float(
-                MetricConstants.PERCENTAGE_SCALE * cer_value
-            )
+            cer_value = cer_metric.compute(predictions=pred_str, references=label_str)
+            results[MetricConstants.CER_METRIC_NAME] = float(MetricConstants.PERCENTAGE_SCALE * cer_value)
 
         return results
 

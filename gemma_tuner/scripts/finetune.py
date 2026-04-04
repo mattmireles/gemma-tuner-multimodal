@@ -138,17 +138,13 @@ def main(profile_config, output_dir):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Fine-tune Gemma models with dynamic routing."
-    )
+    parser = argparse.ArgumentParser(description="Fine-tune Gemma models with dynamic routing.")
     parser.add_argument(
         "--profile_config",
         required=True,
         help="Profile configuration as JSON string.",
     )
-    parser.add_argument(
-        "--output_dir", required=True, help="Output directory for training artifacts."
-    )
+    parser.add_argument("--output_dir", required=True, help="Output directory for training artifacts.")
     args = parser.parse_args()
 
     import json

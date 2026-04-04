@@ -30,7 +30,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           architecture: 'arm64'
 
-      - name: Install dependencies (uv if available, fallback to pip)
+      - name: Install dependencies
         shell: bash
         run: |
           python -m pip install --upgrade pip
@@ -40,6 +40,9 @@ jobs:
             pip install -r requirements.txt
           fi
           python -m pip install -e '.[dev]'
+          # torch is excluded from requirements.txt (platform-specific URL).
+          # Install the MPS-capable wheel directly for Apple Silicon CI runners.
+          pip install torch
 
       - name: Smoke import tests
         run: |
@@ -49,7 +52,7 @@ jobs:
           from gemma_tuner.main import main as legacy_main
           from gemma_tuner.manage import main as legacy_manage
           from gemma_tuner.scripts import evaluate
-          from gemma_tuner.models.whisper.finetune import main as whisper_finetune
+          from gemma_tuner.models.gemma.finetune import main as gemma_finetune
           print('OK: package imports')
           PY
 

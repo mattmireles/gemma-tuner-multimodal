@@ -108,7 +108,7 @@ def main():
     - Applies device-specific configuration defaults (MPS, CUDA, CPU)
     - Dispatches to core/ops.py:finetune() which routes to model-specific implementations
     - Tracks training progress with real-time metadata updates
-    - Automatic GGUF export on successful completion 
+    - Automatic GGUF export on successful completion
     - Signal handling for graceful interruption and run status preservation
 
     evaluate (Model Evaluation):
@@ -190,7 +190,11 @@ def main():
         nargs="?",
         help="Name of the profile to use (from config.ini) or model+dataset combination",
     )
-    parser.add_argument("--config", default=None, help="Path to the configuration file (default: auto-resolved via GEMMA_TUNER_CONFIG env var or config.ini in CWD).")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to the configuration file (default: auto-resolved via GEMMA_TUNER_CONFIG env var or config.ini in CWD).",
+    )
     parser.add_argument(
         "--max_samples", type=int, default=None, help="Maximum number of training or evaluation samples to use."
     )

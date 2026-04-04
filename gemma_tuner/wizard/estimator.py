@@ -34,8 +34,6 @@ def configure_method_specifics(
     method: Dict[str, Any], model: str, seed: Dict[str, Any] | None = None
 ) -> Dict[str, Any]:
     """Step 5: Method-specific configuration (progressive disclosure)"""
-    from gemma_tuner.wizard.config_store import _read_config
-
     config = {} if seed is None else dict(seed)
 
     if method["key"] == "lora":
@@ -74,7 +72,9 @@ def configure_method_specifics(
         ).ask()
 
         if alpha == "custom":
-            alpha_str = questionary.text("Enter custom alpha value:", default=str(default_alpha), style=apple_style).ask()
+            alpha_str = questionary.text(
+                "Enter custom alpha value:", default=str(default_alpha), style=apple_style
+            ).ask()
             try:
                 alpha = int(alpha_str) if alpha_str is not None else default_alpha
             except ValueError:
@@ -83,7 +83,6 @@ def configure_method_specifics(
         config["lora_alpha"] = alpha
         config["lora_dropout"] = 0.1  # Smart default
         config["use_peft"] = True
-
 
     return config
 

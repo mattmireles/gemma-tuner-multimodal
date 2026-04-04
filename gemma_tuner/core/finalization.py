@@ -44,7 +44,9 @@ def finalize_training_run(
     return TrainingFinalizationResult(train_metrics=train_metrics)
 
 
-def finalize_evaluation_run(run_dir: str, output_dir: str, metrics: Optional[dict[str, Any]]) -> EvaluationFinalizationResult:
+def finalize_evaluation_run(
+    run_dir: str, output_dir: str, metrics: Optional[dict[str, Any]]
+) -> EvaluationFinalizationResult:
     metrics = metrics or {}
     if metrics:
         update_run_metadata(run_dir, metrics=metrics)
@@ -82,6 +84,7 @@ def _load_train_results(run_dir: str) -> dict[str, Any]:
 
 def _update_experiment_indexes(output_dir: str, run_dir: str) -> None:
     import logging as _logging
+
     try:
         update_experiments_csv(output_dir, run_dir)
         update_experiments_sqlite(output_dir, run_dir)

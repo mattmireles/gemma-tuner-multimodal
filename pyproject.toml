@@ -114,4 +114,6 @@ ignore = ["F841", "E741", "E501", "E402"]
 "gemma_tuner/models/common/visualizer.py" = ["E501", "E741"]
 "gemma_tuner/wizard/config.py" = ["E501"]
 "gemma_tuner/wizard/estimator.py" = ["E501"]
-"gemma_tuner/cli_typer.py" = ["E501"]
+# I001: import sort order is intentionally violated — bootstrap must run
+# before any torch imports (sets MPS env vars before PyTorch allocator init).
+"gemma_tuner/cli_typer.py" = ["E501", "I001", "E402"]

@@ -318,6 +318,7 @@ def main() -> int:
     # the try/except probe logic across scripts.
     try:
         import torch
+
         from gemma_tuner.utils.device import probe_bfloat16
 
         if torch.backends.mps.is_available():

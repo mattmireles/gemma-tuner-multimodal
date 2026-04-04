@@ -65,8 +65,8 @@ from typing import Any, Dict, Optional
 
 from filelock import FileLock
 
-from gemma_tuner.utils.device import to_bool
 from gemma_tuner.constants import Timing
+from gemma_tuner.utils.device import to_bool
 
 
 # Run management constants
@@ -606,7 +606,6 @@ def write_metrics(run_dir: str, metrics: Dict[str, Any]) -> None:
     with open(tmp_path, "w") as f:
         json.dump(existing, f, indent=2)
     os.replace(tmp_path, metrics_path)
-
 
 
 def summarize_run_for_csv(run_dir: str) -> Dict[str, Any]:

@@ -502,9 +502,7 @@ def _apply_patch_bundle(dataset, patch_bundle, configured_text_col, num_workers,
     logger.info("\n--- Phase 2: Blacklist Filtering ---")
     filtered_count = 0
     if patch_bundle.blacklist_ids:
-        logger.info(
-            f"Applying blacklist filtering (respecting {len(patch_bundle.protected_ids)} protected samples)"
-        )
+        logger.info(f"Applying blacklist filtering (respecting {len(patch_bundle.protected_ids)} protected samples)")
 
         def should_keep_sample(example, _blacklist=patch_bundle.blacklist_ids, _protected=patch_bundle.protected_ids):
             sample_id = _normalize_sample_id(example["id"])

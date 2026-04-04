@@ -428,6 +428,7 @@ def _register_routes():
     function allows the app/socketio creation to be deferred until first
     use while keeping route definitions in a single place.
     """
+
     # Flask routes
     @app.route("/")
     def index():
