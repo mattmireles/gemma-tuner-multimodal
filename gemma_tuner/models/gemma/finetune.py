@@ -528,7 +528,7 @@ def main(profile_config: Dict, output_dir: str):
             logger.warning(f"Failed to load validation split; running without eval: {e}")
 
     # Initialize processor and model
-    model_id = profile_config.get("base_model", "google/gemma-3n-E2B-it")
+    model_id = profile_config.get("base_model", "google/gemma-4-E2B-it")
     attn_impl = profile_config.get("attn_implementation", "eager")
 
     logger.info(f"Loading processor: {model_id}")

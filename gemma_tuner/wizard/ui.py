@@ -208,7 +208,7 @@ def select_model(method: Dict[str, Any], family: str | None = None):
         choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
 
         # Add recommendation for the smaller variant (fits on most Apple Silicon)
-        if display_name == "gemma-3n-e2b-it":
+        if display_name == "gemma-4-e2b-it":
             choice_text += " ⭐ Recommended"
 
         choices.append(
