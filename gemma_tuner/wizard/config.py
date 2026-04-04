@@ -319,23 +319,11 @@ def generate_profile_config(
     # Load the base configuration from config.ini using the robust, hierarchical loader.
     # This ensures that all central defaults are respected.
     cfg = _read_config()
-    # For custom hybrid, load base defaults from decoder source instead of sentinel model
     model_for_loader = model
-    if (
-        method["key"] == "distillation"
-        and method_config.get("student_model_type") == "custom"
-        and model == "__custom_hybrid__"
-    ):
-        model_for_loader = method_config.get("student_decoder_from") or model
     profile_config = load_model_dataset_config(cfg, model_for_loader, dataset["name"])
 
-    # CRITICAL: Add the model and dataset keys that are required by load_profile_config
-    # These are not included in load_model_dataset_config but are required for profile sections
-    # For custom hybrid, use the decoder source as the model key for config validation
-    if method["key"] == "distillation" and method_config.get("student_model_type") == "custom":
-        profile_config["model"] = method_config.get("student_decoder_from", model_for_loader)
-    else:
-        profile_config["model"] = model_for_loader
+    # Add the model and dataset keys required by the training pipeline
+    profile_config["model"] = model_for_loader
     profile_config["dataset"] = dataset["name"]
 
     # Layer the user's interactive choices on top of the base configuration.
@@ -359,19 +347,6 @@ def generate_profile_config(
         section = f"model:{model_for_loader}"
         if cfg.has_option(section, "group") and cfg.get(section, "group").strip().lower() == "gemma":
             profile_config["attn_implementation"] = "eager"
-    elif method["key"] == "distillation":
-        profile_config.update(
-            {
-                "teacher_model": method_config["teacher_model"],
-                "distillation_temperature": method_config["temperature"],
-                "distillation_alpha": 0.5,  # Balance between hard and soft targets
-            }
-        )
-        # Propagate custom student architecture if selected
-        if method_config.get("student_model_type") == "custom":
-            profile_config["student_model_type"] = "custom"
-            profile_config["student_encoder_from"] = method_config.get("student_encoder_from")
-            profile_config["student_decoder_from"] = method_config.get("student_decoder_from")
 
     # Dataset-specific configuration
     if dataset["type"] == "huggingface":

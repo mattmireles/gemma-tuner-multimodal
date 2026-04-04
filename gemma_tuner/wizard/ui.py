@@ -155,11 +155,7 @@ def select_training_method(family: str | None = None) -> Dict[str, Any]:
 
 
 def select_model(method: Dict[str, Any], family: str | None = None):
-    """Step 2: Select model based on training method, driven by config.ini.
-
-    For distillation, this returns the STUDENT model key (not teacher).
-    Teacher will be chosen in a later step via configure_method_specifics().
-    """
+    """Step 2: Select Gemma model for LoRA fine-tuning, driven by config.ini."""
     from gemma_tuner.wizard.config_store import _read_config
 
     console.print("\n[bold]Step 2: Choose your model[/bold]")
@@ -179,22 +175,8 @@ def select_model(method: Dict[str, Any], family: str | None = None):
             filtered.append(m)
     available_models = filtered
 
-    # Filter models based on the selected training method
-    if method["key"] == "lora":
-        # Include LoRA-suffixed Gemma models AND Gemma family models (Gemma uses LoRA-only path)
-        base_models = []
-        for m in available_models:
-            if "lora" in m:
-                base_models.append(m)
-                continue
-            section = f"model:{m}"
-            if cfg.has_option(section, "group") and cfg.get(section, "group").strip().lower() == "gemma":
-                base_models.append(m)
-    elif method["key"] == "distillation":
-        # For distillation, list base students (including medium) to fine-tune as student
-        base_models = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m or "medium" in m)]
-    else:  # standard
-        base_models = [m for m in available_models if "lora" not in m and "distil" not in m]
+    # All Gemma models use LoRA fine-tuning
+    base_models = list(available_models)
 
     # Build model choices with memory and time estimates
     choices = []
@@ -223,34 +205,10 @@ def select_model(method: Dict[str, Any], family: str | None = None):
 
         memory_str = f"{required_memory:.1f}GB"
 
-        # Create descriptive text for distillation models
-        if "from-medium" in display_name:
-            if "tiny" in display_name:
-                model_desc = "Distill tiny (39M) from larger teacher"
-            elif "base" in display_name:
-                model_desc = "Distill base (74M) from larger teacher"
-            else:
-                model_desc = display_name
-            choice_text = f"{model_desc} - ~{time_str}, {memory_str} memory"
-        elif "encoder-tiny-decoder" in display_name:
-            if "large" in display_name:
-                model_desc = "Large Encoder / Tiny Decoder - Fast generation, best quality"
-            elif "medium" in display_name:
-                model_desc = "Medium Encoder / Tiny Decoder - Faster, good quality"
-            elif "small" in display_name:
-                model_desc = "Small Encoder / Tiny Decoder - Balanced speed & quality"
-            else:
-                model_desc = display_name
-            choice_text = f"{model_desc} - ~{time_str}, {memory_str} memory"
-        else:
-            choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
+        choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
 
-        # Add recommendation for optimal choice
-        if display_name == "gemma-3n" and method["key"] != "distillation":
-            choice_text += " ⭐ Recommended"
-        elif display_name == "distil-base-from-medium" and method["key"] == "distillation":
-            choice_text += " ⭐ Recommended"
-        elif display_name == "gemma-3n-e2b-it" and method["key"] == "lora":
+        # Add recommendation for the smaller variant (fits on most Apple Silicon)
+        if display_name == "gemma-3n-e2b-it":
             choice_text += " ⭐ Recommended"
 
         choices.append(
@@ -260,25 +218,13 @@ def select_model(method: Dict[str, Any], family: str | None = None):
             }
         )
 
-    # Distillation: add a Custom Hybrid option inline at Step 2
-    if method["key"] == "distillation":
-        choices.append(
-            {
-                "name": "Build a Custom Hybrid (mix encoder and decoder)",
-                "value": "__custom_hybrid__",
-            }
-        )
-
     if not choices:
-        console.print("[red]❌ No models available for your memory constraints. Consider using LoRA training.[/red]")
+        console.print("[red]❌ No Gemma models found in config.ini. Add model sections with group=gemma.[/red]")
         sys.exit(1)
 
-    prompt = (
-        "Which model do you want to fine-tune?"
-        if method["key"] != "distillation"
-        else "Which student model do you want to train? (or choose Custom Hybrid)"
-    )
-    selected_model = questionary.select(prompt, choices=choices, style=apple_style).ask()
+    selected_model = questionary.select(
+        "Which model do you want to fine-tune?", choices=choices, style=apple_style
+    ).ask()
 
     return selected_model, {}
 
@@ -387,13 +333,7 @@ def show_confirmation_screen(
     config_table.add_row(
         "Training Method", method["name"].replace("🚀", "").replace("🎨", "").replace("🧠", "").strip()
     )
-    # Distillation: show student architecture details (standard vs custom)
-    if method["key"] == "distillation" and method_config.get("student_model_type") == "custom":
-        config_table.add_row("Student", "Custom Hybrid")
-        config_table.add_row("Encoder From", str(method_config.get("student_encoder_from")))
-        config_table.add_row("Decoder From", str(method_config.get("student_decoder_from")))
-    else:
-        config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")
+    config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")
     config_table.add_row("Dataset", f"{dataset['name']} ({estimates['samples']:,} samples)")
     # Training parameters (added in Step 4)
     if "learning_rate" in method_config:
@@ -403,13 +343,10 @@ def show_confirmation_screen(
     if "warmup_steps" in method_config:
         config_table.add_row("Warmup Steps", str(method_config["warmup_steps"]))
 
-    # Add method-specific configuration
+    # Add LoRA configuration
     if method["key"] == "lora":
         config_table.add_row("LoRA Rank", str(method_config["lora_r"]))
         config_table.add_row("LoRA Alpha", str(method_config["lora_alpha"]))
-    elif method["key"] == "distillation":
-        config_table.add_row("Teacher Model", method_config["teacher_model"])
-        config_table.add_row("Temperature", str(method_config["temperature"]))
 
     config_table.add_row("", "")  # Spacer
     config_table.add_row("Estimated Time", f"{estimates['hours']:.1f} hours")

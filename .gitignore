@@ -115,9 +115,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Models and training outputs (downloaded weights; NOT source under whisper_tuner/models/)
+# Models and training outputs (downloaded weights; NOT source under gemma_tuner/models/)
 /models/
-!whisper_tuner/models/
+!gemma_tuner/models/
 *.pt
 *.safetensors
 *.bin

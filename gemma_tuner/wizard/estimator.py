@@ -4,7 +4,7 @@
 Gemma Fine-Tuning Wizard - Training Estimation and Method Configuration
 
 This module handles training time/resource estimation and method-specific
-configuration (LoRA parameters, distillation teacher/temperature selection).
+configuration (LoRA parameters).
 
 All shared constants and utilities are imported from gemma_tuner.wizard.base to avoid
 circular imports. NEVER import from the wizard package root.
@@ -14,9 +14,7 @@ Called by:
 - wizard/__init__.py re-exports for backward compatibility
 
 Integrates with:
-- wizard.base: WizardConstants, ModelSpecs, _infer_num_mel_bins,
-  get_device_info, apple_style, console
-- wizard.config: _read_config for config.ini access
+- wizard.base: ModelSpecs, get_device_info, apple_style, console
 """
 
 from datetime import datetime, timedelta
@@ -26,7 +24,6 @@ import questionary
 
 from gemma_tuner.wizard.base import (
     ModelSpecs,
-    _infer_num_mel_bins,
     apple_style,
     console,
     get_device_info,
@@ -88,116 +85,6 @@ def configure_method_specifics(
         config["lora_dropout"] = 0.1  # Smart default
         config["use_peft"] = True
 
-    elif method["key"] == "distillation":
-        console.print("\n[bold]Step 5: Distillation Configuration[/bold]")
-        # If user already chose Custom Hybrid in Step 2, skip asking architecture again
-        arch_choice = (
-            "custom" if (model == "__custom_hybrid__" or config.get("student_model_type") == "custom") else "standard"
-        )
-
-        # Define student model path
-        if arch_choice == "custom":
-            # Encoder/decoder sources
-            if not config.get("student_encoder_from") or not config.get("student_decoder_from"):
-                cfg = _read_config()
-                available_models = [s.replace("model:", "") for s in cfg.sections() if s.startswith("model:")]
-                large_like = [m for m in available_models if ("large" in m or "medium" in m)]
-                small_like = [m for m in available_models if ("tiny" in m or "base" in m or "small" in m)]
-                encoder_source = questionary.select(
-                    "Choose an Encoder source (teacher model)",
-                    choices=[{"name": m, "value": m} for m in large_like],
-                    style=apple_style,
-                ).ask()
-                decoder_source = questionary.select(
-                    "Choose a Decoder source (small/efficient model)",
-                    choices=[{"name": m, "value": m} for m in small_like],
-                    style=apple_style,
-                ).ask()
-                # Save in config
-                config["student_model_type"] = "custom"
-                config["student_encoder_from"] = encoder_source
-                config["student_decoder_from"] = decoder_source
-            else:
-                encoder_source = config.get("student_encoder_from")
-                decoder_source = config.get("student_decoder_from")
-
-            # Teacher selection (guide to match encoder mel bins)
-            teacher_models = ["gemma-3n-e4b-it", "gemma-3n-e4b-it", "gemma-3n-e4b-it"]
-            student_mels = _infer_num_mel_bins(encoder_source)
-            teacher_choices = []
-            incompatible_count = 0
-            for teacher in teacher_models:
-                txt = teacher
-                teacher_mels = _infer_num_mel_bins(teacher)
-                if teacher_mels != student_mels:
-                    txt += f" ({teacher_mels} mel bins vs student's {student_mels} - incompatible)"
-                    incompatible_count += 1
-                teacher_choices.append({"name": txt, "value": teacher})
-
-            if incompatible_count == len(teacher_models):
-                console.print(
-                    f"[yellow]⚠️ Warning: All teacher models have incompatible mel bins with your encoder ({student_mels} mel bins).[/yellow]"
-                )
-                console.print(
-                    "[yellow]Training may fail or produce poor results. Consider choosing a different encoder.[/yellow]"
-                )
-
-            teacher_choice = questionary.select(
-                "Which teacher model should we distill knowledge from?",
-                choices=teacher_choices,
-                style=apple_style,
-            ).ask()
-        else:
-            # Standard student: teacher from curated list with compatibility filter
-            teacher_models = ["gemma-3n-e4b-it", "gemma-3n-e4b-it", "gemma-3n-e4b-it"]
-            teacher_choices = []
-            for teacher in teacher_models:
-                if teacher != model:
-                    choice_text = f"{teacher}"
-                    teacher_choices.append({"name": choice_text, "value": teacher})
-            student_mels = _infer_num_mel_bins(model)
-            filtered_teacher_choices = []
-            for ch in teacher_choices:
-                t_model = ch["value"]
-                if _infer_num_mel_bins(t_model) != student_mels:
-                    ch = {"name": ch["name"] + " (incompatible mel bins; not recommended)", "value": t_model}
-                filtered_teacher_choices.append(ch)
-            teacher_choice = questionary.select(
-                "Which teacher model should we distill knowledge from?",
-                choices=filtered_teacher_choices,
-                style=apple_style,
-            ).ask()
-        # Resolve to full HF repo id via config.ini when possible
-        try:
-            cfg = _read_config()
-            sec = f"model:{teacher_choice}"
-            if cfg.has_section(sec) and cfg.has_option(sec, "base_model"):
-                resolved_teacher = cfg.get(sec, "base_model")
-            else:
-                resolved_teacher = (
-                    f"openai/{teacher_choice}" if teacher_choice.startswith("whisper-") else teacher_choice
-                )
-        except Exception:
-            resolved_teacher = teacher_choice
-        config["teacher_model"] = resolved_teacher
-
-        # Temperature
-        temp_choices = [
-            {"name": "2.0 (Conservative)", "value": 2.0},
-            {"name": "5.0 (Balanced) ⭐ Recommended", "value": 5.0},
-            {"name": "10.0 (Aggressive)", "value": 10.0},
-            {"name": "Custom value", "value": "custom"},
-        ]
-
-        temperature = questionary.select(
-            "Distillation temperature (higher = softer teacher guidance):", choices=temp_choices, style=apple_style
-        ).ask()
-
-        if temperature == "custom":
-            temperature = questionary.text("Enter custom temperature:", default="5.0", style=apple_style).ask()
-            temperature = float(temperature)
-
-        config["temperature"] = temperature
 
     return config
 
@@ -209,15 +96,9 @@ def estimate_training_time(
 
     device_info = get_device_info()
 
-    # Handle custom hybrid models by using encoder source for estimation
-    if model == "__custom_hybrid__" and method_config:
-        encoder_source = method_config.get("student_encoder_from", "gemma-3n-e4b-it")
-        # Clean up model name to match ModelSpecs keys
-        if "/" in encoder_source:
-            encoder_source = encoder_source.split("/")[-1]
-        model_specs = ModelSpecs.MODELS.get(encoder_source, ModelSpecs.MODELS["gemma-3n-e4b-it"])
-    else:
-        model_specs = ModelSpecs.MODELS.get(model, ModelSpecs.MODELS["gemma-3n-e4b-it"])
+    # Look up model specs, defaulting to the smaller Gemma variant
+    default_specs = ModelSpecs.MODELS.get("gemma-3n-e2b-it", list(ModelSpecs.MODELS.values())[0])
+    model_specs = ModelSpecs.MODELS.get(model, default_specs)
 
     # Rough estimation based on dataset size
     if "files" in dataset:

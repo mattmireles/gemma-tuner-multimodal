@@ -92,10 +92,6 @@ class WizardConstants:
     # Configuration Generation Constants
     # Defaults for wizard-generated training profiles
     DEFAULT_LORA_DROPOUT = 0.1  # Standard LoRA dropout rate
-    DEFAULT_DISTILLATION_ALPHA = 0.5  # Balance between hard and soft targets
-    DEFAULT_TEMPERATURE_RANGE = (2.0, 10.0)  # Conservative to aggressive distillation
-    RECOMMENDED_TEMPERATURE = 5.0  # Balanced distillation temperature
-
     # LoRA Configuration Presets
     # Pre-defined LoRA rank configurations with smart alpha defaults
     LORA_RANK_OPTIONS = [
@@ -121,44 +117,11 @@ class WizardConstants:
 
 
 class TrainingMethod:
+    """Training method configurations with resource estimation multipliers.
+
+    Gemma models use LoRA fine-tuning exclusively. Memory and time multipliers
+    are calibrated from Apple Silicon benchmarking.
     """
-    Training method configurations with smart defaults and resource estimation multipliers.
-
-    This class defines the three primary fine-tuning approaches supported by the wizard,
-    each with carefully calibrated resource requirements and quality expectations based
-    on extensive Apple Silicon benchmarking and community feedback.
-
-    Used by:
-    - select_training_method() for method selection UI (line 300)
-    - estimate_training_time() for resource planning calculations (line 885)
-    - generate_profile_config() for configuration generation (line 998)
-    - show_confirmation_screen() for final configuration display (line 926)
-
-    Design philosophy:
-    - Conservative memory estimates to prevent OOM errors
-    - Realistic time estimates based on Apple Silicon benchmarks
-    - Quality ratings help users understand trade-offs
-    - Progressive disclosure hides complexity from beginners
-
-    Memory multipliers account for:
-    - Standard: Full model parameters + gradients + optimizer states
-    - LoRA: Reduced adapter parameters but same base model memory
-    - Distillation: Teacher model + student model + additional computation
-
-    Time multipliers reflect:
-    - LoRA: Faster convergence due to fewer parameters
-    - Distillation: Additional forward passes through teacher model
-    - Apple Silicon unified memory architecture optimizations
-    """
-
-    STANDARD = {
-        "key": "standard",
-        "name": "🚀 Standard Fine-Tune (SFT)",
-        "description": "Full model fine-tuning for best accuracy",
-        "memory_multiplier": 1.0,  # Baseline memory requirements
-        "time_multiplier": 1.0,  # Baseline training time
-        "quality": "highest",  # Maximum achievable quality
-    }
 
     LORA = {
         "key": "lora",
@@ -167,15 +130,6 @@ class TrainingMethod:
         "memory_multiplier": 0.4,  # ~60% memory savings through adapter architecture
         "time_multiplier": 0.8,  # 20% faster due to fewer parameters to update
         "quality": "high",  # 95-98% of standard fine-tuning quality
-    }
-
-    DISTILLATION = {
-        "key": "distillation",
-        "name": "🧠 Knowledge Distillation",
-        "description": "Train smaller models from larger teacher models",
-        "memory_multiplier": 1.2,  # 20% overhead for teacher model inference
-        "time_multiplier": 1.5,  # 50% longer due to teacher forward passes
-        "quality": "good",  # Quality depends on teacher-student gap
     }
 
 
