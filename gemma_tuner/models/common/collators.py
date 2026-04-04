@@ -118,8 +118,33 @@ class DataCollatorWhisperLoRA:
         labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
 
-        if (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
-            labels = labels[:, 1:]
+        # Strip BOS per-sample rather than with a batch-level .all() check.
+        # The batch-level approach skips stripping entirely if even one sample lacks BOS,
+        # creating inconsistent label targets. Instead we strip per-sample and warn on
+        # mixed batches (some samples have BOS, some don't).
+        bos_id = self.processor.tokenizer.bos_token_id
+        has_bos = labels[:, 0] == bos_id  # shape: [batch_size], dtype bool
+        if has_bos.any().item() and not has_bos.all().item():
+            logger.warning(
+                "DataCollatorWhisperLoRA: mixed BOS batch — only %d/%d samples have BOS at position 0. "
+                "Stripping BOS per-sample to avoid inconsistent label targets.",
+                has_bos.sum().item(),
+                labels.size(0),
+            )
+        if has_bos.any().item():
+            # Build output row-by-row: strip column 0 only for samples that have BOS there.
+            # For samples WITHOUT BOS, keep them at the original length and re-pad the stripped
+            # samples on the right with -100 so all rows remain the same length. Using
+            # labels[i, :-1] would be wrong here because the last token is not guaranteed to be
+            # padding — the longest sample in the batch has no trailing pad at all.
+            stripped_rows = []
+            for i in range(labels.size(0)):
+                if has_bos[i].item():
+                    # Drop BOS (col 0) and append a -100 pad on the right to keep original length.
+                    stripped_rows.append(torch.cat([labels[i, 1:], labels.new_full((1,), -100)]))
+                else:
+                    stripped_rows.append(labels[i])
+            labels = torch.stack(stripped_rows, dim=0)
 
         # Return the clean keys Gemma uses during training
         batch = {
@@ -151,8 +176,30 @@ class DataCollatorWhisperDistill:
         labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), self.ignore_token_id)
 
-        if (labels[:, 0] == self.decoder_start_token_id).all().cpu().item():
-            labels = labels[:, 1:]
+        # Strip decoder_start_token per-sample rather than with a batch-level .all() check.
+        # The batch-level approach skips stripping entirely if even one sample lacks the token,
+        # creating inconsistent label targets. Warn when the batch is mixed.
+        has_dst = labels[:, 0] == self.decoder_start_token_id  # shape: [batch_size], dtype bool
+        if has_dst.any().item() and not has_dst.all().item():
+            logger.warning(
+                "DataCollatorWhisperDistill: mixed decoder_start_token batch — only %d/%d samples have "
+                "decoder_start_token_id (%d) at position 0. Stripping per-sample.",
+                has_dst.sum().item(),
+                labels.size(0),
+                self.decoder_start_token_id,
+            )
+        if has_dst.any().item():
+            # Build output row-by-row: strip column 0 only for samples that have the token there.
+            # For samples WITHOUT the token, keep at original length; re-pad stripped samples on
+            # the right with ignore_token_id. Using labels[i, :-1] would corrupt real content for
+            # the longest (unpadded) samples in the batch.
+            stripped_rows = []
+            for i in range(labels.size(0)):
+                if has_dst[i].item():
+                    stripped_rows.append(torch.cat([labels[i, 1:], labels.new_full((1,), self.ignore_token_id)]))
+                else:
+                    stripped_rows.append(labels[i])
+            labels = torch.stack(stripped_rows, dim=0)
 
         batch["labels"] = labels
         return batch
@@ -273,14 +320,36 @@ class DataCollatorGemmaAudio:
         for i in range(labels.size(0)):
             sot_positions = (input_ids[i] == start_of_turn_id).nonzero(as_tuple=True)[0]
             if len(sot_positions) >= 2:
+                # Normal multi-turn case: mask everything up to (and including the header of)
+                # the last <start_of_turn>, so loss is computed only on the assistant response.
                 response_start = sot_positions[-1].item() + 1 + header_len
                 labels[i, :response_start] = ignore_id
             elif len(sot_positions) == 1:
-                response_start = sot_positions[0].item() + 1 + header_len
-                labels[i, :response_start] = ignore_id
+                # Only one <start_of_turn> found — the prompt/response boundary is ambiguous.
+                # Masking up to response_start would likely zero out the only real response
+                # content, producing zero loss for this sample.
+                # Safer: leave labels unchanged so the sample contributes signal, and warn.
+                logger.warning(
+                    "DataCollatorGemmaAudio._mask_prompt_tokens: sample %d has only one "
+                    "<start_of_turn> token (position %d). Cannot reliably determine prompt/"
+                    "response boundary — skipping prompt masking for this sample. "
+                    "Check that your dataset produces proper two-turn chat templates.",
+                    i,
+                    sot_positions[0].item(),
+                )
+                # Do not mask: leave labels[i] untouched.
 
     def _validate_bos_tokens_present(self, encoded: Dict[str, torch.Tensor]) -> None:
-        """Validate that all sequences start with <bos> tokens for stable Gemma 3n training."""
+        """Validate that all sequences contain a <bos> token somewhere for stable Gemma 3n training.
+
+        For multimodal inputs (e.g. Gemma with audio), audio feature tokens legally precede
+        the text BOS token, so the first attended token is NOT a BOS token. Checking only
+        position 0 would raise a false RuntimeError on every multimodal batch.
+
+        Strategy: use torch.any() to confirm bos_token_id appears anywhere in the sequence.
+        If it is absent entirely, that is a real error worth raising. If it exists but not at
+        position 0, that is legal for multimodal inputs and is silently accepted.
+        """
         from gemma_tuner.models.gemma.constants import GemmaValidationConstants
 
         if "input_ids" not in encoded or not hasattr(self.processor, "tokenizer"):
@@ -294,15 +363,11 @@ class DataCollatorGemmaAudio:
         bos_missing_samples = []
 
         for batch_index, sample_token_ids in enumerate(input_ids):
-            first_real_token_position = 0
-            if "attention_mask" in encoded:
-                sample_attention_mask = encoded["attention_mask"][batch_index]
-                non_zero_positions = (sample_attention_mask != 0).nonzero(as_tuple=True)[0]
-                if len(non_zero_positions) > 0:
-                    first_real_token_position = non_zero_positions[0].item()
-
-            first_token_id = sample_token_ids[first_real_token_position].item()
-            if first_token_id != tokenizer.bos_token_id:
+            # Check whether bos_token_id appears anywhere in this sample's token IDs.
+            # We intentionally do NOT require it to be at position 0 because multimodal
+            # inputs (audio tokens, image tokens, etc.) may legally precede the text BOS.
+            bos_present = torch.any(sample_token_ids == tokenizer.bos_token_id).item()
+            if not bos_present:
                 bos_missing_samples.append(batch_index)
 
         if bos_missing_samples:
@@ -310,9 +375,10 @@ class DataCollatorGemmaAudio:
             displayed = bos_missing_samples[:max_display]
             ellipsis = "..." if len(bos_missing_samples) > max_display else ""
             raise RuntimeError(
-                f"CRITICAL: <bos> token missing in {len(bos_missing_samples)} samples "
+                f"CRITICAL: <bos> token absent entirely from {len(bos_missing_samples)} samples "
                 f"(batch indices: {displayed}{ellipsis}). "
-                f"Gemma 3n requires <bos> tokens at the start of each sequence for stable training. "
+                f"Gemma 3n requires a <bos> token somewhere in each sequence for stable training. "
+                f"For multimodal inputs, audio/image tokens may precede <bos> — that is fine. "
                 f"Expected token ID: {tokenizer.bos_token_id}."
             )
 

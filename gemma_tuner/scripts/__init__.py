@@ -35,8 +35,12 @@ __version__ = "1.0.0"
 __author__ = "Gemma macOS Tuner"
 __description__ = "Scripts package for Gemma model fine-tuning and evaluation"
 
+import warnings
+
 # Export commonly used modules for package-level imports.
-# Be tolerant of optional dependencies when imported in lightweight environments (CI fast tests).
+# Only ImportError is caught here — any other exception (SyntaxError, AttributeError,
+# TypeError, etc.) is a real bug and must propagate so it is visible to the developer.
+# ImportError is expected when optional dependencies (torch, jiwer, …) are absent.
 try:  # pragma: no cover - import surface
     from . import (
         blacklist,
@@ -49,9 +53,14 @@ try:  # pragma: no cover - import surface
         system_check,
         utils,
     )
-except Exception:
-    # Allow partial import if some heavy submodules raise due to optional deps.
-    pass
+except ImportError as e:
+    warnings.warn(
+        f"Some script submodules could not be imported ({e}). "
+        "This is expected if optional dependencies (e.g. torch, jiwer) are missing. "
+        "Install them with: pip install gemma-macos-tuner[torch,eval]",
+        ImportWarning,
+        stacklevel=2,
+    )
 
 # Package-level constants for cross-script consistency.
 from gemma_tuner.constants import (

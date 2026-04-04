@@ -14,7 +14,6 @@ Why these items live here:
 - WizardConstants: Referenced by nearly every wizard submodule for magic-number-free code.
 - TrainingMethod / ModelSpecs: Shared data tables consumed by model selection,
   estimation, configuration generation, and confirmation screens.
-- _infer_num_mel_bins(): Pure function used during distillation compatibility checks.
 - get_device_info(): Hardware detection used by welcome screen, model selection,
   training estimation, and confirmation screen.
 - detect_datasets(): Dataset discovery used by the dataset selection step.
@@ -79,10 +78,6 @@ class WizardConstants:
     # Default audio sample rate for Gemma audio tower (USM-based)
     DEFAULT_SAMPLING_RATE = 16000
 
-    # Legacy mel bin constants (kept for wizard estimator compatibility)
-    MEL_BINS_LARGE_V3 = 128
-    MEL_BINS_STANDARD = 80
-
     # Dataset Detection Patterns
     # File extensions and patterns for automatic dataset discovery
     AUDIO_EXTENSIONS = ["*.wav", "*.mp3", "*.flac", "*.m4a"]
@@ -146,74 +141,16 @@ class ModelSpecs:
     }
 
 
-def _infer_num_mel_bins(model_name_or_key: Any) -> int:
-    """
-    Determines expected mel spectrogram bins for Gemma model compatibility checking.
-
-    This helper function is critical for distillation workflows where teacher and student
-    models must have matching mel bin configurations. Gemma models use different mel
-    bin counts depending on their generation and architecture.
-
-    Called by:
-    - configure_method_specifics() for teacher-student mel bin compatibility (line 718)
-    - Custom hybrid model validation during distillation setup
-    - Model architecture verification before training begins
-
-    Calls to:
-    - Python string operations for model name parsing and normalization
-    - Exception handling for robust input type conversion
-
-    Architecture compatibility rules:
-    - Gemma large-v3: Uses 128 mel bins (newer architecture)
-    - All other Gemma models: Use 80 mel bins (standard architecture)
-    - Custom models: Inherit from their base model architecture
-    - Mixed architectures: Require explicit compatibility validation
-
-    Input handling patterns:
-    - String model names: Direct parsing for architecture detection
-    - Tuples: Extract first element (common from model selection returns)
-    - None/empty values: Graceful degradation to standard 80 mel bins
-    - Invalid types: Defensive string conversion with exception handling
-
-    Args:
-        model_name_or_key: Model identifier in various formats:
-            - str: "gemma-3n-e4b-it", "google/gemma-3n-e4b-it", etc.
-            - tuple: (model_name, config_dict) from selection functions
-            - Any: Defensive handling for edge cases
-
-    Returns:
-        int: Number of mel bins expected by the model:
-            - 128 for large-v3 variants (modern architecture)
-            - 80 for all other models (standard architecture)
-
-    Example:
-        mel_bins = _infer_num_mel_bins("gemma-3n-e4b-it")  # Returns 128
-        mel_bins = _infer_num_mel_bins("gemma-3n-e4b-it")      # Returns 80
-        mel_bins = _infer_num_mel_bins(("gemma-3n", {}))  # Returns 80
-    """
-    # Robust input normalization for various input types and formats
-    # Handles tuples from model selection functions and defensive type conversion
-    value: Any = model_name_or_key
-    if isinstance(value, tuple) and value:
-        value = value[0]  # Extract model name from (model, config) tuples
-
-    # Defensive string conversion with exception handling for edge cases
-    try:
-        key = (value or "").lower()
-    except Exception:
-        key = str(value or "").lower()
-
-    # Architecture detection: large-v3 uses modern 128-bin architecture
-    if "large-v3" in key:
-        return WizardConstants.MEL_BINS_LARGE_V3
-
-    # All other models use standard 80-bin architecture
-    return WizardConstants.MEL_BINS_STANDARD
-
-
 def get_device_info() -> Dict[str, Any]:
     """
     Comprehensive device detection and performance profiling for training estimation.
+
+    NOTE: utils/device.py also exports a function named get_device_info() with a
+    DIFFERENT schema (returns "device_type", "mps_available", "device_name", etc. —
+    no "performance_multiplier" key). This wizard-specific version is intentionally
+    separate because estimator.py depends on "performance_multiplier" and the
+    display_name/unified_memory fields. Do NOT replace this function with the utils
+    version without auditing every caller in the wizard package.
 
     This function provides detailed hardware analysis to enable accurate training time
     and memory requirements estimation. It handles the three primary training platforms

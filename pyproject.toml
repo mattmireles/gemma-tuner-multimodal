@@ -50,6 +50,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# PyTorch is intentionally excluded from core deps because the install URL varies
+# by platform (MPS vs CUDA vs CPU-only). Users must install torch manually first
+# (see requirements.txt for platform-specific instructions), then this extra can
+# be used to satisfy the dependency marker for tools that check extras.
+torch = ["torch"]
+# jiwer provides WER/CER metrics used by evaluate.py. Kept optional because it
+# pulls in several NLP dependencies that are not needed for training-only workflows.
+eval = ["jiwer"]
 dev = [
   "ruff>=0.9.3",
   "pytest>=7.4,<9.0",
@@ -65,7 +73,7 @@ viz = [
   "python-socketio>=5.9.0,<6.0.0",
 ]
 all = [
-  "gemma-macos-tuner[dev,gcp,viz]",
+  "gemma-macos-tuner[torch,eval,dev,gcp,viz]",
 ]
 
 [project.scripts]

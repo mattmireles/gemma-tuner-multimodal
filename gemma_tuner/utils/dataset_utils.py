@@ -99,6 +99,11 @@ logger = logging.getLogger(__name__)
 # Anchored config.ini path — resolves relative to the project root regardless of cwd.
 _CONFIG_INI = Path(__file__).resolve().parent.parent.parent / "config.ini"
 
+# Module-level config singleton — config.ini is static at runtime so we read it once.
+# All callers use _config instead of creating a new ConfigParser on every call.
+_config = configparser.ConfigParser()
+_config.read(_CONFIG_INI)
+
 
 @dataclass
 class PatchBundle:
@@ -211,15 +216,13 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
         Final dataset size: 1034 samples
     """
 
-    config = configparser.ConfigParser()
-    config.read(_CONFIG_INI)
     context, adapter = _resolve_load_context(
         split=split,
         dataset_config=dataset_config,
         max_samples=max_samples,
         patches_dir=patches_dir,
         streaming_enabled=streaming_enabled,
-        config=config,
+        config=_config,
     )
     source = adapter.patch_source(context)
 
@@ -279,14 +282,20 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
     if streaming_enabled:
         return _apply_patches_streaming(dataset, patch_bundle, source, max_samples, configured_text_col)
 
-    # Non-streaming mode: apply patches directly to loaded dataset
-    # Use configurable parallelism for patch application; falls back to 1
+    # Non-streaming mode: apply patches directly to loaded dataset.
+    # Use configurable parallelism for patch application; falls back to None (single-process).
+    #
+    # IMPORTANT: HuggingFace datasets treats num_proc=0 as invalid and raises ValueError.
+    # config.ini defaults preprocessing_num_workers=0 for Apple Silicon MPS to avoid
+    # multiprocessing overhead. We convert 0 (and any value < 1) to None, which is the
+    # correct HuggingFace sentinel for single-process (in-process) execution.
     try:
-        num_workers_for_patches = int(config["dataset_defaults"].get("preprocessing_num_workers", 1))
+        num_workers_for_patches = int(_config["dataset_defaults"].get("preprocessing_num_workers", 1))
         if num_workers_for_patches < 1:
-            num_workers_for_patches = 1
+            # None = single-process mode in HuggingFace datasets (correct for MPS / default config)
+            num_workers_for_patches = None
     except Exception:
-        num_workers_for_patches = 1
+        num_workers_for_patches = None
     dataset, override_counts, filtered_count = _apply_patch_bundle(
         dataset,
         patch_bundle,
@@ -441,21 +450,54 @@ def _apply_patch_bundle(dataset, patch_bundle, configured_text_col, num_workers,
         if not override_dict:
             continue
 
-        def apply_overrides(example, _overrides=override_dict, _column=column, _text_col=configured_text_col):
+        # Mutable list used as a closure counter so the inner function can increment it.
+        # A plain int would not be mutable from inside a nested function in Python 2-style
+        # closures; a list cell avoids the nonlocal keyword and works across Python versions.
+        _override_count = [0]
+
+        def apply_overrides(
+            example,
+            _overrides=override_dict,
+            _column=column,
+            _text_col=configured_text_col,
+            _counter=_override_count,
+        ):
+            # Start from a full copy so all original columns are preserved.
             new_example = example.copy()
             sample_id = _normalize_sample_id(example["id"])
             if sample_id in _overrides:
+                # Sample has a manual correction: apply it and mirror to the base text col.
                 value = _overrides[sample_id]
                 new_example[_column] = value
                 if _text_col:
                     new_example[_text_col] = value
+                _counter[0] += 1
             else:
-                new_example[_column] = example.get(_column, example.get(_text_col, ""))
+                # Sample has no override: preserve the existing column value if present.
+                # Do NOT create the column with an empty-string fallback — that would
+                # inject corrupt empty transcripts into every row that lacks the column.
+                if _column in example:
+                    new_example[_column] = example[_column]
+                # else: column doesn't exist for this sample — leave it absent
             return new_example
 
-        dataset = dataset.map(apply_overrides, num_proc=num_workers)
-        dataset_ids = {_normalize_sample_id(value) for value in dataset["id"]} if "id" in dataset.column_names else set()
-        override_counts[column] = len(set(override_dict.keys()) & dataset_ids)
+        # The closure counter only works correctly in single-process mode. In multiprocessing,
+        # each worker receives a forked copy of _override_count and increments its own copy;
+        # the parent copy stays at 0. Force num_proc=None for the override phase to guarantee
+        # accurate statistics. The dataset is typically small at this point (patch phase runs
+        # before any large-scale filtering), so the single-process overhead is acceptable.
+        override_num_proc = None
+        if num_workers is not None and num_workers > 1:
+            logger.warning(
+                "Override closure counter requires single-process map; forcing num_proc=None "
+                "for the override phase (num_workers=%s will be used for subsequent steps).",
+                num_workers,
+            )
+        dataset = dataset.map(apply_overrides, num_proc=override_num_proc)
+        # Use the closure counter for accurate modification count instead of computing
+        # a set intersection between override keys and dataset IDs (which only measures
+        # overlap, not actual rows touched by the map).
+        override_counts[column] = _override_count[0]
 
     logger.info("\n--- Phase 2: Blacklist Filtering ---")
     filtered_count = 0

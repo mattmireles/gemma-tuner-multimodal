@@ -130,6 +130,8 @@ import psutil
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from gemma_tuner.utils.device import probe_bfloat16
+
 
 class GemmaProfilerConstants:
     """Named constants for Gemma performance profiling configuration."""
@@ -239,18 +241,11 @@ def main(model_id: str = GemmaProfilerConstants.DEFAULT_MODEL_ID) -> None:
     # This validates preprocessing pipeline used during training
     processor = AutoProcessor.from_pretrained(model_id)
 
-    # Optimize data type based on device capabilities
-    # bfloat16 provides significant memory savings when supported
-    bfloat16_supported = False
-    if device.type == "mps":
-        try:
-            test_tensor = torch.zeros(constants.BFLOAT16_TEST_TENSOR_SIZE, device=device, dtype=torch.bfloat16)
-            del test_tensor
-            bfloat16_supported = True
-        except Exception:
-            pass
-    elif device.type == "cuda" and torch.cuda.is_bf16_supported():
-        bfloat16_supported = True
+    # Optimize data type based on device capabilities.
+    # bfloat16 provides significant memory savings when supported.
+    # Delegated to probe_bfloat16() in utils/device.py to avoid duplicating
+    # the try/except probe logic (and the separate CUDA branch) across scripts.
+    bfloat16_supported = probe_bfloat16(device)
 
     # Select optimal dtype based on hardware support testing
     optimal_dtype = torch.bfloat16 if bfloat16_supported else torch.float32
@@ -316,9 +311,12 @@ def main(model_id: str = GemmaProfilerConstants.DEFAULT_MODEL_ID) -> None:
     with torch.inference_mode():
         _ = model(**processed_inputs)
 
-    # Ensure all operations complete before timing measurement
+    # Ensure all operations complete before timing measurement.
+    # Both MPS and CUDA dispatch asynchronously — synchronize to get accurate wall time.
     if device.type == "mps":
         torch.mps.synchronize()
+    elif device.type == "cuda":
+        torch.cuda.synchronize()
 
     inference_duration = time.perf_counter() - start_time
 

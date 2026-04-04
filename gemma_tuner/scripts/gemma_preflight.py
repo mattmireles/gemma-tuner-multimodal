@@ -313,26 +313,21 @@ def main() -> int:
         return constants.EXIT_IMPORT_ERROR
 
     # STEP 3: Hardware Data Type Support Validation
-    # bfloat16 support enables significant memory savings with maintained precision
+    # bfloat16 support enables significant memory savings with maintained precision.
+    # Delegated to probe_bfloat16() in utils/device.py to avoid duplicating
+    # the try/except probe logic across scripts.
     try:
         import torch
+        from gemma_tuner.utils.device import probe_bfloat16
 
         if torch.backends.mps.is_available():
-            try:
-                # Test bfloat16 tensor creation on MPS device
-                # This validates hardware support for numerically stable training
-                test_tensor = torch.zeros(
-                    constants.BFLOAT16_TEST_SIZE, device=torch.device("mps"), dtype=torch.bfloat16
-                )
-                del test_tensor  # Immediate cleanup
-
+            if probe_bfloat16(torch.device("mps")):
                 print(f"{constants.STATUS_OK} MPS bfloat16 tensor creation succeeded")
                 print(
                     f"       Memory benefit: bfloat16 provides "
                     f"{constants.BFLOAT16_MEMORY_REDUCTION} memory reduction vs float32."
                 )
-
-            except Exception:
+            else:
                 print(f"{constants.STATUS_WARN} bfloat16 data type not supported on this MPS device.")
                 print(
                     f"       Training will use float32 with {constants.BFLOAT16_MEMORY_REDUCTION} higher memory usage."

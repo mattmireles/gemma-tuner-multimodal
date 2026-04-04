@@ -936,16 +936,34 @@ def system_check():
 def _load_config(path: str):
     """Load an INI configuration into ConfigParser with no side effects.
 
+    Resolves the config path via core.ops._resolve_config_path() so that the
+    GEMMA_TUNER_CONFIG environment variable is honored and a clear error is
+    raised when config.ini cannot be found anywhere in the fallback chain.
+
     Called by:
-    - Typer commands before delegating to core/main logic
+    - Typer commands before delegating to core/main logic (finetune, evaluate, blacklist, etc.)
+
+    Calls to:
+    - core.ops._resolve_config_path() for env-var-aware path resolution with fallbacks
+
+    Args:
+        path: Raw path string from the --config CLI option. Passed through to
+              _resolve_config_path() as the explicit_path argument.
 
     Returns:
         ConfigParser: Parsed configuration object
+
+    Raises:
+        FileNotFoundError: Propagated from _resolve_config_path() when config.ini
+                           cannot be found and no GEMMA_TUNER_CONFIG env var is set.
     """
     import configparser
 
+    from gemma_tuner.core.ops import _resolve_config_path
+
+    resolved = _resolve_config_path(path)
     cfg = configparser.ConfigParser()
-    cfg.read(path)
+    cfg.read(resolved)
     return cfg
 
 

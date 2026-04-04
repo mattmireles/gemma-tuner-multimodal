@@ -16,14 +16,13 @@ Called by:
 
 Integrates with:
 - wizard.base: WizardConstants, ModelSpecs, TrainingMethod, detect_datasets,
-  get_device_info, _infer_num_mel_bins, apple_style, console
+  get_device_info, apple_style, console
 - wizard.config: _read_config (used by select_model and show_confirmation_screen)
 - wizard.estimator: configure_method_specifics, estimate_training_time (called after UI steps)
 """
 
-import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import questionary
 from rich.align import Align
@@ -136,7 +135,7 @@ We'll guide you through fine-tuning your Gemma model in just a few questions.
     input()  # Wait for user to press Enter
 
 
-def select_training_method(family: str | None = None) -> Dict[str, Any]:
+def select_training_method(family: str | None = None) -> Optional[Dict[str, Any]]:
     """Step 1: Select training method with progressive disclosure"""
     console.print("\n[bold]Step 1: Choose your training method[/bold]")
 
@@ -151,10 +150,15 @@ def select_training_method(family: str | None = None) -> Dict[str, Any]:
         "What kind of fine-tuning do you want to run?", choices=choices, style=apple_style
     ).ask()
 
+    # questionary returns None when stdin is not a TTY (piped/scripted input).
+    # Returning None signals cancellation to wizard_main.
+    if selected_method is None:
+        return None
+
     return selected_method
 
 
-def select_model(method: Dict[str, Any], family: str | None = None):
+def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Optional[str], Dict[str, Any]]:
     """Step 2: Select Gemma model for LoRA fine-tuning, driven by config.ini."""
     from gemma_tuner.wizard.config_store import _read_config
 
@@ -220,16 +224,23 @@ def select_model(method: Dict[str, Any], family: str | None = None):
 
     if not choices:
         console.print("[red]❌ No Gemma models found in config.ini. Add model sections with group=gemma.[/red]")
-        sys.exit(1)
+        # Raise RuntimeError so wizard_main's except-Exception handler can display a
+        # clean message. Using sys.exit(1) would bypass those handlers entirely.
+        raise RuntimeError("No Gemma models found in config.ini. Check your configuration.")
 
     selected_model = questionary.select(
         "Which model do you want to fine-tune?", choices=choices, style=apple_style
     ).ask()
 
+    # questionary returns None when stdin is not a TTY (piped/scripted input).
+    # Returning None signals cancellation to wizard_main.
+    if selected_model is None:
+        return None, {}
+
     return selected_model, {}
 
 
-def select_dataset(method: Dict[str, Any]) -> Dict[str, Any]:
+def select_dataset(method: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Step 3: Select dataset"""
     from gemma_tuner.wizard.config import select_bigquery_table_and_export
     from gemma_tuner.wizard.granary import setup_granary_dataset
@@ -252,6 +263,11 @@ def select_dataset(method: Dict[str, Any]) -> Dict[str, Any]:
     selected_dataset = questionary.select(
         "Which dataset do you want to use for training?", choices=choices, style=apple_style
     ).ask()
+
+    # questionary returns None when stdin is not a TTY (piped/scripted input).
+    # Returning None signals cancellation to wizard_main.
+    if selected_dataset is None:
+        return None
 
     # Handle BigQuery import flow
     if selected_dataset.get("type") == "bigquery_import":
@@ -343,10 +359,15 @@ def show_confirmation_screen(
     if "warmup_steps" in method_config:
         config_table.add_row("Warmup Steps", str(method_config["warmup_steps"]))
 
-    # Add LoRA configuration
+    # Add LoRA configuration.
+    # Use .get() with "N/A" fallbacks because configure_method_specifics() may not
+    # have populated lora_r/lora_alpha when stdin is non-interactive (questionary
+    # returns None and the keys are never set), which would cause a KeyError.
     if method["key"] == "lora":
-        config_table.add_row("LoRA Rank", str(method_config["lora_r"]))
-        config_table.add_row("LoRA Alpha", str(method_config["lora_alpha"]))
+        lora_r = method_config.get("lora_r", "N/A")
+        lora_alpha = method_config.get("lora_alpha", "N/A")
+        config_table.add_row("LoRA Rank", str(lora_r))
+        config_table.add_row("LoRA Alpha", str(lora_alpha))
 
     config_table.add_row("", "")  # Spacer
     config_table.add_row("Estimated Time", f"{estimates['hours']:.1f} hours")
@@ -385,11 +406,19 @@ def show_confirmation_screen(
 
     enable_viz = questionary.confirm("🎆 Enable live training visualization?", default=True, style=apple_style).ask()
 
+    # questionary returns None when stdin is not a TTY. Default to False (no viz)
+    # rather than crashing downstream code that checks method_config["visualize"].
+    if enable_viz is None:
+        enable_viz = False
+
     # Store visualization choice for later use
     method_config["visualize"] = enable_viz
 
     if enable_viz:
         console.print("[green]✨ Visualization will open in your browser when training starts![/green]")
 
-    # Confirmation prompt
-    return questionary.confirm("Start training with this configuration?", default=True, style=apple_style).ask()
+    # Confirmation prompt. None means non-interactive stdin — treat as cancellation.
+    confirmed = questionary.confirm("Start training with this configuration?", default=True, style=apple_style).ask()
+    if confirmed is None:
+        return False
+    return confirmed

@@ -299,21 +299,40 @@ def load_audio_local_or_gcs(
                 "load_audio_local_or_gcs received a scalar (possibly None) as raw audio. "
                 "Expected a 1-D array or a string path."
             )
+        # Warn callers that the sampling_rate parameter is silently ignored for raw arrays.
+        # There is no source-rate metadata, so resampling cannot be applied.  The caller
+        # is responsible for pre-resampling the array to the correct rate before passing it.
+        logger.warning(
+            "load_audio_local_or_gcs received a raw audio array; sampling rate "
+            "conversion is not applied. Ensure the array is already at %d Hz.",
+            sampling_rate,
+        )
         return audio
 
     # String path or GCS URI
     if path_or_audio.startswith(DatasetPrepConstants.GCS_URI_PREFIX):
+        import time
+        from io import BytesIO
+
+        from google.cloud import storage  # type: ignore
+
+        # Instantiate the GCS client once before the retry loop.
+        # Creating storage.Client() performs credential negotiation; doing it
+        # inside the loop would pay that cost on every retry, which is wasteful
+        # and can cause thundering-herd problems against the metadata server.
+        gcs_client = storage.Client()
+
+        gcs_path = path_or_audio[len(DatasetPrepConstants.GCS_URI_PREFIX) :]
+        bucket_name, blob_name = gcs_path.split(DatasetPrepConstants.GCS_BLOB_DELIMITER, 1)
+
         last_err: Optional[Exception] = None
-        for _ in range(max(1, retries + 1)):
+        for attempt in range(max(1, retries + 1)):
+            # Exponential backoff between retries (skip sleep on the first attempt).
+            # Sleeping 2**attempt seconds: attempt 1 → 2 s, attempt 2 → 4 s, etc.
+            if attempt > 0:
+                time.sleep(2 ** attempt)
             try:
-                from io import BytesIO
-
-                from google.cloud import storage  # type: ignore
-
-                gcs_path = path_or_audio[len(DatasetPrepConstants.GCS_URI_PREFIX) :]
-                bucket_name, blob_name = gcs_path.split(DatasetPrepConstants.GCS_BLOB_DELIMITER, 1)
-                client = storage.Client()
-                bucket = client.bucket(bucket_name)
+                bucket = gcs_client.bucket(bucket_name)
                 blob = bucket.blob(blob_name)
                 buffer = BytesIO()
                 # No direct timeout in SDK; rely on short blobs + retries

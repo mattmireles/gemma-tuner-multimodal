@@ -31,16 +31,10 @@ from gemma_tuner.wizard.base import (
 
 
 def configure_method_specifics(
-    method: Dict[str, Any], model: str | tuple, seed: Dict[str, Any] | None = None
+    method: Dict[str, Any], model: str, seed: Dict[str, Any] | None = None
 ) -> Dict[str, Any]:
     """Step 5: Method-specific configuration (progressive disclosure)"""
     from gemma_tuner.wizard.config_store import _read_config
-
-    # Defensive: older call sites may pass a (model, seed) tuple.
-    if isinstance(model, tuple):
-        model, seed_from_tuple = model
-        if seed is None and isinstance(seed_from_tuple, dict):
-            seed = seed_from_tuple
 
     config = {} if seed is None else dict(seed)
 
@@ -60,6 +54,11 @@ def configure_method_specifics(
         config["lora_r"] = questionary.select(
             "LoRA rank (higher = more parameters to train):", choices=rank_choices, style=apple_style
         ).ask()
+
+        # Guard: questionary returns None on non-TTY stdin (e.g. piped input, CI).
+        # Default to rank 16 (the "Balanced" recommended option) rather than crashing.
+        if config["lora_r"] is None:
+            config["lora_r"] = 16
 
         # LoRA alpha (smart default based on rank)
         default_alpha = config["lora_r"] * 2

@@ -127,9 +127,12 @@ def execute_training(profile_config: Dict[str, Any]):
     """
     console.print("\n[bold green]🚀 Starting training...[/bold green]")
 
-    # Temporary configuration management with timestamp-based isolation
-    # Prevents conflicts between concurrent wizard instances
-    config_dir = Path("temp_configs")
+    # Anchor temp_configs to the project root (three levels up from this file:
+    # wizard/runner.py -> wizard/ -> gemma_tuner/ -> project root).
+    # Using a relative Path("temp_configs") would create the directory relative to
+    # the caller's CWD, which breaks when the wizard is invoked from any other directory.
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    config_dir = _PROJECT_ROOT / "temp_configs"
     config_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -369,14 +372,23 @@ def wizard_main():
         # Step 1: Training method selection (LoRA for Gemma)
         family = "gemma"
         method = select_training_method(family)
+        # select_training_method returns None when questionary can't prompt (non-TTY stdin).
+        if method is None:
+            raise KeyboardInterrupt
 
         # Step 2: Model selection with intelligent constraints
         # Returns (model_key, seed_dict) tuple for configuration flexibility
         model, seed = select_model(method, family)
+        # select_model returns (None, {}) when questionary can't prompt (non-TTY stdin).
+        if model is None:
+            raise KeyboardInterrupt
 
         # Step 3: Dataset selection with automatic discovery
         # Supports local files, BigQuery imports, and HuggingFace datasets
         dataset = select_dataset(method)
+        # select_dataset returns None when questionary can't prompt (non-TTY stdin).
+        if dataset is None:
+            raise KeyboardInterrupt
 
         # Step 4: Training parameters (mandatory hyperparameters)
         training_params = configure_training_parameters()

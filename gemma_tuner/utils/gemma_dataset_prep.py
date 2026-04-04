@@ -140,10 +140,20 @@ from typing import Dict, List
 
 from transformers import AutoProcessor
 
-# Reuse shared audio I/O to support file system and GCS URIs
+# Reuse shared audio I/O to support file system and GCS URIs.
+# Only catch ImportError (missing optional deps such as librosa/soundfile) so that
+# programmer errors — AttributeError, SyntaxError, etc. — are never swallowed.
 try:
     from gemma_tuner.utils.dataset_prep import load_audio_local_or_gcs
-except Exception:
+except ImportError as e:
+    import warnings
+
+    warnings.warn(
+        f"Could not import load_audio_local_or_gcs ({e}). "
+        "Audio loading will be unavailable. Install librosa and soundfile.",
+        ImportWarning,
+        stacklevel=2,
+    )
     load_audio_local_or_gcs = None  # Optional for --validate path when not needed
 
 

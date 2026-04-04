@@ -13,6 +13,8 @@ Uses deferred imports to avoid loading heavy ML dependencies at module import ti
 reducing CLI startup time from ~2000ms to ~5ms.
 """
 
+import os
+from pathlib import Path
 from typing import Any, Dict
 
 
@@ -24,7 +26,84 @@ class OperationConstants:
     TEMP_CONFIG_PREFIX = "wizard_config_"  # Prefix for wizard-generated temp configs
 
 
-def prepare(profile_config: Dict) -> None:
+def _resolve_config_path(explicit_path: str | None = None) -> Path:
+    """Resolve the config.ini path using a prioritized fallback chain.
+
+    This function is the canonical config path resolver for the entire pipeline.
+    It prevents silent failures when the CLI is invoked from outside the project
+    root directory (a common issue with installed CLI tools).
+
+    Called by:
+    - cli_typer._load_config() as the default path resolver for all Typer commands
+    - main.py before cfg.read() when no explicit --config is given
+    - ops.prepare() when dispatching to scripts.prepare_data
+
+    Priority order (first match wins):
+    1. explicit_path argument — from CLI --config flag
+    2. GEMMA_TUNER_CONFIG environment variable — for installed/containerized use
+    3. config.ini relative to CWD — legacy behavior, works when run from project root
+    4. config.ini relative to the installed package root (3 levels up from this file)
+
+    Environment variable:
+        GEMMA_TUNER_CONFIG: Absolute or relative path to config.ini.
+        Example: export GEMMA_TUNER_CONFIG=/home/user/projects/my-tuner/config.ini
+
+    Args:
+        explicit_path: Path string passed via --config CLI flag, or None to use fallback chain.
+
+    Returns:
+        Path: Resolved, existing path to config.ini.
+
+    Raises:
+        FileNotFoundError: With a helpful message if no config.ini is found anywhere
+                           in the fallback chain. The message includes the
+                           GEMMA_TUNER_CONFIG env var hint so users know how to fix it.
+    """
+    # Priority 1: explicit --config argument from CLI (only when genuinely specified)
+    if explicit_path is not None:
+        p = Path(explicit_path)
+        if p.exists():
+            return p
+        raise FileNotFoundError(f"Config not found at explicit path: {p}")
+
+    # Priority 2: GEMMA_TUNER_CONFIG environment variable
+    # Useful when running the installed CLI from any working directory.
+    env_path = os.environ.get("GEMMA_TUNER_CONFIG")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        raise FileNotFoundError(
+            f"Config not found at GEMMA_TUNER_CONFIG={env_path!r}. "
+            "Check that the path is correct and the file exists."
+        )
+
+    # Priority 3: CWD fallback — legacy behavior for running from project root
+    cwd_path = Path(OperationConstants.DEFAULT_CONFIG_PATH)
+    if cwd_path.exists():
+        return cwd_path
+
+    # Priority 4: Source-tree / editable-install fallback.
+    # This file lives at gemma_tuner/core/ops.py so parent.parent.parent == project root.
+    # NOTE: This only works for editable installs (`pip install -e .`) or running directly
+    # from the source tree. For non-editable pip installs, this resolves to site-packages/
+    # and will not find config.ini — the GEMMA_TUNER_CONFIG env var (Priority 2) is the
+    # correct solution for installed packages.
+    pkg_root = Path(__file__).resolve().parent.parent.parent
+    pkg_path = pkg_root / OperationConstants.DEFAULT_CONFIG_PATH
+    if pkg_path.exists():
+        return pkg_path
+
+    raise FileNotFoundError(
+        "config.ini not found. Options to fix this:\n"
+        "  1. Run from the project root directory (where config.ini lives)\n"
+        "  2. Set the GEMMA_TUNER_CONFIG environment variable:\n"
+        "       export GEMMA_TUNER_CONFIG=/path/to/your/config.ini\n"
+        "  3. Pass --config /path/to/config.ini explicitly"
+    )
+
+
+def prepare(profile_config: Dict, config_path: str | None = None) -> None:
     """
     Prepares dataset for training by downloading and preprocessing audio files.
 
@@ -73,7 +152,9 @@ def prepare(profile_config: Dict) -> None:
     from gemma_tuner.scripts.prepare_data import prepare_data
 
     dataset_name = profile_config["dataset"]
-    cfg_path = OperationConstants.DEFAULT_CONFIG_PATH
+    # Thread the caller's explicit config path through so the same config.ini governs
+    # both main.py and prepare_data(). Falls back to env var / CWD chain if not provided.
+    cfg_path = str(_resolve_config_path(config_path))
     no_download = False  # Always attempt download for completeness
     prepare_data(dataset_name, cfg_path, no_download)
 

@@ -79,308 +79,16 @@ from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
     GemmaValidationConstants,
 )
+from gemma_tuner.models.common.utils import install_kw_filter
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 from gemma_tuner.utils.device import empty_cache, get_device
 
+# Re-export DataCollatorGemmaAudio so existing imports from this module still work.
+# The canonical class lives in models/common/collators.py; the local duplicate was
+# removed because it called load_audio_local_or_gcs without importing it (NameError).
+__all__ = ["DataCollatorGemmaAudio"]
+
 logger = logging.getLogger(__name__)
-
-
-class DataCollatorGemmaAudio:
-    """Data collator that packs audio+text into Gemma inputs via AutoProcessor.
-
-    Cross-file connections:
-    - Consumes rows loaded by `utils.dataset_utils.load_dataset_split()` which must
-      include: `id`, `audio_path`, and a text column configured by profile.
-    - Delegates audio feature extraction and text tokenization to AutoProcessor to
-      ensure exact replication of Gemma 3n preprocessing (USM audio tower).
-
-    Returns dicts compatible with Gemma 3n CausalLM forward(). Exact key names are
-    determined by the model processor (e.g., `input_ids`, `attention_mask`, and one
-    of `audio_values`/`input_features` plus any multimodal masks).
-    """
-
-    def __init__(self, processor, text_column: str, sampling_rate_hint: Optional[int] = None):
-        self.processor = processor
-        self.text_column = text_column
-        self.sampling_rate_hint = sampling_rate_hint
-
-    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        # Load audio and associated transcript for each sample in batch
-        audios: List[List[float]] = []
-        texts: List[str] = []
-
-        # Get sampling rate once for the batch (all samples use same rate)
-        sampling_rate = self._get_sampling_rate()
-
-        for ex in features:
-            audio_path = ex.get("audio_path", ex.get("audio"))
-            if audio_path is None:
-                raise KeyError(
-                    f"DataCollatorGemmaAudio: no audio path found in sample. "
-                    f"Expected 'audio_path' or 'audio' key. Available keys: {list(ex.keys())}"
-                )
-            audio = load_audio_local_or_gcs(audio_path, sampling_rate=sampling_rate)
-            text = ex.get(self.text_column)
-            if text is None:
-                raise KeyError(
-                    f"DataCollatorGemmaAudio: text column '{self.text_column}' missing from sample. "
-                    f"Available keys: {list(ex.keys())}"
-                )
-            audios.append(audio)
-            texts.append(text)
-
-        # Build a minimal conversation template via processor if supported
-        # Prefer processor.apply_chat_template when available to ensure
-        # correct special tokens (<bos>, <start_of_turn>, <end_of_turn>).
-        messages_batch = []
-        for t in texts:
-            messages_batch.append(
-                [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "audio", "audio": "<audio:attached>"},
-                            {"type": "text", "text": "Please transcribe this audio."},
-                        ],
-                    },
-                    {"role": "assistant", "content": [{"type": "text", "text": t}]},
-                ]
-            )
-
-        # Delegate packing to processor; it should attach audio features correctly.
-        # Gemma 3n processors MUST support the messages interface for proper chat templating.
-        #
-        # Implementation context: This fix addresses the "Processor Interface Fallback Bug"
-        # identified in the bug hunt. The original code had a dangerous fallback that
-        # bypassed official chat templating, potentially causing training instability.
-        #
-        # Reference: README/guides/Gemma3n-fine-tune-apple-silicon-condensed.md:46-54
-        # Shows the required chat template format with special tokens
-        try:
-            encoded = self.processor(
-                messages=messages_batch,
-                audios=audios,
-                return_tensors="pt",
-                padding=True,
-            )
-        except TypeError as e:
-            # CRITICAL: Gemma 3n requires proper chat templating via messages interface.
-            # Fallback text rendering bypasses official tokenization and can cause training instability.
-            # This indicates a processor compatibility issue that must be resolved.
-            raise RuntimeError(
-                f"Gemma 3n processor does not support messages interface: {e}. "
-                f"This is required for proper chat templating with <bos>, <start_of_turn>, <end_of_turn> tokens. "
-                f"Ensure you're using a compatible transformers version (>=4.38.2) and processor."
-            ) from e
-
-        # CRITICAL VALIDATION: Ensure <bos> tokens are present for stable training
-        #
-        # Implementation note: This validation addresses the "High Initial Training Loss" issue
-        # documented in README/guides/Gemma3n-fine-tune-apple-silicon-condensed.md:271
-        # Quote: "Ensure every single training example is prefixed with the <bos> token.
-        #         This is a strict requirement."
-        #
-        # Called during every batch processing in DataCollatorGemmaAudio.__call__()
-        # Prevents silent training failures that would only manifest as poor convergence
-        self._validate_bos_tokens_present(encoded)
-
-        # Labels: typical CausalLM objective is next-token prediction on text turns.
-        # If the processor did not create labels, derive from input_ids while
-        # ignoring non-text positions. As a safe baseline, copy input_ids.
-        if "labels" not in encoded:
-            labels = encoded.get("input_ids").clone()
-            # Replace pad token with IGNORE to exclude from loss
-            if "attention_mask" in encoded and hasattr(self.processor, "tokenizer"):
-                pad_id = self.processor.tokenizer.pad_token_id
-                labels[labels == pad_id] = GemmaTrainingConstants.IGNORE_TOKEN_ID
-
-            # Mask prompt tokens so only the assistant turn contributes to loss.
-            # The conversation has two turns: user (prompt) and model (response).
-            # We find the last <start_of_turn> token — which begins the model turn —
-            # then skip past the "model\n" header to locate where the response starts.
-            self._mask_prompt_tokens(labels, encoded["input_ids"])
-            encoded["labels"] = labels
-
-        return encoded
-
-    def _mask_prompt_tokens(self, labels: torch.Tensor, input_ids: torch.Tensor) -> None:
-        """Mask prompt tokens in labels so loss is computed only on the assistant response.
-
-        Finds the model-turn boundary by locating the last <start_of_turn> token in each
-        sample, then skips past the "model\\n" header.  Everything before the response
-        text is set to IGNORE_TOKEN_ID.
-
-        Called by:
-        - DataCollatorGemmaAudio.__call__() during label construction
-
-        Args:
-            labels: (batch, seq_len) tensor to mask in-place.
-            input_ids: (batch, seq_len) encoded token IDs for boundary detection.
-        """
-        tokenizer = self.processor.tokenizer
-
-        # Resolve <start_of_turn> token ID (special token in Gemma vocabulary)
-        start_of_turn_id = getattr(tokenizer, "start_of_turn_token_id", None)
-        if start_of_turn_id is None:
-            start_of_turn_id = tokenizer.convert_tokens_to_ids("<start_of_turn>")
-            if start_of_turn_id == getattr(tokenizer, "unk_token_id", None):
-                start_of_turn_id = None
-
-        if start_of_turn_id is None:
-            if not getattr(self, "_warned_prompt_masking", False):
-                logger.warning(
-                    "DataCollatorGemmaAudio: could not resolve <start_of_turn> token ID. "
-                    "Prompt tokens will NOT be masked — this degrades fine-tuning quality."
-                )
-                self._warned_prompt_masking = True
-            return
-
-        # Determine how many tokens the "model\n" header occupies
-        model_header_ids = tokenizer.encode("model\n", add_special_tokens=False)
-        header_len = len(model_header_ids)
-
-        ignore_id = GemmaTrainingConstants.IGNORE_TOKEN_ID
-        for i in range(labels.size(0)):
-            sot_positions = (input_ids[i] == start_of_turn_id).nonzero(as_tuple=True)[0]
-            if len(sot_positions) >= 2:
-                # Last <start_of_turn> starts the model turn; skip past its header
-                response_start = sot_positions[-1].item() + 1 + header_len
-                labels[i, :response_start] = ignore_id
-            elif len(sot_positions) == 1:
-                # Single turn — mask through the turn header (same formula)
-                response_start = sot_positions[0].item() + 1 + header_len
-                labels[i, :response_start] = ignore_id
-
-    def _validate_bos_tokens_present(self, encoded: Dict[str, torch.Tensor]) -> None:
-        """
-        Validates that all sequences start with <bos> tokens for stable Gemma 3n training.
-
-        This critical validation prevents the "High Initial Training Loss" issue documented
-        in the Gemma 3n integration guide. Missing <bos> tokens cause training instability
-        and poor convergence that may not be immediately apparent.
-
-        Called by:
-        - DataCollatorGemmaAudio.__call__() after processor encoding
-        - Invoked for every training batch before returning to trainer
-
-        Validation process:
-        1. Check if tokenizer has a defined <bos> token ID
-        2. For each sample in the batch, find the first non-padding token
-        3. Verify the first real token is <bos> (tokenizer.bos_token_id)
-        4. Raise detailed error if any samples are missing <bos> tokens
-
-        Why this validation is critical:
-        - Gemma 3n training stability depends on proper sequence formatting
-        - Chat templating must include <bos> tokens for each conversation
-        - Missing tokens cause subtle training issues that are hard to debug
-        - Early detection prevents hours of wasted training time
-
-        Reference:
-        - README/guides/Gemma3n-fine-tune-apple-silicon-condensed.md:271
-        - "Ensure every single training example is prefixed with the <bos> token"
-
-        Args:
-            encoded (Dict[str, torch.Tensor]): Processor output containing input_ids and attention_mask
-
-        Raises:
-            RuntimeError: If any sequences are missing <bos> tokens, with detailed sample indices
-
-        Note:
-            Uses GemmaValidationConstants.MAX_DISPLAYED_ERROR_SAMPLES to limit error message length
-            while still providing actionable debugging information.
-        """
-        if "input_ids" not in encoded or not hasattr(self.processor, "tokenizer"):
-            # Skip validation if we don't have the required components
-            return
-
-        tokenizer = self.processor.tokenizer
-        if not hasattr(tokenizer, "bos_token_id") or tokenizer.bos_token_id is None:
-            # Skip validation if tokenizer doesn't define a <bos> token
-            return
-
-        input_ids = encoded["input_ids"]
-        bos_missing_samples = []
-
-        # Check each sample in the batch for missing <bos> tokens
-        for batch_index, sample_token_ids in enumerate(input_ids):
-            # Find the first non-padding token position
-            first_real_token_position = 0
-            if "attention_mask" in encoded:
-                sample_attention_mask = encoded["attention_mask"][batch_index]
-                # Locate first non-zero attention position (first real token)
-                non_zero_positions = (sample_attention_mask != 0).nonzero(as_tuple=True)[0]
-                if len(non_zero_positions) > 0:
-                    first_real_token_position = non_zero_positions[0].item()
-
-            # Verify the first real token is <bos>
-            first_token_id = sample_token_ids[first_real_token_position].item()
-            if first_token_id != tokenizer.bos_token_id:
-                bos_missing_samples.append(batch_index)
-
-        # Raise detailed error if any samples are missing <bos> tokens
-        if bos_missing_samples:
-            max_display = GemmaValidationConstants.MAX_DISPLAYED_ERROR_SAMPLES
-            displayed_sample_indices = bos_missing_samples[:max_display]
-            has_additional_samples = len(bos_missing_samples) > max_display
-            ellipsis_indicator = "..." if has_additional_samples else ""
-
-            raise RuntimeError(
-                f"CRITICAL: <bos> token missing in {len(bos_missing_samples)} samples "
-                f"(batch indices: {displayed_sample_indices}{ellipsis_indicator}). "
-                f"Gemma 3n requires <bos> tokens at the start of each sequence for stable training. "
-                f"This usually indicates a processor bug or incompatible tokenizer configuration. "
-                f"Expected token ID: {tokenizer.bos_token_id}, but found different token IDs."
-            )
-
-    def _get_sampling_rate(self) -> int:
-        """
-        Determines the appropriate sampling rate for audio processing with robust fallback logic.
-
-        This method implements a hierarchical sampling rate detection strategy to ensure
-        consistent audio preprocessing across different processor configurations. It replaces
-        complex duplicated logic that was previously scattered throughout the collator.
-
-        Called by:
-        - DataCollatorGemmaAudio.__call__() during batch processing
-        - Invoked once per batch to determine sampling rate for all audio files
-
-        Sampling rate detection hierarchy:
-        1. Explicit hint (sampling_rate_hint from constructor)
-        2. Processor.sampling_rate attribute (direct processor configuration)
-        3. Processor.feature_extractor.sampling_rate (feature extractor configuration)
-        4. Defensive default (16kHz as specified in Gemma 3n guide)
-
-        Why this approach:
-        - Gemma 3n audio tower (USM-based) expects 16kHz input sampling rate
-        - Different processor versions may expose sampling rate in different attributes
-        - Fallback ensures training continues even with misconfigured processors
-        - Centralizes complex detection logic for maintainability
-
-        Returns:
-            int: Sampling rate in Hz for audio preprocessing
-
-        Note:
-            The 16kHz default aligns with Universal Speech Model (USM) architecture
-            used in Gemma 3n's audio tower, as documented in the integration guide.
-        """
-        # Use explicit hint if provided (highest priority)
-        if self.sampling_rate_hint is not None:
-            return self.sampling_rate_hint
-
-        # Try processor.sampling_rate (most direct configuration)
-        if hasattr(self.processor, "sampling_rate") and self.processor.sampling_rate is not None:
-            return self.processor.sampling_rate
-
-        # Try processor.feature_extractor.sampling_rate (nested configuration)
-        if (
-            hasattr(self.processor, "feature_extractor")
-            and hasattr(self.processor.feature_extractor, "sampling_rate")
-            and self.processor.feature_extractor.sampling_rate is not None
-        ):
-            return self.processor.feature_extractor.sampling_rate
-
-        # Defensive default for Gemma 3n audio models (USM-based architecture)
-        return AudioProcessingConstants.DEFAULT_SAMPLING_RATE
 
 
 def _test_mps_bfloat16_support(device: torch.device) -> bool:
@@ -466,16 +174,27 @@ def _test_mps_bfloat16_support(device: torch.device) -> bool:
 
 
 def _discover_candidate_target_modules(model) -> List[str]:
-    """Scan model modules to validate LoRA target heads exist; return filtered list."""
+    """Scan model modules to find which default LoRA target heads exist in the model.
+
+    Used when no lora_target_modules is specified in the profile config — it
+    discovers which of the default target names (from GemmaTrainingConstants) are
+    actually present in the model's named modules.
+
+    Called by:
+    - main() during LoRA configuration to validate discovered defaults.
+    - NOT responsible for validating user-specified targets (that happens in main()
+      via a ValueError if none of the requested targets exist).
+
+    Returns:
+        Sorted list of module short-names (e.g. ["k_proj", "q_proj", "v_proj"])
+        that exist in the model. Empty list if none of the defaults are found.
+    """
     candidates = set(GemmaTrainingConstants.LORA_TARGET_MODULES)
     present = set()
     for name, _ in model.named_modules():
         for c in list(candidates):
             if name.endswith(c):
                 present.add(c)
-    if not present:
-        # Fallback to conservative q/k/v/o naming used by many HF models
-        present = {m for m in ("q_proj", "k_proj", "v_proj", "o_proj")}
     return sorted(present)
 
 
@@ -551,6 +270,13 @@ def main(profile_config: Dict, output_dir: str):
     else:
         logger.info("bf16 not available on %s: using float32", device.type)
 
+    # Reconcile dtype with profile_config so device.py and this module agree.
+    # device.py:apply_device_defaults() may have set profile_config["dtype"] = "float32"
+    # for MPS, but the bfloat16 test above may have determined we can use bfloat16.
+    # Writing the actual dtype back here ensures downstream code (e.g. logging,
+    # checkpoint metadata) reflects the real dtype in use.
+    profile_config["dtype"] = "bfloat16" if torch_dtype == torch.bfloat16 else "float32"
+
     logger.info(f"Loading base model: {model_id}")
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -586,21 +312,35 @@ def main(profile_config: Dict, output_dir: str):
         logger.warning(f"Unexpected LoRA target modules format: {type(target_modules_from_config)}. Using defaults.")
         target_modules_list = GemmaTrainingConstants.LORA_TARGET_MODULES
 
-    # Validate target modules against actual model architecture
-    # This prevents LoRA injection failures from targeting non-existent modules
+    # Validate target modules against actual model architecture.
+    # This prevents LoRA injection failures from targeting non-existent modules.
+    #
+    # Two cases:
+    # 1. User specified lora_target_modules in config → their list came through
+    #    target_modules_list. If none exist in the model, that is a hard config
+    #    error: raise ValueError with the available module names so they can fix it.
+    # 2. No user config → target_modules_list came from GemmaTrainingConstants defaults.
+    #    Use _discover_candidate_target_modules to find which defaults exist, and
+    #    fall back to discovered defaults silently (no user mistake to surface).
+    user_specified_targets = bool(profile_config.get("lora_target_modules"))
     discovered_modules = _discover_candidate_target_modules(model)
-    # Check if requested short names exist in discovered modules (both are short suffix names)
-    validated_target_modules = [
-        module
-        for module in target_modules_list
-        if module in discovered_modules
-    ]
+
+    # Intersect: which of the requested names are actually present in the model?
+    validated_target_modules = [m for m in target_modules_list if m in discovered_modules]
 
     if not validated_target_modules:
-        logger.warning(
-            f"Requested LoRA target_modules not found in model; using discovered modules: {discovered_modules}"
-        )
-        validated_target_modules = discovered_modules
+        if user_specified_targets:
+            # User explicitly asked for modules that don't exist → hard error.
+            available = sorted({name.split(".")[-1] for name, _ in model.named_modules() if "." in name})
+            raise ValueError(
+                f"None of the requested lora_target_modules {target_modules_list} exist in the model. "
+                f"Available leaf module names include: {available[:40]}. "
+                f"Fix 'lora_target_modules' in your profile config."
+            )
+        else:
+            # Defaults weren't found — use whatever _discover found (may be empty,
+            # in which case PEFT will raise its own informative error).
+            validated_target_modules = discovered_modules
 
     lora_cfg = LoraConfig(
         r=lora_r,
@@ -612,6 +352,18 @@ def main(profile_config: Dict, output_dir: str):
     )
     model = get_peft_model(model, lora_cfg)
     model = model.to(device)
+
+    # Install kwarg filter at all PEFT nesting levels.
+    # Prevents TypeErrors when HuggingFace Trainer injects unexpected kwargs
+    # (e.g. num_items_in_batch for loss scaling) into the Gemma forward pass.
+    # Must be called AFTER model.to(device) because device moves may re-wrap the model.
+    # See models/common/utils.py:install_kw_filter for the list of stripped kwargs.
+    install_kw_filter(model)
+    if hasattr(model, "base_model"):
+        install_kw_filter(model.base_model)
+        if hasattr(model.base_model, "model"):
+            install_kw_filter(model.base_model.model)
+
     try:
         model.print_trainable_parameters()
     except Exception:
@@ -666,7 +418,12 @@ def main(profile_config: Dict, output_dir: str):
         bf16=use_bf16,
         logging_steps=int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS)),
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
-        eval_strategy=str(profile_config.get("eval_strategy", GemmaTrainingConstants.DEFAULT_EVAL_STRATEGY)),
+        # Default eval_strategy to "no": compute_metrics returns {} (WER not yet wired),
+        # so running eval every epoch wastes wall time for zero gain.
+        # Set eval_strategy="epoch" in profile_config to re-enable eval loss tracking.
+        # TODO: wire models/common/metrics.py:build_wer_metrics once generation pipeline
+        # is stable, then change this default back to "epoch".
+        eval_strategy=str(profile_config.get("eval_strategy", "no")),
         report_to=[],
         remove_unused_columns=False,
         dataloader_pin_memory=False,
@@ -676,26 +433,12 @@ def main(profile_config: Dict, output_dir: str):
     # Seed for reproducibility
     set_seed(args.seed)
 
-    # WER metrics for Gemma require token decoding via processor, which is not yet
-    # wired up here. Eval loss is still tracked by the Trainer.
-    # TODO: wire up models/common/metrics.py build_wer_metrics once Gemma generation
-    # pipeline is stable.
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "Gemma eval will report loss only — WER/CER metrics not yet implemented. "
-        "See models/common/metrics.py to add them."
-    )
-
-    def _compute_metrics(_):
-        return {}
-
     trainer = Trainer(
         model=model,
         args=args,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=data_collator,
-        compute_metrics=_compute_metrics if eval_ds is not None else None,
     )
 
     logger.info("Starting Gemma LoRA training...")

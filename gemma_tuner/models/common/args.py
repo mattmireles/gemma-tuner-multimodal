@@ -269,6 +269,10 @@ def build_common_training_kwargs(profile_config: Dict) -> Dict:
     Note:
         Model-specific implementations can override or extend these arguments
         before creating their TrainingArguments instance.
+
+    NOTE: This function is not currently called by finetune.py:main() which builds
+    TrainingArguments inline. If you are refactoring the training pipeline, consider
+    using this function to centralize TrainingArguments construction.
     """
     # Handle evaluation_strategy key aliases for backward compatibility
     evaluation_strategy = (

@@ -351,9 +351,38 @@ def generate_profile_config(
     # Dataset-specific configuration
     if dataset["type"] == "huggingface":
         profile_config["dataset_name"] = dataset["name"]
-        profile_config["dataset_config"] = "en"  # Default to English
+        # Use the language/config the user selected during dataset setup if available.
+        # Fallback to "en" only when no config key was captured — avoids silently
+        # forcing English on users who selected a non-English HuggingFace dataset.
+        profile_config["dataset_config"] = dataset.get("config") or dataset.get("language") or "en"
         profile_config["train_split"] = "train"
         profile_config["eval_split"] = "validation"
+    elif dataset["type"] == "granary_configured":
+        # Granary datasets are configured but may not yet be fully prepared (manifest
+        # generation is a separate step run via `gemma-macos-tuner prepare-granary`).
+        # Set dataset_source_type so the training pipeline knows to look up the
+        # [dataset:<name>] config.ini section and use its granary-specific keys
+        # (hf_name, hf_subset, audio_source_*, etc.) rather than expecting a ready CSV.
+        # The training pipeline reads dataset_source_type == "granary" to trigger the
+        # granary data loader path.
+        profile_config["dataset_source_type"] = "granary"
+        profile_config["dataset_name"] = dataset["name"]
+        # Use the local_path from config.ini (set by setup_granary_dataset) if available,
+        # otherwise fall back to the path in the dataset descriptor.
+        _granary_path = dataset.get("path", f"data/datasets/{dataset['name']}")
+        profile_config["train_dataset_path"] = _granary_path
+        profile_config["eval_dataset_path"] = _granary_path
+        # Surface a clear warning so the user knows training will fail if preparation
+        # has not been completed first.
+        if not dataset.get("prepared", False):
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Granary dataset '%s' is configured but not yet prepared. "
+                "Run `gemma-macos-tuner prepare-granary %s` before starting training, "
+                "or the training pipeline will fail to find data files.",
+                dataset["name"],
+                dataset["name"],
+            )
     elif dataset["type"] in ["local_csv", "local_audio"]:
         profile_config["train_dataset_path"] = dataset["path"]
         # Check for a sibling eval CSV (e.g. data_eval.csv or data_validation.csv)

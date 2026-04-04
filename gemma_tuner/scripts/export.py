@@ -65,7 +65,7 @@ Compatibility:
 import logging
 
 import torch
-from transformers import AutoModelForSpeechSeq2Seq
+from transformers import AutoModelForCausalLM
 
 from gemma_tuner.utils.device import get_device
 
@@ -86,7 +86,7 @@ def export_model_dir(model_path_or_profile):
     # Resolve a profile name to latest completed run directory, if metadata exists
     model_id = model_path_or_profile
 
-    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
     )
 
@@ -107,4 +107,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export a model to HF/SafeTensors directory")
     parser.add_argument("model", help="Path or model id to export")
     args = parser.parse_args()
-    export_model_dir(None, args.model)
+    export_model_dir(args.model)

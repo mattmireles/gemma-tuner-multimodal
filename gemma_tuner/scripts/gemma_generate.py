@@ -108,6 +108,8 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from gemma_tuner.utils.device import probe_bfloat16
+
 
 class GemmaInferenceConstants:
     """Named constants for Gemma inference configuration and optimization."""
@@ -243,21 +245,10 @@ def main(model_id: str, adapter_path: str, wav_path: str):
     processor = AutoProcessor.from_pretrained(model_id)
 
     # Optimize data type based on device capabilities
-    # bfloat16 provides better performance when supported, especially on MPS
-    use_bf16 = False
-    if device.type == "mps":
-        try:
-            # Test bfloat16 support with minimal tensor creation
-            test_tensor = torch.zeros(
-                GemmaInferenceConstants.BFLOAT16_TEST_TENSOR_SIZE,
-                device=device,
-                dtype=GemmaInferenceConstants.DTYPE_BFLOAT16,
-            )
-            del test_tensor  # Immediate cleanup
-            use_bf16 = True
-        except Exception:
-            # Graceful fallback to float32 if bfloat16 unsupported
-            pass
+    # bfloat16 provides better performance when supported, especially on MPS.
+    # Delegated to probe_bfloat16() in utils/device.py to avoid duplicating
+    # the try/except probe logic across multiple scripts.
+    use_bf16 = probe_bfloat16(device)
 
     # Select optimal dtype based on hardware support
     dtype = GemmaInferenceConstants.DTYPE_BFLOAT16 if use_bf16 else GemmaInferenceConstants.DTYPE_FLOAT32
@@ -340,24 +331,6 @@ def main(model_id: str, adapter_path: str, wav_path: str):
 
 
 if __name__ == "__main__":
-    """
-    Command-line interface for Gemma 3n audio transcription.
-    
-    This entry point provides a user-friendly CLI for performing audio transcription
-    using fine-tuned Gemma 3n models. It validates arguments and delegates to the
-    main inference function with proper error handling.
-    
-    CLI Design Philosophy:
-    - Required arguments for essential components (adapter, audio file)
-    - Sensible defaults for common use cases (default model)
-    - Clear help text for user guidance
-    - Comprehensive error messages for debugging
-    
-    Argument Validation:
-    - model: Can be Hugging Face identifier or local path
-    - adapter: Must exist and contain valid LoRA weights
-    - wav: Must be readable audio file in supported format
-    """
     ap = argparse.ArgumentParser(
         description="Transcribe audio using fine-tuned Gemma 3n multimodal model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

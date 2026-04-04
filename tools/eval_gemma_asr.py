@@ -43,7 +43,7 @@ except Exception:
     load_audio_local_or_gcs = None
 
 # Canonical device selection (MPS > CUDA > CPU) from shared utils
-from gemma_tuner.utils.device import get_device
+from gemma_tuner.utils.device import get_device, probe_bfloat16
 
 
 def build_messages(transcript_hint: Optional[str] = None) -> List[Dict]:
@@ -73,16 +73,8 @@ def main() -> int:
 
     device = get_device()
 
-    # Prefer bf16 on MPS when available; else float32
-    use_bf16 = False
-    if device.type == "mps":
-        try:
-            x = torch.zeros(1, device=device, dtype=torch.bfloat16)
-            use_bf16 = x.dtype == torch.bfloat16
-            del x
-        except Exception:
-            use_bf16 = False
-    dtype = torch.bfloat16 if use_bf16 else torch.float32
+    # Prefer bf16 when available (MPS tensor probe, CUDA is_bf16_supported); else float32
+    dtype = torch.bfloat16 if probe_bfloat16(device) else torch.float32
 
     processor = AutoProcessor.from_pretrained(args.model)
     model = AutoModelForCausalLM.from_pretrained(
@@ -143,10 +135,16 @@ def main() -> int:
                 torch.mps.synchronize()
             _ = time.perf_counter() - t0
 
+            # model.generate() returns [input_ids + new_tokens]; slice off the prompt
+            # so we only decode the tokens the model actually generated. Without this
+            # slice, batch_decode includes the prompt text in the hypothesis and every
+            # WER/CER value produced would be inflated/wrong.
+            input_len = enc["input_ids"].shape[1]
+            new_tokens = out[:, input_len:]
             if hasattr(processor, "tokenizer"):
-                hyp = processor.tokenizer.batch_decode(out, skip_special_tokens=True)[0]
+                hyp = processor.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)[0]
             else:
-                hyp = ""
+                hyp = "<decoded text unavailable>"
 
             refs.append(ref)
             hyps.append(hyp)

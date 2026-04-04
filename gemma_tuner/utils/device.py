@@ -129,12 +129,54 @@ def apply_device_defaults(profile_config: dict[str, Any]) -> None:
 # Memory management
 # ---------------------------------------------------------------------------
 
+def probe_bfloat16(device: torch.device) -> bool:
+    """
+    Test whether bfloat16 tensors can be created on the given device.
+
+    Returns True if bfloat16 is usable on this device, False otherwise.
+    Replaces three independent inline try/except probe loops that previously
+    lived in gemma_generate.py, gemma_profiler.py, and gemma_preflight.py.
+
+    Called by:
+    - gemma_tuner.scripts.gemma_generate.main() for dtype selection
+    - gemma_tuner.scripts.gemma_profiler.main() for dtype selection
+    - gemma_tuner.scripts.gemma_preflight.main() for capability reporting
+
+    Device-specific logic:
+    - mps:  Allocates a single-element bfloat16 tensor; if that raises, bfloat16
+            is not supported by this PyTorch/macOS combination.
+    - cuda: Delegates to torch.cuda.is_bf16_supported(), which queries the GPU's
+            compute capability (requires SM 8.0 / Ampere or newer for full support).
+    - cpu:  Returns False — CPU bfloat16 support is inconsistent across platforms
+            and not used in this pipeline.
+
+    Args:
+        device: The torch.device to probe.
+
+    Returns:
+        bool: True if bfloat16 is usable on the given device, False otherwise.
+    """
+    if device.type == "mps":
+        try:
+            test_tensor = torch.zeros(1, device=device, dtype=torch.bfloat16)
+            del test_tensor
+            return True
+        except Exception:
+            return False
+    if device.type == "cuda":
+        return torch.cuda.is_bf16_supported()
+    return False
+
+
 def set_memory_fraction(fraction=MemoryLimits.MPS_DEFAULT_FRACTION) -> None:
     """
     Set device memory fraction before the training run starts.
 
-    For MPS: sets PYTORCH_MPS_HIGH_WATERMARK_RATIO env var. Must be called
-    before torch is imported to take effect — warns if called too late.
+    For MPS: sets PYTORCH_MPS_HIGH_WATERMARK_RATIO env var. Set this before
+    importing device.py (and therefore torch) to guarantee the allocator picks
+    up the value at initialization. Setting it after torch is loaded still
+    records the env var and may affect future allocations, but the allocator's
+    initial watermark will already be fixed.
     For CUDA: calls torch.cuda.set_per_process_memory_fraction().
     """
     device = get_device()
@@ -143,14 +185,6 @@ def set_memory_fraction(fraction=MemoryLimits.MPS_DEFAULT_FRACTION) -> None:
         current_value = os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO")
         target_value = str(fraction)
         if current_value is None:
-            import sys as _sys
-            if "torch" in _sys.modules:
-                logger.warning(
-                    "set_memory_fraction() called after torch was already imported — "
-                    "PYTORCH_MPS_HIGH_WATERMARK_RATIO=%s will have NO EFFECT. "
-                    "Call this function before importing torch (e.g. in core/bootstrap.py).",
-                    fraction,
-                )
             os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = target_value
             logger.info("Set PYTORCH_MPS_HIGH_WATERMARK_RATIO=%s", fraction)
         elif current_value != target_value:

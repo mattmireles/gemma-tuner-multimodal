@@ -190,7 +190,7 @@ def main():
         nargs="?",
         help="Name of the profile to use (from config.ini) or model+dataset combination",
     )
-    parser.add_argument("--config", default="config.ini", help="Path to the configuration file.")
+    parser.add_argument("--config", default=None, help="Path to the configuration file (default: auto-resolved via GEMMA_TUNER_CONFIG env var or config.ini in CWD).")
     parser.add_argument(
         "--max_samples", type=int, default=None, help="Maximum number of training or evaluation samples to use."
     )
@@ -211,8 +211,12 @@ def main():
     if args.json_logging:
         init_logging("INFO", json_format=True)
 
+    # Resolve config path via _resolve_config_path so GEMMA_TUNER_CONFIG env var
+    # is honored and a clear error is raised when config.ini cannot be found.
+    from gemma_tuner.core.ops import _resolve_config_path
+
     config = configparser.ConfigParser()
-    config.read(args.config)
+    config.read(_resolve_config_path(args.config))
 
     output_dir = config["DEFAULT"]["output_dir"]
 
@@ -229,7 +233,7 @@ def main():
             parser.error("The 'prepare' operation requires a dataset name (as defined in config.ini).")
         # Build a minimal config dict mirroring profile_config expectation for prepare()
         profile_config = {"dataset": args.profile_or_model_dataset}
-        ops.prepare(profile_config)
+        ops.prepare(profile_config, config_path=args.config)
 
     elif args.operation == "prepare-granary":
         if not args.profile_or_model_dataset:

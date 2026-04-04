@@ -29,13 +29,17 @@ def test_collator_produces_labels_and_ids():
         {"audio_path": "/path/a.wav", "text": "hello"},
         {"audio_path": "/path/b.wav", "text": "world"},
     ]
-    # Monkeypatch audio loader to avoid file I/O
-    import gemma_tuner.models.gemma.finetune as finetune_mod
+    # Monkeypatch audio loader to avoid file I/O.
+    # DataCollatorGemmaAudio lives in collators.py and imports load_audio_local_or_gcs
+    # locally inside __call__ via `from gemma_tuner.utils.dataset_prep import ...`.
+    # Patching the module attribute before the call makes the local import pick up
+    # the fake — patch the source module, not the consumer module.
+    import gemma_tuner.utils.dataset_prep as dataset_prep_mod
 
     def fake_loader(path, sampling_rate=None):
         return [0.0] * 16000
 
-    finetune_mod.load_audio_local_or_gcs = fake_loader
+    dataset_prep_mod.load_audio_local_or_gcs = fake_loader
 
     out = collator(batch)
     assert "input_ids" in out and "attention_mask" in out and "labels" in out
