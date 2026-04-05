@@ -169,6 +169,12 @@ def build_wer_metrics(
             pred_str = [normalizer(p).strip() for p in pred_str]
             label_str = [normalizer(r).strip() for r in label_str]
 
+        # --- Guard: empty strings after normalization ---
+        # If all predictions or references normalise to empty strings, return 100% WER
+        # (no correct words) rather than risking a division-by-zero inside jiwer.
+        if not any(pred_str) or not any(label_str):
+            return {MetricConstants.WER_METRIC_NAME: float(MetricConstants.PERCENTAGE_SCALE)}
+
         # --- Compute WER ---
         wer_value = wer_metric.compute(predictions=pred_str, references=label_str)
         results: Dict[str, float] = {

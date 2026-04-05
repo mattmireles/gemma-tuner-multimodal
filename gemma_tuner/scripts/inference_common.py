@@ -285,7 +285,10 @@ def load_model_and_processor(profile_config, device):
     tokenizer = processor.tokenizer
     feature_extractor = getattr(processor, "feature_extractor", None)
 
-    dtype = getattr(torch, profile_config["dtype"])
+    dtype_str = profile_config.get("dtype", "float32")
+    if not hasattr(torch, dtype_str):
+        raise ValueError(f"Invalid dtype in profile config: {dtype_str!r}. Expected e.g. 'float32', 'bfloat16'.")
+    dtype = getattr(torch, dtype_str)
 
     if os.path.isdir(model_name_or_path):
         model = AutoModelForCausalLM.from_pretrained(
@@ -323,7 +326,7 @@ def build_dataset_config(profile_config):
         "text_column": profile_config["text_column"],
         "max_label_length": int(profile_config["max_label_length"]),
         "max_duration": float(profile_config["max_duration"]),
-        "id_column": profile_config["id_column"],
+        "id_column": profile_config.get("id_column", "id"),
         "speaker_id_column": None,
         "train_split": profile_config["train_split"],
     }

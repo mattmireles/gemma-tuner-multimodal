@@ -3,17 +3,17 @@
 Shared across all model finetune paths.
 
 Called by:
-- models.gemma.finetune.py after trainer.train()
-- models.gemma.finetune.py after trainer.train()
-
 - models/gemma/finetune.py after trainer.train()
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _to_safe(obj: Any) -> Any:
@@ -60,7 +60,7 @@ def persist_training_results(
         with open(results_path, "w") as wf:
             json.dump(_to_safe(metrics), wf, indent=2)
     except Exception:
-        pass
+        logger.warning("Failed to write train_results.json to %s", output_dir, exc_info=True)
 
 
 def load_training_results(output_dir: str) -> dict:

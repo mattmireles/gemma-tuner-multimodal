@@ -310,7 +310,10 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
     logger.info("\n" + "=" * 50)
     logger.info("DATASET PROCESSING SUMMARY")
     logger.info("=" * 50)
-    logger.info(f"Original dataset size:     {original_count:,} samples")
+    if original_count is not None:
+        logger.info(f"Original dataset size:     {original_count:,} samples")
+    else:
+        logger.info("Original dataset size:     (streaming — unknown)")
 
     # Override statistics
     total_overrides = sum(override_counts.values())

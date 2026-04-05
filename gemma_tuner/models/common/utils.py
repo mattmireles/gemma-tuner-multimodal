@@ -6,6 +6,10 @@ Called by:
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Keys that Gemma LoRA models do not accept but some Trainer utilities may inject.
 # Removing them at the .forward() boundary prevents TypeErrors during LoRA training.
 #
@@ -52,6 +56,7 @@ def install_kw_filter(module) -> None:
     try:
         _orig = module.forward
     except Exception:
+        logger.debug("Cannot read .forward on %s — skipping kwarg filter", type(module).__name__)
         return
 
     def _filtered(*f_args, **f_kwargs):
@@ -62,4 +67,8 @@ def install_kw_filter(module) -> None:
     try:
         module.forward = _filtered  # type: ignore[assignment]
     except Exception:
-        pass
+        logger.warning(
+            "Cannot patch .forward on %s — kwarg filter not installed; "
+            "unexpected kwargs may cause TypeErrors during training",
+            type(module).__name__,
+        )

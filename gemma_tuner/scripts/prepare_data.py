@@ -573,6 +573,11 @@ def prepare_data(dataset_name, config_path, no_download=False):
 
     # 3. Dataset Splitting with Stratification
     # Create balanced train/validation splits for reliable model evaluation
+    if len(df_duration_filtered) == 0:
+        raise ValueError(
+            "No samples remain after filtering. Check language, duration, "
+            "and download settings."
+        )
     train_df, val_df = train_test_split(df_duration_filtered, test_size=0.1, random_state=42)
 
     # Split Generation with Progress Reporting

@@ -223,7 +223,7 @@ def create_blacklist(profile_config, output_dir):
     references = []
     ids = []
     audio_urls = []
-    all_ids = [int(item["id"]) for item in vectorized_datasets]
+    all_ids = [str(item["id"]) for item in vectorized_datasets]
 
     eval_dataloader = build_eval_dataloader(
         vectorized_datasets=vectorized_datasets,

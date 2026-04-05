@@ -196,7 +196,10 @@ def run_evaluation(profile_config, output_dir):
 
     # 3. Load pretrained model, tokenizer, and feature extractor via shared helper
     model, processor, tokenizer, feature_extractor = load_model_and_processor(profile_config, device)
-    dtype = getattr(torch, profile_config["dtype"])
+    dtype_str = profile_config.get("dtype", "float32")
+    if not hasattr(torch, dtype_str):
+        raise ValueError(f"Invalid dtype in profile config: {dtype_str!r}. Expected e.g. 'float32', 'bfloat16'.")
+    dtype = getattr(torch, dtype_str)
 
     normalizer = EnglishTextNormalizer(tokenizer.english_spelling_normalizer)
 
