@@ -132,8 +132,12 @@ def check_gcp_auth() -> bool:
 def list_datasets(project_id: str) -> List[str]:
     """List dataset IDs in a project using the BigQuery SDK; fallback to `bq ls -d`.
 
-    Returns empty list on errors (the wizard will fall back to manual input).
+    Raises ValueError if project_id contains characters unsafe for CLI use.
+    Returns empty list on GCP connectivity or auth errors (wizard falls back to manual input).
     """
+    # Validate before any network or subprocess call so an unsafe identifier
+    # raises clearly to the caller rather than being caught by the broad except below.
+    _assert_safe_identifier(project_id, "project_id")
     try:
         import google.auth  # type: ignore
         from google.cloud import bigquery  # type: ignore
@@ -160,10 +164,15 @@ def list_datasets(project_id: str) -> List[str]:
 
 
 def list_tables(project_id: str, dataset_id: str) -> List[str]:
-    """List table IDs in a dataset; empty list on errors.
+    """List table IDs in a dataset; empty list on GCP errors.
 
+    Raises ValueError if project_id or dataset_id contain characters unsafe for CLI use.
     Uses BigQuery SDK first; falls back to `bq ls`.
     """
+    # Validate up-front so unsafe identifiers raise to the caller
+    # rather than being silently swallowed by the broad except below.
+    _assert_safe_identifier(project_id, "project_id")
+    _assert_safe_identifier(dataset_id, "dataset_id")
     try:
         import google.auth  # type: ignore
         from google.cloud import bigquery  # type: ignore
@@ -247,6 +256,25 @@ def _assert_safe_column_name(name: str) -> None:
     """
     if not re.fullmatch(r"[A-Za-z0-9_]+", name):
         raise ValueError(f"Unsafe column name rejected: {name!r}")
+
+
+def _assert_safe_identifier(name: str, label: str = "identifier") -> None:
+    """Raise ValueError if name contains characters unsafe for use in bq CLI arguments.
+
+    GCP project IDs and dataset IDs may contain letters, digits, and hyphens only.
+    This is called before passing project_id / dataset_id to subprocess.run() so
+    that malformed inputs are rejected with a clear error instead of being silently
+    passed to the bq CLI where they could cause unexpected argument parsing.
+
+    Valid GCP identifier characters: letters, digits, hyphens, underscores.
+    Rejects anything containing shell metacharacters or whitespace.
+
+    Called by:
+    - list_datasets() before bq CLI fallback
+    - list_tables() before bq CLI fallback
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise ValueError(f"Unsafe {label} rejected: {name!r}")
 
 
 def get_distinct_languages(

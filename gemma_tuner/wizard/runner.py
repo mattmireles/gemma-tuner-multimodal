@@ -13,6 +13,7 @@ Called by:
 """
 
 import configparser
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -186,8 +187,11 @@ def execute_training(profile_config: Dict[str, Any]):
             serialized[k] = str(v)
     config[f"profile:{profile_name}"] = serialized
 
-    # Temporary configuration file generation for subprocess execution
-    with open(temp_config_path, "w") as f:
+    # Temporary configuration file generation for subprocess execution.
+    # Written with 0o600 (owner read/write only) so GCP project IDs and
+    # hyperparameters are not visible to other users on a shared system.
+    fd = os.open(str(temp_config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         config.write(f)
 
     # User progress feedback with realistic time expectations
