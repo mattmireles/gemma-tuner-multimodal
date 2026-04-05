@@ -834,21 +834,6 @@ def run_wizard() -> None:
 legacy_app = typer.Typer(help="Legacy interfaces kept for backward compatibility")
 
 
-@legacy_app.command("manage")
-def legacy_manage():
-    """Run legacy manage.py main() if available."""
-    try:
-        import gemma_tuner.manage as _manage
-
-        if hasattr(_manage, "main"):
-            _manage.main()
-        else:
-            typer.echo("manage.py has no main(); use 'runs' commands instead.")
-    except Exception as e:
-        typer.echo(f"❌ legacy manage failed: {e}", err=True)
-        raise typer.Exit(ExitCodes.GENERAL_ERROR)
-
-
 @legacy_app.command("main")
 def legacy_main():
     """Run legacy main.py entrypoint if available (deprecated)."""

@@ -283,44 +283,22 @@ def create_blacklist(profile_config, output_dir):
             continue
 
         with torch.no_grad():
-            # Set the language and task for generation
-            if language_mode == "mixed":
-                # Do not set language token, allow for mixed-language
-                model.generation_config.forced_decoder_ids = None
-            elif language_mode == "strict":
-                # Retrieve per-sample languages from the original dataset
+            # Determine batch_language for strict mode (generate() handles forced_decoder_ids)
+            batch_language = None
+            if language_mode == "strict":
                 languages = [
                     vectorized_datasets[idx]["language"]
                     for idx in range(id_offset, min(id_offset + batch_size, len(vectorized_datasets)))
                 ]
                 unique_langs = set(lang for lang in languages if lang != "??")
-                if len(unique_langs) <= 1 and unique_langs:
-                    # Homogeneous batch — single language token for all
-                    language = unique_langs.pop()
-                    model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-                        language=language, task="transcribe"
-                    )
+                if len(unique_langs) == 1:
+                    batch_language = unique_langs.pop()
                 elif len(unique_langs) > 1:
-                    # Heterogeneous batch — must generate per-language sub-batches.
-                    # For simplicity, use the most common language in the batch.
-                    # A full per-language split is complex here; the evaluate.py path
-                    # shows the full implementation.
+                    # Heterogeneous batch — use the most common language.
                     from collections import Counter
 
                     lang_counts = Counter(lang for lang in languages if lang != "??")
-                    most_common_lang = lang_counts.most_common(1)[0][0]
-                    model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-                        language=most_common_lang, task="transcribe"
-                    )
-                else:
-                    model.generation_config.forced_decoder_ids = None
-            elif language_mode.startswith("override:"):
-                # Force the specified language
-                model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-                    language=forced_language, task="transcribe"
-                )
-            else:
-                raise ValueError(f"Invalid language mode: {language_mode}")
+                    batch_language = lang_counts.most_common(1)[0][0]
 
             generated_tokens = generate(
                 model=model,
@@ -328,7 +306,7 @@ def create_blacklist(profile_config, output_dir):
                 input_features=input_features,
                 language_mode=language_mode,
                 forced_language=forced_language,
-                batch_language=None,  # strict handled per-batch earlier for blacklist as well if needed
+                batch_language=batch_language,
                 gen_kwargs=gen_kwargs,
             )
 

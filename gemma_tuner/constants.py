@@ -202,56 +202,6 @@ class TrainingDefaults:
     """
 
 
-# ===== DEVICE OPTIMIZATION CONSTANTS =====
-
-
-class DeviceOptimization:
-    """
-    Device-specific optimization parameters for different compute platforms.
-
-    These constants enable platform-specific optimizations that account for
-    architectural differences between Apple Silicon, NVIDIA CUDA, and CPU platforms.
-    """
-
-    # Memory Management Timing
-    MEMORY_PRESSURE_CHECK_INTERVAL = 10
-    """
-    Interval for memory pressure monitoring (10 batches).
-    
-    On Apple Silicon systems, memory pressure can affect system stability.
-    This constant controls how frequently the training loop checks for
-    memory pressure and takes corrective action.
-    """
-
-    # Synchronization Requirements
-    CUDA_SYNC_FREQUENCY = 100
-    """
-    CUDA synchronization frequency for accurate timing (100 operations).
-    
-    CUDA operations are asynchronous by default. This constant controls
-    how frequently explicit synchronization occurs for timing measurements
-    and memory usage tracking.
-    """
-
-    MPS_SYNC_FREQUENCY = 50
-    """
-    MPS synchronization frequency for accurate measurements (50 operations).
-    
-    MPS operations are also asynchronous. More frequent synchronization
-    is needed compared to CUDA due to unified memory architecture.
-    """
-
-    # Cache Management
-    CACHE_CLEAR_FREQUENCY = 1000
-    """
-    Frequency of explicit cache clearing (1000 operations).
-    
-    Both MPS and CUDA maintain memory caches for performance. This constant
-    controls how frequently caches are explicitly cleared to prevent
-    memory pressure in long-running training jobs.
-    """
-
-
 # ===== FILE SYSTEM CONSTANTS =====
 
 
@@ -444,79 +394,16 @@ class VisualizationConstants:
     """WebSocket connection timeout in seconds (5s)."""
 
 
-# ===== VERSION COMPATIBILITY CONSTANTS =====
-
-
-class Versions:
-    """
-    Version requirements and compatibility constants.
-
-    These constants define minimum version requirements for dependencies
-    and provide clear documentation of compatibility requirements.
-    """
-
-    # Minimum Required Versions
-    TRANSFORMERS_MIN_VERSION = "4.46.0"
-    """
-    Minimum transformers version for Gemma support.
-
-    This version includes Gemma model implementations and fixes
-    required for stable fine-tuning on Apple Silicon.
-    Note: Aligned with requirements.txt specification.
-    """
-
-    DATASETS_MIN_VERSION = "2.14.6"
-    """
-    Minimum datasets version for efficient loading.
-    
-    This version includes performance improvements and bug fixes
-    essential for large dataset handling and caching.
-    """
-
-    PYTORCH_MIN_VERSION = "2.0.0"
-    """
-    Minimum PyTorch version for MPS support.
-    
-    PyTorch 2.0+ includes stable MPS backend implementation
-    required for Apple Silicon GPU acceleration.
-    """
-
-
 # ===== LOGGING CONSTANTS =====
 
 
 class LoggingDefaults:
-    """
-    Logging configuration constants for consistent application-wide logging.
+    """Logging configuration constants. Delegates to core.logging.LoggingConstants
+    for level values to avoid duplication."""
 
-    These constants ensure consistent logging configuration across all modules
-    and provide clear documentation of logging levels and formats used.
-    """
-
-    # Default logging level for application startup
     DEFAULT_LEVEL = "INFO"
-    """
-    Default logging level for application initialization.
-    
-    INFO level provides appropriate detail for production use while avoiding
-    excessive debug output. Balances informativeness with log volume.
-    """
-
-    DEBUG_LEVEL = "DEBUG"
-    """Debug logging level for development and troubleshooting."""
-
-    WARNING_LEVEL = "WARNING"
-    """Warning level for non-critical issues requiring attention."""
-
-    ERROR_LEVEL = "ERROR"
-    """Error level for critical issues requiring immediate attention."""
-
-    # Default log filenames
     RUN_LOG_FILENAME = "run.log"
-    """Standard filename for run-specific log files."""
-
     TRAINING_LOG_FILENAME = "training.log"
-    """Standard filename for training-specific logs."""
 
 
 # ===== BACKWARDS COMPATIBILITY ALIASES =====

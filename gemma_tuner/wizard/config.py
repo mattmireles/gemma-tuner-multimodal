@@ -32,10 +32,6 @@ from gemma_tuner.wizard import config_store as _config_store
 from gemma_tuner.wizard import granary as _granary
 from gemma_tuner.wizard.base import apple_style, console
 
-_PROJECT_ROOT = _config_store._PROJECT_ROOT
-_add_dataset_to_config = _config_store._add_dataset_to_config
-_read_config = _config_store._read_config
-_update_bq_defaults = _config_store._update_bq_defaults
 setup_granary_dataset = _granary.setup_granary_dataset
 
 
@@ -65,126 +61,34 @@ def _infer_candidate_columns(schema_fields: List[Dict[str, Any]]) -> Tuple[List[
 
 def select_bigquery_table_and_export() -> Dict[str, Any]:
     """
-    Interactive BigQuery dataset import with surgical precision and enterprise-grade workflow.
-
-    This function implements a comprehensive BigQuery-to-training-data pipeline that enables
-    users to extract precisely the data they need from enterprise data warehouses. It provides
-    intelligent schema analysis, column mapping, sampling strategies, and quality control
-    for production-ready training datasets.
+    Interactive wizard step: import a BigQuery table as a local CSV training dataset.
 
     Called by:
-    - select_dataset() when user chooses BigQuery import option (line 502)
-    - Enterprise workflows requiring direct data warehouse integration
-    - Large-scale training data preparation from production analytics systems
-    - Custom dataset creation for specialized domain training requirements
+    - wizard/ui.py:select_dataset() when user chooses the BigQuery import option
 
     Calls to:
-    - core/bigquery.py:check_gcp_auth() for authentication validation
-    - core/bigquery.py:list_datasets(), list_tables() for resource discovery
-    - core/bigquery.py:get_table_schema() for intelligent column analysis
-    - core/bigquery.py:get_distinct_languages() for multilingual dataset filtering
-    - core/bigquery.py:build_query_and_export() for surgical data extraction
-    - _add_dataset_to_config() for automatic configuration integration
-    - _update_bq_defaults() for user experience optimization through defaults
+    - core/bigquery.py:check_gcp_auth() — validates GCP credentials
+    - core/bigquery.py:list_datasets(), list_tables() — resource discovery
+    - core/bigquery.py:get_table_schema() — column analysis
+    - core/bigquery.py:get_distinct_languages() — language filtering
+    - core/bigquery.py:build_query_and_export() — data extraction to CSV
+    - wizard/config_store.py:_add_dataset_to_config() — writes dataset to config.ini
+    - wizard/config_store.py:_update_bq_defaults() — persists project/dataset for next run
 
-    Enterprise BigQuery integration workflow:
-
-    Authentication & Access:
-    - GCP authentication verification with actionable setup guidance
-    - Project access validation and permission checking
-    - Service account or user credential support with clear error messages
-    - Graceful fallback options for authentication issues
-
-    Resource Discovery:
-    - Dynamic project dataset enumeration with caching for performance
-    - Table listing with metadata analysis for informed selection
-    - Schema introspection for intelligent column mapping suggestions
-    - Automatic detection of common audio and transcript patterns
-
-    Intelligent Column Mapping:
-    - Audio path detection: audio_path, audio_url, gcs_uri, path, audio
-    - Transcript identification: text_perfect, text_verbatim, transcript, text
-    - Language analysis: language, lang, locale with distinct value enumeration
-    - Fallback suggestions when standard patterns aren't found
-
-    Sampling Strategies:
-    - Random sampling: Statistical representation across data distribution
-    - First-N sampling: Chronological order preservation for time-series data
-    - Row limits: Memory management and iteration speed optimization
-
-    Language-Aware Processing:
-    - Automatic language detection from schema analysis
-    - Multi-language filtering with checkbox selection interface
-    - Language distribution analysis for balanced dataset creation
-    - Unicode and encoding validation for international datasets
-
-    Quality Control & Validation:
-    - Schema compatibility checking for Gemma training requirements
-    - Data type validation and automatic conversion recommendations
-    - NULL value detection and handling strategies
-    - File size estimation and download time predictions
-
-    Configuration Integration:
-    - Automatic config.ini updates with dataset definitions
-    - Standard train/validation split generation (80/20 default)
-    - Text column mapping for consistent pipeline integration
-    - Source tracking for data lineage and reproducibility
-
-    Output Structure:
-    Creates `data/datasets/{dataset_name}/` directory containing:
-    - train.csv: Training split with audio paths and transcripts
-    - validation.csv: Validation split for model evaluation
-    - metadata.json: Export configuration and statistics
-    - schema.json: Original BigQuery schema for reference
-
-    Error Handling & Recovery:
-    - Network timeout handling with retry mechanisms
-    - Query complexity validation and optimization suggestions
-    - Memory pressure detection during large exports
-    - Partial download recovery for interrupted transfers
-
-    Performance Optimizations:
-    - Parallel chunk downloading for large datasets
-    - Automatic query optimization through BigQuery best practices
-    - Smart caching of schema and metadata to reduce API calls
-    - Progress tracking with ETA calculation for long exports
+    What it actually does:
+    1. Verifies GCP auth and prompts for project/dataset/table selection
+    2. Introspects schema to suggest audio path, transcript, and language columns
+    3. Optionally filters rows by language
+    4. Exports to data/datasets/{name}/ as train.csv + validation.csv (80/20 split)
+    5. Updates config.ini with the new dataset definition
 
     Returns:
-        Dict[str, Any]: Dataset descriptor compatible with wizard workflow:
-        {
-            "name": Generated dataset directory name,
-            "type": "local_csv" for downstream compatibility,
-            "path": Absolute path to created dataset directory,
-            "files": Number of CSV files created (train.csv, validation.csv),
-            "description": Human-readable description with source information,
-            "source_info": {
-                "project_id": BigQuery project identifier,
-                "dataset_id": BigQuery dataset name,
-                "table_id": Source table name,
-                "export_timestamp": ISO timestamp of export,
-                "row_count": Total rows exported,
-                "languages": List of languages included (if filtered)
-            }
-        }
-
-    Example Usage:
-        dataset = select_bigquery_table_and_export()
-        # Interactive prompts guide user through:
-        # 1. Project selection: "my-audio-project"
-        # 2. Dataset selection: "speech_data_warehouse"
-        # 3. Table selection: "transcribed_calls"
-        # 4. Column mapping: audio_path -> "gcs_audio_uri", transcript -> "human_transcription"
-        # 5. Language filtering: ["en", "es", "fr"] from 15 available languages
-        # 6. Sampling: Random 10,000 rows
-        # Result: Creates data/datasets/bq_gemma_finetuning_20250813/ with train.csv and validation.csv
-
-    Integration Benefits:
-        - Zero-copy data pipeline from BigQuery to training
-        - Surgical precision in data selection reduces training time
-        - Enterprise-grade authentication and permission handling
-        - Automatic data validation and quality assurance
-        - Seamless integration with existing wizard workflow
-        - Configuration persistence for reproducible experiments
+        Dict[str, Any] with keys:
+            "name": dataset directory name
+            "type": "local_csv"
+            "path": absolute path to dataset directory
+            "files": number of CSV files written
+            "description": human-readable summary
     """
     from gemma_tuner.core import bigquery as bq
 
@@ -198,7 +102,7 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
             return {"name": "custom", "type": "custom", "description": "Manual path"}
 
     # Defaults
-    cfg = _read_config()
+    cfg = _config_store._read_config()
     last_project = cfg.get("bigquery", "last_project_id", fallback="")
     last_dataset = cfg.get("bigquery", "last_dataset_id", fallback="")
 
@@ -231,7 +135,7 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
             console.print(f"[red]Preflight failed again for '{table_id}':[/red] {msg2}")
             raise RuntimeError("BigQuery table check failed. Please choose a concrete table or fix the view wildcard.")
 
-    _update_bq_defaults(project_id, dataset_id)
+    _config_store._update_bq_defaults(project_id, dataset_id)
 
     # Schema and candidates
     schema = bq.get_table_schema(project_id, dataset_id, table_id)
@@ -276,7 +180,7 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
     extra_where = None
 
     # Execute export — anchored to project root so it works from any cwd
-    out_dir = _PROJECT_ROOT / "data" / "datasets"
+    out_dir = _config_store._PROJECT_ROOT / "data" / "datasets"
     try:
         dataset_dir = bq.build_query_and_export(
             project_id=project_id,
@@ -297,7 +201,7 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
     dataset_name = dataset_dir.name
     # Update config.ini for dataset resolution and text_column
     # Use the source column name (transcript_col) which is now the same as transcript_target
-    _add_dataset_to_config(dataset_name, transcript_target)
+    _config_store._add_dataset_to_config(dataset_name, transcript_target)
 
     # Return dataset descriptor compatible with downstream flow
     return {
@@ -318,7 +222,7 @@ def generate_profile_config(
 
     # Load the base configuration from config.ini using the robust, hierarchical loader.
     # This ensures that all central defaults are respected.
-    cfg = _read_config()
+    cfg = _config_store._read_config()
     model_for_loader = model
     profile_config = load_model_dataset_config(cfg, model_for_loader, dataset["name"])
 

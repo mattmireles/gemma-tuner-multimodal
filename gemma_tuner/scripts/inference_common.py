@@ -15,8 +15,8 @@ Calls to:
 - utils/device.py:get_device() for platform-specific device selection
 - utils/dataset_utils.py:load_dataset_split() for dataset loading with patch system
 - utils/dataset_prep.py:encode_labels(), load_audio_local_or_gcs(), resolve_language()
-- transformers.WhisperForConditionalGeneration.from_pretrained() for model loading
-- transformers.WhisperProcessor.from_pretrained() for processor loading
+- transformers.AutoModelForCausalLM.from_pretrained() for model loading
+- transformers.AutoProcessor.from_pretrained() for processor loading
 - transformers.set_seed() for reproducibility
 
 Design rationale:
@@ -33,8 +33,8 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 from torch.utils.data import DataLoader
 from transformers import (
-    WhisperForConditionalGeneration,
-    WhisperProcessor,
+    AutoModelForCausalLM,
+    AutoProcessor,
 )
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
@@ -192,18 +192,22 @@ class EvalDataCollator:
                 batch["language"] = [lang for _ in lang_features]
                 batches.append(batch)
 
-            # Pad each batch to max length across language groups, then concatenate
-            max_len_input_features = max(batch["input_features"].shape[1] for batch in batches)
+            # Pad each batch to max length across language groups, then concatenate.
+            # input_features shape is [batch, mel_bins, time_frames] — use shape[2] for the
+            # variable time dimension, NOT shape[1] (mel_bins is fixed, e.g. 80 or 128).
+            max_len_input_features = max(batch["input_features"].shape[2] for batch in batches)
             max_len_labels = max(batch["labels"].shape[1] for batch in batches)
 
             padded_batches = []
             for batch in batches:
                 padded_batch = {}
-                padding_size_input_features = max_len_input_features - batch["input_features"].shape[1]
+                padding_size_input_features = max_len_input_features - batch["input_features"].shape[2]
                 padding_size_labels = max_len_labels - batch["labels"].shape[1]
 
+                # F.pad tuple is applied right-to-left on dimensions:
+                # (0, padding_size) pads only the last dim (time), leaving mel_bins untouched.
                 padded_batch["input_features"] = torch.nn.functional.pad(
-                    batch["input_features"], (0, 0, 0, padding_size_input_features)
+                    batch["input_features"], (0, padding_size_input_features)
                 )
                 padded_batch["labels"] = torch.nn.functional.pad(batch["labels"], (0, padding_size_labels), value=-100)
                 padded_batch["language"] = batch["language"]
@@ -253,7 +257,7 @@ def parse_language_mode(language_mode):
 
 def load_model_and_processor(profile_config, device):
     """
-    Loads WhisperForConditionalGeneration + WhisperProcessor from profile config.
+    Loads AutoModelForCausalLM + AutoProcessor from profile config.
 
     Handles both local checkpoint directories and HuggingFace Hub model identifiers.
     Applies dtype and attention implementation settings from the profile.
@@ -271,26 +275,26 @@ def load_model_and_processor(profile_config, device):
 
     Returns:
         tuple: (model, processor, tokenizer, feature_extractor)
-            - model: WhisperForConditionalGeneration on target device
-            - processor: WhisperProcessor
+            - model: AutoModelForCausalLM on target device
+            - processor: AutoProcessor
             - tokenizer: processor.tokenizer (convenience alias)
-            - feature_extractor: processor.feature_extractor (convenience alias)
+            - feature_extractor: processor.feature_extractor (convenience alias, may be None)
     """
     model_name_or_path = profile_config["model_name_or_path"]
-    processor = WhisperProcessor.from_pretrained(model_name_or_path)
+    processor = AutoProcessor.from_pretrained(model_name_or_path)
     tokenizer = processor.tokenizer
-    feature_extractor = processor.feature_extractor
+    feature_extractor = getattr(processor, "feature_extractor", None)
 
     dtype = getattr(torch, profile_config["dtype"])
 
     if os.path.isdir(model_name_or_path):
-        model = WhisperForConditionalGeneration.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
             torch_dtype=dtype,
             attn_implementation=profile_config["attn_implementation"],
         ).to(device)
     else:
-        model = WhisperForConditionalGeneration.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
             torch_dtype=dtype,
             attn_implementation=profile_config["attn_implementation"],

@@ -198,7 +198,7 @@ def execute_training(profile_config: Dict[str, Any]):
     try:
         # Subprocess training execution with environment isolation
         # Uses module invocation for package compatibility and clean resource management
-        module_cwd = Path(__file__).resolve().parent.parent
+        module_cwd = Path(__file__).resolve().parent.parent.parent
         result = subprocess.run(
             [
                 sys.executable,

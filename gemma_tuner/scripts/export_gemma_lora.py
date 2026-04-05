@@ -1,5 +1,26 @@
-"""Gemma LoRA export -- not yet implemented."""
+"""Gemma LoRA export entry point.
+
+Thin wrapper around scripts/export.py:export_model_dir(), which handles both
+LoRA adapter directories and full model directories transparently.
+
+Called by:
+- Direct execution: python export_gemma_lora.py <adapter_dir>
+
+Calls to:
+- scripts/export.py:export_model_dir() for all export logic
+"""
+
+import argparse
+
+from gemma_tuner.scripts.export import export_model_dir
 
 
 def main():
-    raise NotImplementedError("Gemma LoRA export is not yet implemented.")
+    parser = argparse.ArgumentParser(description="Merge and export a Gemma LoRA adapter to SafeTensors")
+    parser.add_argument("adapter_dir", help="Path to a PEFT adapter directory (contains adapter_config.json)")
+    args = parser.parse_args()
+    export_model_dir(args.adapter_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -73,6 +73,7 @@ from transformers import (
 from transformers.utils import logging as hf_logging
 
 from gemma_tuner.models.common.collators import DataCollatorGemmaAudio
+from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
 from gemma_tuner.models.gemma.constants import (
@@ -133,6 +134,7 @@ def _test_mps_bfloat16_support(device: torch.device) -> bool:
         # Only test MPS devices - other devices have different bfloat16 characteristics
         return False
 
+    input_tensor = weight_tensor = output_tensor = loss_value = None
     try:
         # Create test tensors with gradient tracking (mimics training conditions)
         # Use randn (not zeros) to actually stress the dtype with non-trivial values
@@ -153,7 +155,7 @@ def _test_mps_bfloat16_support(device: torch.device) -> bool:
         loss_value.backward()
 
         # Comprehensive validation of bfloat16 operation success
-        bfloat16_fully_supported = (
+        return (
             input_tensor.dtype == torch.bfloat16  # Input dtype preserved
             and output_tensor.dtype == torch.bfloat16  # Output dtype preserved
             and torch.isfinite(loss_value).item()  # No NaN/inf in results
@@ -161,15 +163,13 @@ def _test_mps_bfloat16_support(device: torch.device) -> bool:
             and input_tensor.grad.dtype == torch.bfloat16  # Gradient dtype preserved
         )
 
-        # Clean up test tensors to avoid memory leaks
-        del input_tensor, weight_tensor, output_tensor, loss_value
-
-        return bfloat16_fully_supported
-
     except Exception as exception:
         # Any exception indicates bfloat16 is not fully supported
         logger.debug(f"MPS bfloat16 comprehensive test failed: {exception}")
         return False
+    finally:
+        # Clean up test tensors to avoid memory leaks on any exit path
+        del input_tensor, weight_tensor, output_tensor, loss_value
 
 
 def _discover_candidate_target_modules(model) -> List[str]:
@@ -394,6 +394,56 @@ def main(profile_config: Dict, output_dir: str):
     # Let the collator handle sampling rate detection internally for cleaner code
     data_collator = DataCollatorGemmaAudio(processor=processor, text_column=text_column, sampling_rate_hint=None)
 
+    # WER metrics for evaluation.
+    # build_wer_metrics() returns a compute_fn closure wired to the tokenizer.
+    # local_files_only=True: avoids network downloads in offline/CI environments;
+    # build_wer_metrics falls back to a zero-stub if the metric script is unavailable,
+    # so training is never blocked by metric loading failures.
+    _wer_metrics = build_wer_metrics(
+        tokenizer=processor.tokenizer,
+        decoder=processor.tokenizer,
+        include_cer=False,
+        local_files_only=True,
+    )
+    compute_metrics_fn = _wer_metrics["compute_fn"]
+
+    def _preprocess_logits_for_metrics(logits, labels):
+        """Argmax logits immediately after each eval batch to avoid accumulating [B, T, V] tensors.
+
+        Standard HF pattern for causal LM evaluation with plain Trainer.
+        Gemma's 256 k vocabulary makes storing full logits across the eval set
+        prohibitively expensive (2 samples × 512 tokens × 256 k vocab × 4 bytes ≈ 1 GB
+        per batch). Argmaxing here reduces each batch to [B, T] int64 token IDs.
+
+        Called by:
+        - Trainer.evaluation_loop() immediately after each eval batch, before
+          tensors are gathered across devices/workers.
+
+        Result shape [B, T] is what compute_metrics_fn receives as pred.predictions.
+        The 3-D branch in compute_fn (metrics.py) becomes a no-op but does not break.
+        """
+        if isinstance(logits, tuple):
+            logits = logits[0]
+        return logits.argmax(dim=-1)
+
+    # Guard: HF Trainer.__init__ raises ValueError when eval_strategy != "no" and
+    # eval_dataset is None (verified against transformers trainer.py line 439).
+    # The validation split load above is wrapped in a broad except, so eval_ds=None
+    # is a real runtime path whenever the split is missing or fails to load.
+    # We override to "no" here and log a warning so the failure is visible without
+    # crashing the entire training run.
+    requested_eval_strategy = str(
+        profile_config.get("eval_strategy", GemmaTrainingConstants.DEFAULT_EVAL_STRATEGY)
+    )
+    if eval_ds is None and requested_eval_strategy != "no":
+        logger.warning(
+            "eval_strategy=%r requested but no eval_dataset is available; overriding to 'no'.",
+            requested_eval_strategy,
+        )
+        effective_eval_strategy = "no"
+    else:
+        effective_eval_strategy = requested_eval_strategy
+
     # Training arguments
     per_device_train_batch_size = int(profile_config.get("per_device_train_batch_size", 2))
     per_device_eval_batch_size = int(profile_config.get("per_device_eval_batch_size", per_device_train_batch_size))
@@ -418,12 +468,7 @@ def main(profile_config: Dict, output_dir: str):
         bf16=use_bf16,
         logging_steps=int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS)),
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
-        # Default eval_strategy to "no": compute_metrics returns {} (WER not yet wired),
-        # so running eval every epoch wastes wall time for zero gain.
-        # Set eval_strategy="epoch" in profile_config to re-enable eval loss tracking.
-        # TODO: wire models/common/metrics.py:build_wer_metrics once generation pipeline
-        # is stable, then change this default back to "epoch".
-        eval_strategy=str(profile_config.get("eval_strategy", "no")),
+        eval_strategy=effective_eval_strategy,
         report_to=[],
         remove_unused_columns=False,
         dataloader_pin_memory=False,
@@ -439,6 +484,8 @@ def main(profile_config: Dict, output_dir: str):
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=data_collator,
+        compute_metrics=compute_metrics_fn,
+        preprocess_logits_for_metrics=_preprocess_logits_for_metrics,
     )
 
     logger.info("Starting Gemma LoRA training...")

@@ -14,7 +14,7 @@ Why these items live here:
 - WizardConstants: Referenced by nearly every wizard submodule for magic-number-free code.
 - TrainingMethod / ModelSpecs: Shared data tables consumed by model selection,
   estimation, configuration generation, and confirmation screens.
-- get_device_info(): Hardware detection used by welcome screen, model selection,
+- get_wizard_device_info(): Hardware detection used by welcome screen, model selection,
   training estimation, and confirmation screen.
 - detect_datasets(): Dataset discovery used by the dataset selection step.
 
@@ -141,16 +141,13 @@ class ModelSpecs:
     }
 
 
-def get_device_info() -> Dict[str, Any]:
+def get_wizard_device_info() -> Dict[str, Any]:
     """
     Comprehensive device detection and performance profiling for training estimation.
 
-    NOTE: utils/device.py also exports a function named get_device_info() with a
-    DIFFERENT schema (returns "device_type", "mps_available", "device_name", etc. —
-    no "performance_multiplier" key). This wizard-specific version is intentionally
-    separate because estimator.py depends on "performance_multiplier" and the
-    display_name/unified_memory fields. Do NOT replace this function with the utils
-    version without auditing every caller in the wizard package.
+    This is separate from utils/device.py:get_device_info() which returns a simpler
+    schema without performance_multiplier or display_name. This version includes
+    fields needed by the wizard estimator.
 
     This function provides detailed hardware analysis to enable accurate training time
     and memory requirements estimation. It handles the three primary training platforms
@@ -205,7 +202,7 @@ def get_device_info() -> Dict[str, Any]:
         }
 
     Example:
-        device_info = get_device_info()
+        device_info = get_wizard_device_info()
         if device_info["available_memory_gb"] > 16:
             # Sufficient memory for large model training
             enable_large_models = True

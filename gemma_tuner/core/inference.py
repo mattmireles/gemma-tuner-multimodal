@@ -36,7 +36,7 @@ def prepare_features(audio_or_path: Any, feature_extractor) -> Any:
 
     Calls to:
     - librosa.load() for audio file loading and resampling
-    - WhisperFeatureExtractor.__call__() for mel-spectrogram extraction
+    - feature_extractor.__call__() for audio feature extraction
     - google.cloud.storage (optional) for GCS file access
 
     Input format handling:
@@ -54,7 +54,7 @@ def prepare_features(audio_or_path: Any, feature_extractor) -> Any:
             - str: Local file path or GCS URL (gs://bucket/path)
             - dict: {"array": audio_samples, "sampling_rate": sr}
             - array-like: 1D audio samples (np.array or list)
-        feature_extractor: WhisperFeatureExtractor for mel-spectrogram extraction
+        feature_extractor: Audio feature extractor (e.g. from AutoProcessor)
             - Expects sampling_rate attribute (typically 16000 Hz)
             - Returns dict with "input_features" key
 
@@ -158,10 +158,10 @@ def generate(
     - Efficient batch processing with unified memory architecture
 
     Args:
-        model: WhisperForConditionalGeneration model instance
+        model: Gemma CausalLM model instance
             - Must be on appropriate device (cuda/mps/cpu)
             - Can be LoRA-adapted or full model
-        processor: WhisperProcessor with tokenizer and feature extractor
+        processor: AutoProcessor with tokenizer and feature extractor
             - Used for decoder prompt generation
             - Handles language token mapping
         input_features: Tensor of mel-spectrogram features
@@ -320,36 +320,8 @@ def decode_and_score(
         return None, None, pred_str, label_str, norm_pred_str, norm_label_str
 
     # Prefer local files only to keep tests offline; fall back gracefully
-    def _edit_distance(a: str, b: str) -> int:
-        # Simple Levenshtein distance (DP)
-        la, lb = len(a), len(b)
-        dp = [[0] * (lb + 1) for _ in range(la + 1)]
-        for i in range(la + 1):
-            dp[i][0] = i
-        for j in range(lb + 1):
-            dp[0][j] = j
-        for i in range(1, la + 1):
-            for j in range(1, lb + 1):
-                cost = 0 if a[i - 1] == b[j - 1] else 1
-                dp[i][j] = min(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + cost,
-                )
-        return dp[la][lb]
-
-    def _cer_fallback(preds: list[str], refs: list[str]) -> float:
-        if not preds:
-            return 0.0
-        total_dist = 0
-        total_chars = 0
-        for p, r in zip(preds, refs):
-            total_dist += _edit_distance(p, r)
-            total_chars += max(1, len(r))
-        return total_dist / total_chars
-
-    def _seq_edit_distance(a: list, b: list) -> int:
-        """Levenshtein distance on token lists (same DP as _edit_distance but for sequences)."""
+    def _levenshtein(a: Sequence, b: Sequence) -> int:
+        """Generic Levenshtein distance (works on strings or token lists)."""
         la, lb = len(a), len(b)
         dp = [[0] * (lb + 1) for _ in range(la + 1)]
         for i in range(la + 1):
@@ -362,31 +334,33 @@ def decode_and_score(
                 dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
         return dp[la][lb]
 
+    def _cer_fallback(preds: list[str], refs: list[str]) -> float:
+        if not preds:
+            return 0.0
+        total_dist = sum(_levenshtein(p, r) for p, r in zip(preds, refs))
+        total_chars = sum(max(1, len(r)) for r in refs)
+        return total_dist / total_chars
+
     def _wer_fallback(preds: list[str], refs: list[str]) -> float:
         if not preds:
             return 0.0
-        total_dist = 0
-        total_words = 0
-        for p, r in zip(preds, refs):
-            pw, rw = p.split(), r.split()
-            total_dist += _seq_edit_distance(pw, rw)
-            total_words += max(1, len(rw))
+        total_dist = sum(_levenshtein(p.split(), r.split()) for p, r in zip(preds, refs))
+        total_words = sum(max(1, len(r.split())) for r in refs)
         return total_dist / total_words
 
     try:
-        wer_metric = evaluate.load("wer", download_config=evaluate.DownloadConfig(local_files_only=True))
-        cer_metric = evaluate.load("cer", download_config=evaluate.DownloadConfig(local_files_only=True))
+        # Try local-only first (offline/CI), then allow network download
+        try:
+            wer_metric = evaluate.load("wer", download_config=evaluate.DownloadConfig(local_files_only=True))
+            cer_metric = evaluate.load("cer", download_config=evaluate.DownloadConfig(local_files_only=True))
+        except Exception:
+            wer_metric = evaluate.load("wer")
+            cer_metric = evaluate.load("cer")
         wer = 100 * wer_metric.compute(predictions=score_preds, references=score_refs)
         cer = 100 * cer_metric.compute(predictions=score_preds, references=score_refs)
     except Exception:
-        try:
-            wer_metric = evaluate.load("wer")
-            cer_metric = evaluate.load("cer")
-            wer = 100 * wer_metric.compute(predictions=score_preds, references=score_refs)
-            cer = 100 * cer_metric.compute(predictions=score_preds, references=score_refs)
-        except Exception:
-            # Offline or HF unavailable: use internal fallbacks sufficient for tests
-            wer = 100 * _wer_fallback(score_preds, score_refs)
-            cer = 100 * _cer_fallback(score_preds, score_refs)
+        # Offline or HF unavailable: use internal fallbacks sufficient for tests
+        wer = 100 * _wer_fallback(score_preds, score_refs)
+        cer = 100 * _cer_fallback(score_preds, score_refs)
 
     return wer, cer, list(pred_str), list(label_str), norm_pred_str, norm_label_str

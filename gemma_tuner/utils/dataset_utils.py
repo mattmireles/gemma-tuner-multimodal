@@ -509,7 +509,7 @@ def _apply_patch_bundle(dataset, patch_bundle, configured_text_col, num_workers,
             return sample_id not in _blacklist or sample_id in _protected
 
         dataset = dataset.filter(should_keep_sample, num_proc=num_workers)
-        filtered_count = original_count - len(dataset)
+        filtered_count = (original_count - len(dataset)) if original_count is not None else 0
         logger.info(f"Filtered out {filtered_count} samples after applying protections")
     else:
         logger.info("No blacklist filtering applied (no blacklist files found)")
