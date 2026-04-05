@@ -212,7 +212,7 @@ def cleanup_runs(output_dir: str) -> CleanupResult:
 
 
 def get_run_status(run_dir: str) -> str:
-    metadata = _load_metadata(run_dir)
+    metadata = load_metadata(run_dir)
     if metadata is None:
         return "unknown"
 
@@ -246,7 +246,7 @@ def _iter_run_metadata(output_dir: str) -> Iterable[dict[str, Any]]:
             continue
 
         if "+" not in run_dir:
-            metadata = _load_metadata(full_run_dir)
+            metadata = load_metadata(full_run_dir)
             if metadata is not None:
                 discovered.append(metadata)
 
@@ -256,7 +256,7 @@ def _iter_run_metadata(output_dir: str) -> Iterable[dict[str, Any]]:
                 eval_dir = os.path.join(full_run_dir, subdir)
                 if not os.path.isdir(eval_dir):
                     continue
-                nested_meta = _load_metadata(eval_dir)
+                nested_meta = load_metadata(eval_dir)
                 if nested_meta is not None:
                     discovered.append(nested_meta)
             continue
@@ -264,7 +264,7 @@ def _iter_run_metadata(output_dir: str) -> Iterable[dict[str, Any]]:
         eval_dir = os.path.join(full_run_dir, "eval")
         if not os.path.isdir(eval_dir):
             continue
-        metadata = _load_metadata(eval_dir)
+        metadata = load_metadata(eval_dir)
         if metadata is None:
             continue
         model, dataset = run_dir.split("+", 1)
@@ -276,7 +276,7 @@ def _iter_run_metadata(output_dir: str) -> Iterable[dict[str, Any]]:
     return discovered
 
 
-def _load_metadata(run_dir: str) -> Optional[dict[str, Any]]:
+def load_metadata(run_dir: str) -> Optional[dict[str, Any]]:
     metadata_path = os.path.join(run_dir, METADATA_FILENAME)
     try:
         with open(metadata_path, "r") as handle:

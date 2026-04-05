@@ -64,7 +64,6 @@ except ImportError as e:
 
 # Package-level constants for cross-script consistency.
 from gemma_tuner.constants import (
-    Evaluation,
     FileSystem,
     MemoryLimits,
 )
@@ -80,8 +79,6 @@ CUDA_MEMORY_RATIO = MemoryLimits.CUDA_DEFAULT_FRACTION
 CPU_BATCH_SIZE = 8
 
 # Quality assurance constants
-DEFAULT_WER_THRESHOLD = Evaluation.WER_THRESHOLD_TRAINING
-VALIDATION_WER_THRESHOLD = Evaluation.WER_THRESHOLD_VALIDATION
 MIN_AUDIO_DURATION = 0.1
 
 __all__ = [
@@ -102,7 +99,5 @@ __all__ = [
     "MPS_MEMORY_RATIO",
     "CUDA_MEMORY_RATIO",
     "CPU_BATCH_SIZE",
-    "DEFAULT_WER_THRESHOLD",
-    "VALIDATION_WER_THRESHOLD",
     "MIN_AUDIO_DURATION",
 ]

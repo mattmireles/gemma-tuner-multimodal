@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants, GemmaTrainingConstants, GemmaValidationConstants
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +31,6 @@ class DataCollatorGemmaAudio:
         self._warned_prompt_masking: bool = False
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
         from gemma_tuner.utils.dataset_prep import load_audio_local_or_gcs
 
         audios: List[List[float]] = []
@@ -98,8 +99,6 @@ class DataCollatorGemmaAudio:
 
     def _mask_prompt_tokens(self, labels: torch.Tensor, input_ids: torch.Tensor) -> None:
         """Mask prompt tokens in labels so loss is computed only on the assistant response."""
-        from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
-
         tokenizer = self.processor.tokenizer
 
         start_of_turn_id = getattr(tokenizer, "start_of_turn_token_id", None)
@@ -154,8 +153,6 @@ class DataCollatorGemmaAudio:
         If it is absent entirely, that is a real error worth raising. If it exists but not at
         position 0, that is legal for multimodal inputs and is silently accepted.
         """
-        from gemma_tuner.models.gemma.constants import GemmaValidationConstants
-
         if "input_ids" not in encoded or not hasattr(self.processor, "tokenizer"):
             return
 
@@ -188,8 +185,6 @@ class DataCollatorGemmaAudio:
 
     def _get_sampling_rate(self) -> int:
         """Return sampling rate using hint > processor.sampling_rate > feature_extractor > 16kHz default."""
-        from gemma_tuner.models.gemma.constants import AudioProcessingConstants
-
         if self.sampling_rate_hint is not None:
             return self.sampling_rate_hint
         if hasattr(self.processor, "sampling_rate") and self.processor.sampling_rate is not None:

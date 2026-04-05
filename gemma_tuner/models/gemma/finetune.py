@@ -127,6 +127,10 @@ def _test_mps_bfloat16_support(device: torch.device) -> bool:
         bool: True if bfloat16 is fully supported, False if fallback to float32 needed
 
     Note:
+        Returns False for non-MPS devices. Callers must use device-specific checks
+        (e.g. torch.cuda.is_bf16_supported()) for CUDA — this function only validates
+        MPS bfloat16 support and is not a general-purpose dtype probe.
+
         Uses GemmaValidationConstants.BFLOAT16_TEST_TENSOR_SIZE for test tensor dimensions
         to balance thorough testing with memory efficiency.
     """

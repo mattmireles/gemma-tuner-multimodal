@@ -80,14 +80,14 @@ def configure_method_specifics(
                 alpha = default_alpha
 
         config["lora_alpha"] = alpha
-        config["lora_dropout"] = 0.1  # Smart default
+        config["lora_dropout"] = 0.1  # Intentionally higher than GemmaTrainingConstants.LORA_DROPOUT (0.05) for wizard's conservative defaults
         config["use_peft"] = True
 
     return config
 
 
 def estimate_training_time(
-    method: Dict[str, Any], model: str, dataset: Dict[str, Any], method_config: Dict[str, Any] = None
+    method: Dict[str, Any], model: str, dataset: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Estimate training time and resource usage"""
 

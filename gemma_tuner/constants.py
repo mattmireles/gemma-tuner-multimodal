@@ -153,16 +153,6 @@ class TrainingDefaults:
     EVAL_STEPS = 500
     """Frequency of validation evaluation (500 steps)."""
 
-    # LoRA Configuration
-    LORA_RANK_DEFAULT = 32
-    """Default LoRA rank for adapter layers (32)."""
-
-    LORA_ALPHA_DEFAULT = 64
-    """Default LoRA alpha scaling factor (64)."""
-
-    LORA_DROPOUT_DEFAULT = 0.07
-    """Default LoRA dropout rate (0.07)."""
-
     # Token Length Limits
     MAX_LABEL_LENGTH = 256
     """Maximum token length for labels (256 tokens)."""
@@ -242,9 +232,6 @@ class FileSystem:
     BLACKLIST_PREFIX = "blacklist-"
     """Prefix for blacklist files."""
 
-    METADATA_FILENAME = "metadata.json"
-    """Standard filename for run metadata."""
-
     COMPLETION_FILENAME = "completed"
     """Filename for run completion markers."""
 
@@ -319,40 +306,6 @@ class Evaluation:
     precision while maintaining readability in reports and logs.
     """
 
-    # WER Thresholds for Quality Control
-    WER_THRESHOLD_TRAINING = 75.0
-    """
-    Maximum acceptable WER for training samples (75%).
-    
-    Samples with WER above this threshold are considered too noisy
-    for training and should be blacklisted or reviewed.
-    """
-
-    WER_THRESHOLD_VALIDATION = 80.0
-    """
-    Maximum acceptable WER for validation samples (80%).
-    
-    Slightly more permissive than training threshold to allow
-    for dataset variability while still catching major issues.
-    """
-
-    # Sample Limiting
-    EVAL_SAMPLE_LIMIT_DEBUG = 100
-    """Sample limit for debug evaluation (100 samples)."""
-
-    EVAL_SAMPLE_LIMIT_QUICK = 1000
-    """Sample limit for quick evaluation (1000 samples)."""
-
-    # Progress Reporting
-    PROGRESS_UPDATE_FREQUENCY = 10
-    """
-    Progress update frequency during evaluation (10 samples).
-    
-    Controls how frequently progress updates are displayed during
-    long evaluation runs to provide user feedback without overwhelming
-    the output with too many updates.
-    """
-
     # Evaluation Batch Size
     EVAL_BATCH_SIZE_DEFAULT = 16
     """Default batch size for evaluation (16 samples)."""
@@ -418,4 +371,3 @@ DEFAULT_EPOCHS = TrainingDefaults.EPOCHS_DEFAULT
 
 # File system aliases
 DEFAULT_OUTPUT_DIR = FileSystem.OUTPUT_DIR_DEFAULT
-METADATA_FILE = FileSystem.METADATA_FILENAME

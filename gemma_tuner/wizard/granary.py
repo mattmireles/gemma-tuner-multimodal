@@ -266,7 +266,7 @@ sample_validation_rate = {sample_validation_rate}
     # Step 6: Optional preparation execution
     preparation_succeeded = False
     if downloads_complete and add_config:
-        console.print("\n[bold]Step 5: Prepare Dataset[/bold]")
+        console.print("\n[bold]Step 6: Prepare Dataset[/bold]")
         run_preparation = questionary.confirm(
             f"Run dataset preparation now? (gemma-macos-tuner prepare-granary {dataset_name})",
             default=True,

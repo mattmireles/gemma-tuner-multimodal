@@ -224,9 +224,9 @@ def main() -> int:
     - Exit code differentiation: Critical vs non-critical failure modes
 
     Performance Impact Analysis:
-    - Native ARM64: {ARM64_PERFORMANCE_MULTIPLIER} improvement over Rosetta emulation
-    - MPS acceleration: {MPS_PERFORMANCE_MULTIPLIER} speedup over CPU training
-    - bfloat16 support: {BFLOAT16_MEMORY_REDUCTION} memory reduction
+    - Native ARM64: 2-5x improvement over Rosetta emulation
+    - MPS acceleration: 3-10x speedup over CPU training
+    - bfloat16 support: 30-50% memory reduction
     - Proper memory config: Eliminates disk swapping during training
 
     Returns:
@@ -317,8 +317,6 @@ def main() -> int:
     # Delegated to probe_bfloat16() in utils/device.py to avoid duplicating
     # the try/except probe logic across scripts.
     try:
-        import torch
-
         from gemma_tuner.utils.device import probe_bfloat16
 
         if torch.backends.mps.is_available():

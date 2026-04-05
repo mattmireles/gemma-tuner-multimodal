@@ -86,7 +86,7 @@ class WizardConstants:
 
     # Configuration Generation Constants
     # Defaults for wizard-generated training profiles
-    DEFAULT_LORA_DROPOUT = 0.1  # Standard LoRA dropout rate
+    DEFAULT_LORA_DROPOUT = 0.1  # Intentionally higher than GemmaTrainingConstants.LORA_DROPOUT (0.05) for wizard's conservative defaults
     # LoRA Configuration Presets
     # Pre-defined LoRA rank configurations with smart alpha defaults
     LORA_RANK_OPTIONS = [

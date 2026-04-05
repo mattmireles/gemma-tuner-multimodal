@@ -109,13 +109,14 @@ Compatibility:
 - datetime: Timestamp processing and formatting
 """
 
-import json
 import logging
 import os
 import sys
 from datetime import datetime
 
 import pandas as pd
+
+from gemma_tuner.core.run_queries import load_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -293,17 +294,6 @@ def gather_predictions(profiles, output_dir="output"):
     output_path = os.path.join(output_dir, output_filename)
     combined_df.to_csv(output_path, index=False)
     logger.info(f"{output_path}")
-
-
-def load_metadata(run_dir):
-    """Loads the metadata from metadata.json in a given run directory."""
-    metadata_file = os.path.join(run_dir, "metadata.json")
-    try:
-        with open(metadata_file, "r") as f:
-            metadata = json.load(f)
-    except FileNotFoundError:
-        metadata = None
-    return metadata
 
 
 if __name__ == "__main__":

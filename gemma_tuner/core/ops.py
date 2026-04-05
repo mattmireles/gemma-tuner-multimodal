@@ -104,46 +104,39 @@ def _resolve_config_path(explicit_path: str | None = None) -> Path:
 
 def prepare(profile_config: Dict, config_path: str | None = None) -> None:
     """
-    Prepares dataset for training by downloading and preprocessing audio files.
+    Prepares dataset for fine-tuning by downloading and preprocessing CSV data files.
 
-    This operation handles the complete dataset preparation pipeline including
-    audio download, format conversion, quality filtering, and split generation.
-    It uses deferred import to avoid loading data processing dependencies until
-    actually needed.
+    Dispatches to scripts.prepare_data.prepare_data() which handles the complete
+    dataset preparation pipeline: downloading from HuggingFace or GCS, filtering,
+    split generation, and saving prepared CSV files.
 
     Called by:
     - main.py:main() when operation="prepare" is specified
     - Batch dataset preparation scripts processing multiple datasets sequentially
-    - CI/CD pipelines for automated dataset validation and preprocessing
-    - Data ingestion workflows integrating new audio collections
-    - Quality assurance workflows validating audio format consistency
 
     Calls to:
     - scripts.prepare_data.prepare_data() for the complete preparation workflow
-    - Dataset download utilities (HuggingFace datasets, direct HTTP downloads)
-    - Audio processing libraries (librosa for format conversion and resampling)
     - Pandas for CSV manipulation and split generation
     - File system utilities for directory structure creation and management
 
     Operation workflow:
     1. Extract dataset name from profile configuration
     2. Load dataset configuration from config.ini
-    3. Download audio files if not cached
-    4. Convert audio to WAV format (16kHz)
-    5. Filter samples by quality criteria
-    6. Generate train/validation splits
-    7. Save prepared dataset CSV files
+    3. Download or locate source dataset files
+    4. Filter samples by quality criteria (language, duration, etc.)
+    5. Generate train/validation splits
+    6. Save prepared dataset CSV files to data/datasets/{dataset}/
 
     Args:
         profile_config (Dict): Merged configuration containing dataset name
+        config_path (str | None): Explicit path to config.ini, or None to use fallback chain
 
     Side effects:
         - Creates data/datasets/{dataset}/ directory structure
-        - Downloads and caches audio files in data/audio/
         - Generates prepared CSV files for training
 
     Note:
-        Uses deferred import to avoid loading pandas, librosa, and other
+        Uses deferred import to avoid loading pandas and other
         data processing libraries at module import time.
     """
     # Defer import to avoid heavy dependencies at module import time
@@ -214,27 +207,22 @@ def finetune(profile_config: Dict, output_dir: str) -> dict[str, Any]:
 
 def evaluate(profile_config: Dict, output_dir: str):
     """
-    Evaluates a fine-tuned model on the validation dataset.
+    Evaluates a fine-tuned Gemma model on the validation dataset.
 
-    This operation computes Word Error Rate (WER) and Character Error Rate (CER)
-    metrics on the validation split. It supports both completed training runs
-    and specific checkpoints for evaluation.
+    Dispatches to scripts.evaluate.run_evaluation() which computes Word Error Rate (WER)
+    and Character Error Rate (CER) metrics by running batch inference on the validation
+    split and comparing predictions against reference transcriptions.
 
     Called by:
     - main.py:main() when operation="evaluate" is specified
     - Post-training evaluation workflows automatically triggered after training completion
     - Model comparison scripts evaluating multiple checkpoints or model variants
-    - Quality assurance pipelines validating model performance against benchmarks
-    - A/B testing frameworks comparing different training configurations
-    - Production deployment workflows validating model quality before release
 
     Calls to:
     - scripts.evaluate.run_evaluation() for the complete evaluation workflow
     - Gemma model loading and inference pipeline for batch prediction generation
-    - Audio preprocessing utilities for consistent input formatting
-    - Metric calculation libraries for WER (Word Error Rate) and CER (Character Error Rate)
-    - Text normalization utilities for fair comparison between predictions and ground truth
-    - Detailed prediction analysis for error categorization and debugging insights
+    - Metric calculation libraries for WER and CER computation
+    - Text normalization utilities for fair prediction-vs-reference comparison
 
     Evaluation workflow:
     1. Load fine-tuned model from checkpoint
@@ -302,25 +290,20 @@ def blacklist(profile_config: Dict, run_dir: str) -> None:
     """
     Generates blacklist of problematic training samples based on evaluation results.
 
-    This operation analyzes model predictions to identify samples that consistently
-    cause high error rates or training instability. These samples can be filtered
+    Dispatches to scripts.blacklist.create_blacklist() which analyzes model predictions
+    to identify samples with consistently high error rates. These samples can be filtered
     out in future training runs to improve model quality.
 
     Called by:
     - main.py:main() when operation="blacklist" is specified
     - Data quality improvement workflows identifying problematic training samples
     - Iterative training pipelines refining datasets between training iterations
-    - Quality assurance workflows maintaining dataset integrity over time
-    - Active learning systems identifying samples requiring manual annotation review
-    - Dataset curation pipelines automatically filtering low-quality audio samples
 
     Calls to:
     - scripts.blacklist.create_blacklist() for the complete blacklist generation workflow
     - Evaluation result parsing utilities for prediction analysis
-    - Statistical analysis libraries for outlier detection and threshold calculation
-    - Text similarity metrics for identifying transcription quality issues
-    - Audio analysis utilities for detecting corrupted or problematic audio files
-    - CSV manipulation utilities for blacklist file generation and formatting
+    - Statistical analysis for outlier detection and threshold calculation
+    - CSV manipulation utilities for blacklist file generation
 
     Blacklist generation workflow:
     1. Load evaluation predictions from previous run
@@ -337,11 +320,9 @@ def blacklist(profile_config: Dict, run_dir: str) -> None:
     Side effects:
         - Creates blacklist CSV in data_patches/{dataset}/delete/
         - Updates run metadata with blacklist statistics
-        - Generates analysis report with problem categories
 
     Blacklist criteria:
-        - High WER samples (>threshold)
-        - Empty or corrupted audio files
+        - High WER samples (above threshold)
         - Mismatched language samples
         - Extreme duration outliers
 

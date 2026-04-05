@@ -405,7 +405,7 @@ def wizard_main():
 
         # Step 6: Resource estimation with realistic expectations
         # Calculates training time and memory requirements based on hardware
-        estimates = estimate_training_time(method, model, dataset, method_config)
+        estimates = estimate_training_time(method, model, dataset)
 
         # Step 7: Beautiful confirmation screen with final approval
         # Comprehensive configuration review before committing to training
