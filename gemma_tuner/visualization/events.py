@@ -50,7 +50,7 @@ def build_training_event(
         memory_gb=memory_gb,
         attention=_extract_attention(outputs),
         token_probs=_extract_token_probs(outputs),
-        mel_spectrogram=_extract_mel_spectrogram(batch),
+        mel_spectrogram=_extract_audio_features(batch),
         steps_per_second=steps_per_second,
         total_time=total_time,
         architecture=architecture,
@@ -80,13 +80,15 @@ def _extract_token_probs(outputs: Optional[Any]) -> Optional[dict[str, list[floa
     }
 
 
-def _extract_mel_spectrogram(batch: Optional[dict[str, Any]]) -> Optional[list[list[float]]]:
+def _extract_audio_features(batch: Optional[dict[str, Any]]) -> Optional[list[list[float]]]:
     if not batch:
         return None
-    input_features = batch.get("input_features")
-    if input_features is None:
+    # Gemma 3n batches use "audio_values"; older Whisper-style batches use "input_features".
+    # Try both keys so this function works for all model families.
+    raw = batch.get("input_features") or batch.get("audio_values")
+    if raw is None:
         return None
-    mel = input_features[0].detach().cpu().numpy()
+    mel = raw[0].detach().cpu().numpy()
     return mel[::10, ::10].tolist()
 
 

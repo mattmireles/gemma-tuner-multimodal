@@ -1,6 +1,7 @@
 import torch
 
-from gemma_tuner.models.gemma.finetune import DataCollatorGemmaAudio, GemmaTrainingConstants
+from gemma_tuner.models.common.collators import DataCollatorGemmaAudio
+from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 
 
 class DummyProcessor:

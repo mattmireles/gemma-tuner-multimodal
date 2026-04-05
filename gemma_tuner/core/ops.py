@@ -169,10 +169,8 @@ def finetune(profile_config: Dict, output_dir: str) -> dict[str, Any]:
     - CI/CD pipelines executing scheduled training runs for model updates
 
     Calls to:
-    - scripts.finetune.main() which implements model type detection and routing:
-      - models.gemma.finetune.main() for standard supervised fine-tuning
-      - models.gemma.finetune.main() for knowledge distillation training
-      - models.gemma.finetune.main() for Parameter-Efficient Fine-Tuning (LoRA)
+    - scripts.finetune.main() → models.gemma.finetune.main() for all fine-tuning variants
+      (standard SFT, LoRA/PEFT, and distillation are detected from profile_config fields)
     - Model type detection based on configuration parameters (lora_*, teacher_model, etc.)
     - Dynamic import system for loading model-specific training implementations
     - Resource management utilities for GPU/MPS memory allocation and optimization

@@ -45,10 +45,6 @@ from gemma_tuner.scripts.inference_common import (
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 from gemma_tuner.utils.device import get_device
 
-# Device Detection and Optimization Setup
-# Early device detection enables optimal model loading and batch size configuration
-device = get_device()
-
 logger = logging.getLogger(__name__)
 
 
@@ -175,6 +171,9 @@ def create_blacklist(profile_config, output_dir):
         return_timestamps=False,
     )
 
+    # 1. Resolve device — called here (not at module level) so tests can mock get_device()
+    device = get_device()
+
     set_seed(42)
 
     # 2. Dataset Loading with Patch Integration
@@ -212,8 +211,6 @@ def create_blacklist(profile_config, output_dir):
         filter_none=False,
     )
 
-    normalizer = EnglishTextNormalizer(tokenizer.english_spelling_normalizer)
-
     # 5. Generation arguments, collator, and DataLoader via shared helpers
     gen_kwargs = build_gen_kwargs(profile_config, return_timestamps=data_args.return_timestamps)
     data_collator = EvalDataCollator(processor=processor, language_mode=language_mode)
@@ -243,7 +240,10 @@ def create_blacklist(profile_config, output_dir):
                 do_not_blacklist_df = pd.read_csv(do_not_blacklist_file)
                 if "id" not in do_not_blacklist_df.columns:
                     raise ValueError(f"Do-not-blacklist file {do_not_blacklist_file} must contain an 'id' column.")
-                do_not_blacklist_ids.update({int(id_) for id_ in do_not_blacklist_df["id"] if not pd.isna(id_)})
+                # Store as strings, stripping the ".0" suffix that pandas adds to
+                # integer-valued float columns (e.g. "123.0" → "123"), so they
+                # match the str(item["id"]) keys used in id_to_wer.
+                do_not_blacklist_ids.update({str(id_).split(".")[0] for id_ in do_not_blacklist_df["id"] if not pd.isna(id_)})
             except Exception as e:
                 raise ValueError(f"Error loading do-not-blacklist IDs from {do_not_blacklist_file}: {e}")
 
@@ -264,7 +264,8 @@ def create_blacklist(profile_config, output_dir):
                     override_df = pd.read_csv(override_file)
                     if "id" not in override_df.columns:
                         raise ValueError(f"Override file {override_file} must contain an 'id' column.")
-                    overridden_ids.update({int(id_) for id_ in override_df["id"] if not pd.isna(id_)})
+                    # Store as strings (same ".0" stripping as do_not_blacklist_ids above).
+                    overridden_ids.update({str(id_).split(".")[0] for id_ in override_df["id"] if not pd.isna(id_)})
                 except Exception as e:
                     raise ValueError(f"Error loading overridden IDs from {override_file}: {e}")
 
@@ -323,8 +324,11 @@ def create_blacklist(profile_config, output_dir):
         id_offset += batch_size
 
     # Quality Metrics Calculation and Analysis via shared helper
+    # normalizer=None lets decode_and_score use its built-in EnglishTextNormalizer()
+    # default — avoids calling tokenizer.english_spelling_normalizer which does not
+    # exist on Gemma tokenizers.
     wer_val, cer_val, pred_str, label_str, norm_pred_str, norm_label_str = decode_and_score(
-        all_preds, references, normalizer
+        all_preds, references, normalizer=None
     )
 
     # Sample Quality Mapping Generation
@@ -375,10 +379,10 @@ def create_blacklist(profile_config, output_dir):
     new_outliers = []
     updated_entries = 0
 
-    # Pre-convert override ID sets to strings once to avoid O(n^2) list
-    # reconstruction inside the per-sample loop below.
-    overridden_ids_str = {str(oid) for oid in overridden_ids}
-    do_not_blacklist_ids_str = {str(did) for did in do_not_blacklist_ids}
+    # Both sets are already strings (populated with str(id_).split(".")[0] above).
+    # Assign to *_str aliases for readability without any re-conversion.
+    overridden_ids_str = overridden_ids
+    do_not_blacklist_ids_str = do_not_blacklist_ids
 
     for i, id_val in enumerate(ids):
         # Handle potential type mismatches and empty IDs

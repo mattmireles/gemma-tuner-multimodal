@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 import questionary
@@ -87,6 +88,12 @@ def setup_granary_dataset() -> Dict[str, Any]:
         language_code = questionary.text("Enter language code (e.g., 'it', 'pt', 'nl'):", style=apple_style).ask()
     else:
         language_code = language_choice
+
+    # Validate language_code regardless of which branch produced it.
+    # Config section names containing '][' or '=' corrupt configparser files.
+    if not re.fullmatch(r"[a-z]{2,8}", language_code or ""):
+        console.print("[red]Language code must be 2-8 lowercase letters (e.g. 'en', 'fr', 'de').[/red]")
+        language_code = "en"  # Safe fallback
 
     # Step 3: Download guidance with specific links
     console.print("\n[bold]Step 2: Download Required Audio Corpora[/bold]")

@@ -43,10 +43,6 @@ from gemma_tuner.scripts.inference_common import (
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 from gemma_tuner.utils.device import get_device
 
-# Device Detection and Optimization Setup
-# Early device detection enables optimal model loading and batch size configuration
-device = get_device()
-
 # Evaluation Constants for Consistent Processing
 DEFAULT_MAX_DURATION = 30.0  # Maximum audio duration for processing
 DEFAULT_BATCH_SIZE = 16  # Default batch size for evaluation
@@ -160,7 +156,10 @@ def run_evaluation(profile_config, output_dir):
         if metrics:
             logger.info(f"WER: {metrics['wer']:.3f}")
     """
-    # 1. Parse input arguments
+    # 1. Resolve device — called here (not at module level) so tests can mock get_device()
+    device = get_device()
+
+    # 2. Parse input arguments
     # Cap preprocessing workers on MPS by default (config override respected via profile)
     configured_workers = profile_config.get("preprocessing_num_workers", None)
     if configured_workers is not None:
@@ -200,8 +199,6 @@ def run_evaluation(profile_config, output_dir):
     if not hasattr(torch, dtype_str):
         raise ValueError(f"Invalid dtype in profile config: {dtype_str!r}. Expected e.g. 'float32', 'bfloat16'.")
     dtype = getattr(torch, dtype_str)
-
-    normalizer = EnglishTextNormalizer(tokenizer.english_spelling_normalizer)
 
     # 4. Language mode parsing and dataset vectorization via shared helpers
     language_mode = profile_config["language_mode"]
@@ -396,8 +393,11 @@ def run_evaluation(profile_config, output_dir):
                 )
 
         # Compute metrics via shared helper
+        # normalizer=None lets decode_and_score use its built-in EnglishTextNormalizer()
+        # default — avoids calling tokenizer.english_spelling_normalizer which does not
+        # exist on Gemma tokenizers.
         wer, cer, pred_str, label_str, norm_pred_str, norm_label_str = decode_and_score(
-            all_preds, references, normalizer
+            all_preds, references, normalizer=None
         )
 
         # Prepare the metrics dictionary to be returned

@@ -47,7 +47,7 @@ class TestAudioSourceExtraction:
         cfg = make_cfg(
             {
                 "DEFAULT": {},
-                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "model:gemma-4-e2b-it": {"base_model": "google/gemma-4-E2B-it", "group": "gemma"},
                 "dataset:granary-en": {
                     "hf_name": "nvidia/Granary",
                     "hf_subset": "en",
@@ -61,11 +61,11 @@ class TestAudioSourceExtraction:
                     "audio_source_ytc": "/path/to/ytc",
                     "audio_source_librilight": "/path/to/librilight",
                 },
-                "group:whisper": {},
+                "group:gemma": {},
             }
         )
 
-        config = load_model_dataset_config(cfg, "whisper-base", "granary-en")
+        config = load_model_dataset_config(cfg, "gemma-4-e2b-it", "granary-en")
 
         # Verify audio sources are extracted
         assert "audio_sources" in config
@@ -78,7 +78,7 @@ class TestAudioSourceExtraction:
         cfg = make_cfg(
             {
                 "DEFAULT": {},
-                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "model:gemma-4-e2b-it": {"base_model": "google/gemma-4-E2B-it", "group": "gemma"},
                 "dataset:regular-dataset": {
                     "source": "regular-dataset",
                     "text_column": "text",
@@ -87,11 +87,11 @@ class TestAudioSourceExtraction:
                     "max_label_length": "256",
                     "max_duration": "30.0",
                 },
-                "group:whisper": {},
+                "group:gemma": {},
             }
         )
 
-        config = load_model_dataset_config(cfg, "whisper-base", "regular-dataset")
+        config = load_model_dataset_config(cfg, "gemma-4-e2b-it", "regular-dataset")
 
         # Verify no audio_sources key is added when none exist
         assert "audio_sources" not in config
@@ -101,7 +101,7 @@ class TestAudioSourceExtraction:
         cfg = make_cfg(
             {
                 "DEFAULT": {},
-                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "model:gemma-4-e2b-it": {"base_model": "google/gemma-4-E2B-it", "group": "gemma"},
                 "dataset:granary-partial": {
                     "hf_name": "nvidia/Granary",
                     "text_column": "text",
@@ -112,11 +112,11 @@ class TestAudioSourceExtraction:
                     "audio_source_voxpopuli": "/path/to/voxpopuli",
                     "regular_config": "value",  # Non audio-source key
                 },
-                "group:whisper": {},
+                "group:gemma": {},
             }
         )
 
-        config = load_model_dataset_config(cfg, "whisper-base", "granary-partial")
+        config = load_model_dataset_config(cfg, "gemma-4-e2b-it", "granary-partial")
 
         # Verify only configured audio sources are extracted
         assert "audio_sources" in config
@@ -129,7 +129,7 @@ class TestAudioSourceExtraction:
         cfg = make_cfg(
             {
                 "DEFAULT": {},
-                "model:whisper-base": {"base_model": "openai/whisper-base", "group": "whisper"},
+                "model:gemma-4-e2b-it": {"base_model": "google/gemma-4-E2B-it", "group": "gemma"},
                 "dataset:granary-en": {
                     "hf_name": "nvidia/Granary",
                     "text_column": "text",
@@ -140,7 +140,7 @@ class TestAudioSourceExtraction:
                     "audio_source_voxpopuli": "/path/to/voxpopuli",
                 },
                 "profile:test-granary": {
-                    "model": "whisper-base",
+                    "model": "gemma-4-e2b-it",
                     "dataset": "granary-en",
                     "per_device_train_batch_size": "16",
                     "num_train_epochs": "3",
@@ -149,7 +149,7 @@ class TestAudioSourceExtraction:
                     "save_total_limit": "2",
                     "gradient_accumulation_steps": "1",
                 },
-                "group:whisper": {},
+                "group:gemma": {},
             }
         )
 
@@ -448,10 +448,10 @@ def test_end_to_end_config_integration():
     # Create a minimal config that includes audio sources
     cfg_dict = {
         "DEFAULT": {"num_train_epochs": "3"},
-        "group:whisper": {"dtype": "float32"},
-        "model:whisper-base": {
-            "base_model": "openai/whisper-base",
-            "group": "whisper",
+        "group:gemma": {"dtype": "float32"},
+        "model:gemma-4-e2b-it": {
+            "base_model": "google/gemma-4-E2B-it",
+            "group": "gemma",
             "per_device_train_batch_size": "16",
         },
         "dataset:granary-test": {
@@ -472,10 +472,10 @@ def test_end_to_end_config_integration():
     cfg = make_cfg(cfg_dict)
 
     # Test model+dataset loading
-    config = load_model_dataset_config(cfg, "whisper-base", "granary-test")
+    config = load_model_dataset_config(cfg, "gemma-4-e2b-it", "granary-test")
 
     # Verify all configuration is properly merged
-    assert config["base_model"] == "openai/whisper-base"
+    assert config["base_model"] == "google/gemma-4-E2B-it"
     assert config["hf_name"] == "nvidia/Granary"
     assert config["hf_subset"] == "en"
     assert config["dtype"] == "float32"  # From group

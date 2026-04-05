@@ -13,7 +13,7 @@ Key categories:
 - Timing parameters: Delays, timeouts, retry intervals
 
 Usage pattern:
-    from gemma_tuner.constants import MemoryLimits, DeviceOptimization
+    from gemma_tuner.constants import MemoryLimits, TrainingDefaults
 
     # Instead of: set_memory_fraction(0.8)
     set_memory_fraction(MemoryLimits.MPS_DEFAULT_FRACTION)

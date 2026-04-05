@@ -24,6 +24,7 @@ Integrates with:
 - config.ini: Central configuration file for models, datasets, and profiles
 """
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import questionary
@@ -33,6 +34,8 @@ from gemma_tuner.wizard import granary as _granary
 from gemma_tuner.wizard.base import apple_style, console
 
 setup_granary_dataset = _granary.setup_granary_dataset
+
+logger = logging.getLogger(__name__)
 
 
 def _infer_candidate_columns(schema_fields: List[Dict[str, Any]]) -> Tuple[List[str], List[str], List[str]]:
@@ -132,7 +135,8 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
         table_id = _pick_table()
         ok2, msg2 = bq.verify_table(project_id, dataset_id, table_id)
         if not ok2:
-            console.print(f"[red]Preflight failed again for '{table_id}':[/red] {msg2}")
+            logger.debug("BigQuery preflight error (table=%s): %s", table_id, msg2)
+            console.print("[red]BigQuery table check failed. Run with --verbose for details.[/red]")
             raise RuntimeError("BigQuery table check failed. Please choose a concrete table or fix the view wildcard.")
 
     _config_store._update_bq_defaults(project_id, dataset_id)
@@ -279,9 +283,7 @@ def generate_profile_config(
         # Surface a clear warning so the user knows training will fail if preparation
         # has not been completed first.
         if not dataset.get("prepared", False):
-            import logging as _logging
-
-            _logging.getLogger(__name__).warning(
+            logger.warning(
                 "Granary dataset '%s' is configured but not yet prepared. "
                 "Run `gemma-macos-tuner prepare-granary %s` before starting training, "
                 "or the training pipeline will fail to find data files.",
@@ -291,8 +293,6 @@ def generate_profile_config(
     elif dataset["type"] in ["local_csv", "local_audio"]:
         profile_config["train_dataset_path"] = dataset["path"]
         # Check for a sibling eval CSV (e.g. data_eval.csv or data_validation.csv)
-        import logging as _logging
-
         _ds_path = dataset["path"]
         _eval_path = None
         try:
@@ -310,7 +310,7 @@ def generate_profile_config(
             profile_config["eval_dataset_path"] = _eval_path
         else:
             profile_config["eval_dataset_path"] = _ds_path
-            _logging.getLogger(__name__).warning(
+            logger.warning(
                 "eval_dataset_path set to the same path as train_dataset_path (%s); "
                 "evaluation metrics will reflect training data distribution.",
                 _ds_path,

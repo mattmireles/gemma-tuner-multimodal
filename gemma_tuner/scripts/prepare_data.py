@@ -569,16 +569,26 @@ def prepare_data(dataset_name, config_path, no_download=False):
     necessary_columns = ["id", "audio_path", "text_verbatim", "text_perfect", "language", "duration"]
     df_duration_filtered = df_duration_filtered[necessary_columns]
 
-    df_duration_filtered.to_csv(prepared_csv_path, index=False)
-
-    # 3. Dataset Splitting with Stratification
-    # Create balanced train/validation splits for reliable model evaluation
+    # Guard before writing: raise early so no empty header-only CSV is left on disk.
     if len(df_duration_filtered) == 0:
         raise ValueError(
             "No samples remain after filtering. Check language, duration, "
             "and download settings."
         )
+
+    df_duration_filtered.to_csv(prepared_csv_path, index=False)
+
+    # 3. Dataset Splitting with Stratification
+    # Create balanced train/validation splits for reliable model evaluation
     train_df, val_df = train_test_split(df_duration_filtered, test_size=0.1, random_state=42)
+
+    # Guard: a dataset with fewer than 10 rows produces an empty validation set.
+    # This doesn't block training but evaluation metrics will be meaningless.
+    if len(val_df) == 0:
+        logger.warning(
+            "Validation set is empty after split (dataset has fewer than 10 rows). "
+            "Evaluation metrics will be unreliable."
+        )
 
     # Split Generation with Progress Reporting
     logger.info("\nGenerating stratified train/validation splits...")

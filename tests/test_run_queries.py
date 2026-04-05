@@ -21,7 +21,7 @@ def test_list_runs_discovers_nested_and_model_dataset_runs(tmp_path):
             "run_type": "finetuning",
             "status": "completed",
             "profile": "profile-a",
-            "model": "whisper-tiny",
+            "model": "gemma-3n-e2b-it",
             "dataset": "dataset-a",
             "start_time": "2026-04-01 10:00:00",
         },
@@ -33,7 +33,7 @@ def test_list_runs_discovers_nested_and_model_dataset_runs(tmp_path):
             "run_type": "evaluation",
             "status": "completed",
             "profile": "profile-a",
-            "model": "whisper-tiny",
+            "model": "gemma-3n-e2b-it",
             "dataset": "dataset-a",
             "finetuning_run_id": "1",
             "start_time": "2026-04-01 11:00:00",
@@ -41,7 +41,7 @@ def test_list_runs_discovers_nested_and_model_dataset_runs(tmp_path):
         },
     )
     _write_metadata(
-        output_dir / "whisper-base+dataset-b" / "eval",
+        output_dir / "gemma-4-e2b-it+dataset-b" / "eval",
         {
             "run_id": "3",
             "run_type": "evaluation",
@@ -55,7 +55,7 @@ def test_list_runs_discovers_nested_and_model_dataset_runs(tmp_path):
     rows = list_runs(str(output_dir), RunQuery.from_filters(type="evaluation"))
     assert {row.run_id for row in rows} == {"2", "3"}
     model_dataset_row = next(row for row in rows if row.run_id == "3")
-    assert model_dataset_row.model == "whisper-base"
+    assert model_dataset_row.model == "gemma-4-e2b-it"
     assert model_dataset_row.dataset == "dataset-b"
 
 
@@ -69,7 +69,7 @@ def test_run_overview_and_details_use_typed_queries(tmp_path):
             "run_type": "finetuning",
             "status": "completed",
             "profile": "profile-a",
-            "model": "whisper-tiny",
+            "model": "gemma-3n-e2b-it",
             "dataset": "toy",
             "start_time": "2026-04-01 10:00:00",
         },
@@ -81,7 +81,7 @@ def test_run_overview_and_details_use_typed_queries(tmp_path):
             "run_type": "evaluation",
             "status": "completed",
             "profile": "profile-a",
-            "model": "whisper-tiny",
+            "model": "gemma-3n-e2b-it",
             "dataset": "toy",
             "finetuning_run_id": "1",
             "start_time": "2026-04-01 11:00:00",
@@ -95,7 +95,7 @@ def test_run_overview_and_details_use_typed_queries(tmp_path):
             "run_type": "evaluation",
             "status": "completed",
             "profile": "profile-b",
-            "model": "whisper-base",
+            "model": "gemma-4-e2b-it",
             "dataset": "toy",
             "finetuning_run_id": "2",
             "start_time": "2026-04-02 11:00:00",

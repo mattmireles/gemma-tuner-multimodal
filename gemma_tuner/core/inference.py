@@ -291,6 +291,8 @@ def decode_and_score(
     - Metric libraries cached after first load
     - Filtering step prevents unnecessary computation
     """
+    if predictions is None:
+        predictions = []
     pred_str = [str(p) for p in predictions]
     label_str = [str(l) for l in references]
 

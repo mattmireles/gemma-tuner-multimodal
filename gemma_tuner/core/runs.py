@@ -58,6 +58,7 @@ when multiple training processes start simultaneously.
 
 import csv
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -67,6 +68,8 @@ from filelock import FileLock
 
 from gemma_tuner.constants import Timing
 from gemma_tuner.utils.device import to_bool
+
+logger = logging.getLogger(__name__)
 
 
 # Run management constants
@@ -529,6 +532,14 @@ def update_run_metadata(run_dir: str, **kwargs) -> None:
     except FileNotFoundError:
         # Metadata missing, create minimal structure
         meta = {"run_dir": run_dir}
+    except (json.JSONDecodeError, ValueError):
+        # Metadata file exists but is corrupt (e.g. partial write from power loss).
+        # Log a warning and start fresh rather than propagating a crash to callers
+        # like mark_run_as_completed() that must not be interrupted.
+        logger.warning(
+            "Corrupt metadata file at %s — resetting to defaults. Original content lost.", meta_path
+        )
+        meta = {"run_dir": run_dir}
 
     # Merge updates with existing metadata
     meta.update(kwargs)
@@ -596,6 +607,11 @@ def write_metrics(run_dir: str, metrics: Dict[str, Any]) -> None:
             existing = json.load(f)
     except FileNotFoundError:
         existing = {}
+    except (json.JSONDecodeError, ValueError):
+        # Corrupt metrics.json (e.g. partial write from a previous crash).
+        # Reset to empty rather than propagating to finalize_training_run.
+        logger.warning("Corrupt metrics file at %s — resetting to defaults.", metrics_path)
+        existing = {}
 
     # Merge new metrics with existing
     existing.update(metrics)
@@ -624,11 +640,13 @@ def summarize_run_for_csv(run_dir: str) -> Dict[str, Any]:
         with open(meta_path, "r") as f:
             meta = json.load(f)
     except Exception:
+        logger.warning("Could not read metadata from %s — using defaults for CSV summary", run_dir, exc_info=True)
         meta = {"run_dir": run_dir}
     try:
         with open(metrics_path, "r") as f:
             metrics = json.load(f)
     except Exception:
+        logger.warning("Could not read metrics from %s — using empty defaults for CSV summary", run_dir, exc_info=True)
         metrics = {}
 
     cfg = meta.get("config", {}) if isinstance(meta.get("config"), dict) else {}
@@ -698,7 +716,7 @@ def update_experiments_csv(output_dir: str, run_dir: str) -> str:
     # Atomic write
     tmp_path = csv_path + ".tmp"
     with open(tmp_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
         for r in rows:
             writer.writerow(r)

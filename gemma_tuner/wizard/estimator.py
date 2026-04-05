@@ -80,7 +80,7 @@ def configure_method_specifics(
                 alpha = default_alpha
 
         config["lora_alpha"] = alpha
-        config["lora_dropout"] = 0.1  # Intentionally higher than GemmaTrainingConstants.LORA_DROPOUT (0.05) for wizard's conservative defaults
+        config["lora_dropout"] = WizardConstants.DEFAULT_LORA_DROPOUT  # Intentionally higher than GemmaTrainingConstants.LORA_DROPOUT (0.05) for wizard's conservative defaults
         config["use_peft"] = True
 
     return config

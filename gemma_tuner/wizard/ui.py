@@ -49,12 +49,12 @@ def show_welcome_screen():
     through capability verification. It serves as both introduction and technical validation.
 
     Called by:
-    - wizard_main() as the opening experience (line 1801)
+    - wizard_main() as the opening experience
     - Interactive training workflows requiring system status validation
     - Development and demonstration environments for visual appeal
 
     Calls to:
-    - get_wizard_device_info() for comprehensive system capability detection (line 311)
+    - get_wizard_device_info() for comprehensive system capability detection
     - rich.console for Apple-inspired visual formatting and layout
     - rich.panel for elegant bordered content presentation
 

@@ -154,10 +154,10 @@ def get_wizard_device_info() -> Dict[str, Any]:
     (Apple Silicon MPS, NVIDIA CUDA, CPU) with platform-specific optimizations.
 
     Called by:
-    - show_welcome_screen() for system status display (line 185)
-    - select_model() for memory constraint filtering (line 322)
-    - estimate_training_time() for performance multiplier application (line 885)
-    - show_confirmation_screen() for final hardware verification (line 926)
+    - show_welcome_screen() for system status display
+    - select_model() for memory constraint filtering
+    - estimate_training_time() for performance multiplier application
+    - show_confirmation_screen() for final hardware verification
 
     Calls to:
     - utils/device.py:get_device() for PyTorch device detection and MPS availability
@@ -290,7 +290,7 @@ def detect_datasets() -> List[Dict[str, Any]]:
                 )
 
             # Look for audio files recursively inside this dataset folder
-            audio_extensions = ["*.wav", "*.mp3", "*.flac", "*.m4a"]
+            audio_extensions = WizardConstants.AUDIO_EXTENSIONS
             audio_files: List[Path] = []
             for ext in audio_extensions:
                 audio_files.extend(subdir.glob(f"**/{ext}"))

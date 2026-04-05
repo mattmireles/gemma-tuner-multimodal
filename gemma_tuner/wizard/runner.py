@@ -53,12 +53,12 @@ def execute_training(profile_config: Dict[str, Any]):
     graceful error handling and cleanup.
 
     Called by:
-    - wizard_main() after user confirms training configuration (line 1159)
+    - wizard_main() after user confirms training configuration
     - Interactive training workflows initiated through the wizard interface
     - Automated training pipelines using wizard-generated configurations
 
     Calls to:
-    - main.py:main() via subprocess for isolated training execution (line 1127)
+    - main.py:main() via subprocess for isolated training execution
     - core/config.py configuration loading through main.py integration
     - All training infrastructure through main.py's operation dispatch system
     - Temporary file management for wizard-generated configurations
@@ -134,7 +134,7 @@ def execute_training(profile_config: Dict[str, Any]):
     # the caller's CWD, which breaks when the wizard is invoked from any other directory.
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     config_dir = _PROJECT_ROOT / "temp_configs"
-    config_dir.mkdir(exist_ok=True)
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     temp_config_path = config_dir / f"wizard_config_{timestamp}.ini"
@@ -263,110 +263,110 @@ def execute_training(profile_config: Dict[str, Any]):
 
 def wizard_main():
     """
-        Main wizard orchestration function implementing Steve Jobs-inspired progressive disclosure.
+    Main wizard orchestration function implementing Steve Jobs-inspired progressive disclosure.
 
-        This function implements the complete wizard workflow using progressive disclosure principles:
-        show only what's relevant at each step, ask one question at a time, and provide intelligent
-        defaults for everything. The design creates a smooth, Apple-like experience that guides
-        users from zero configuration to production-ready training.
+    This function implements the complete wizard workflow using progressive disclosure principles:
+    show only what's relevant at each step, ask one question at a time, and provide intelligent
+    defaults for everything. The design creates a smooth, Apple-like experience that guides
+    users from zero configuration to production-ready training.
 
-        Called by:
-        - Direct script execution: python wizard.py (project-root shim)
-        - wizard/__init__.py re-export for ``from gemma_tuner.wizard import wizard_main``
-        - Package entry points and command-line tools
-        - Interactive training workflows and development environments
-        - Automated training setup and configuration generation
+    Called by:
+    - Direct script execution: python wizard.py (project-root shim)
+    - wizard/__init__.py re-export for ``from gemma_tuner.wizard import wizard_main``
+    - Package entry points and command-line tools
+    - Interactive training workflows and development environments
+    - Automated training setup and configuration generation
 
-        Calls to (complete wizard workflow):
-        - show_welcome_screen() for elegant introduction and system status
-        - select_training_method() for method selection with smart recommendations
-        - select_model() for model selection with memory/performance constraints
-        - select_dataset() for dataset selection with BigQuery integration
-        - configure_training_parameters() for mandatory hyperparameters
-        - configure_method_specifics() for advanced configuration with progressive disclosure
-        - estimate_training_time() for realistic resource planning and expectations
-        - show_confirmation_screen() for final configuration review and approval
-        - generate_profile_config() for production configuration generation
+    Calls to (complete wizard workflow):
+    - show_welcome_screen() for elegant introduction and system status
+    - select_training_method() for method selection with smart recommendations
+    - select_model() for model selection with memory/performance constraints
+    - select_dataset() for dataset selection with BigQuery integration
+    - configure_training_parameters() for mandatory hyperparameters
+    - configure_method_specifics() for advanced configuration with progressive disclosure
+    - estimate_training_time() for realistic resource planning and expectations
+    - show_confirmation_screen() for final configuration review and approval
+    - generate_profile_config() for production configuration generation
     - execute_training() for single-machine training execution
 
-        Progressive disclosure workflow:
+    Progressive disclosure workflow:
 
-        Step 0 (Welcome Screen):
-        - System capability detection and hardware profiling
-        - Visual welcome with Apple-inspired design language
-        - Confidence building through status verification
-        - Sets expectations for the complete workflow
+    Step 0 (Welcome Screen):
+    - System capability detection and hardware profiling
+    - Visual welcome with Apple-inspired design language
+    - Confidence building through status verification
+    - Sets expectations for the complete workflow
 
-        Step 1 (Training Method Selection):
-        - Three clear options: Standard, LoRA, Knowledge Distillation
-        - Quality vs efficiency trade-offs explained simply
-        - Smart defaults highlighted with recommendation badges
-        - Technical complexity hidden until needed
+    Step 1 (Training Method Selection):
+    - Three clear options: Standard, LoRA, Knowledge Distillation
+    - Quality vs efficiency trade-offs explained simply
+    - Smart defaults highlighted with recommendation badges
+    - Technical complexity hidden until needed
 
-        Step 2 (Model Selection):
-        - Dynamic model filtering based on hardware constraints
-        - Memory and time estimates for realistic expectations
-        - Performance recommendations based on use case
-        - Automatic incompatibility filtering for user safety
+    Step 2 (Model Selection):
+    - Dynamic model filtering based on hardware constraints
+    - Memory and time estimates for realistic expectations
+    - Performance recommendations based on use case
+    - Automatic incompatibility filtering for user safety
 
-        Step 3 (Dataset Selection):
-        - Automatic local dataset discovery with file counting
-        - BigQuery integration for enterprise workflows
-        - Popular HuggingFace datasets with descriptions
-        - Custom dataset path support for advanced users
+    Step 3 (Dataset Selection):
+    - Automatic local dataset discovery with file counting
+    - BigQuery integration for enterprise workflows
+    - Popular HuggingFace datasets with descriptions
+    - Custom dataset path support for advanced users
 
-        Step 4 (Training Parameters):
-        - Learning rate, epochs, warmup steps
-        - Clear explanations for each hyperparameter
-        - Safe defaults for beginners
+    Step 4 (Training Parameters):
+    - Learning rate, epochs, warmup steps
+    - Clear explanations for each hyperparameter
+    - Safe defaults for beginners
 
-        Step 5 (Method-Specific Configuration):
-        - Revealed only for selected training method
-        - LoRA: Rank and alpha with smart defaults
-        - Distillation: Teacher model and temperature selection
-        - Custom hybrid: Encoder/decoder architecture building
+    Step 5 (Method-Specific Configuration):
+    - Revealed only for selected training method
+    - LoRA: Rank and alpha with smart defaults
+    - Distillation: Teacher model and temperature selection
+    - Custom hybrid: Encoder/decoder architecture building
 
-        Step 6 (Resource Estimation):
-        - Realistic time and memory requirements
-        - Hardware-specific performance calculations
-        - Training completion estimates with ETA
-        - Safety checks for resource constraints
+    Step 6 (Resource Estimation):
+    - Realistic time and memory requirements
+    - Hardware-specific performance calculations
+    - Training completion estimates with ETA
+    - Safety checks for resource constraints
 
-        Step 7 (Confirmation & Execution):
-        - Beautiful configuration summary table
-        - Final approval with ability to cancel safely
-        - Training execution with progress feedback
-        - Success/failure handling with actionable guidance
+    Step 7 (Confirmation & Execution):
+    - Beautiful configuration summary table
+    - Final approval with ability to cancel safely
+    - Training execution with progress feedback
+    - Success/failure handling with actionable guidance
 
-        Error handling philosophy:
-        - Graceful degradation: Never crash, always provide alternatives
-        - User empowerment: Clear error messages with troubleshooting guidance
-        - State preservation: Configuration saved even on failures
-        - Recovery options: Instructions for manual continuation
+    Error handling philosophy:
+    - Graceful degradation: Never crash, always provide alternatives
+    - User empowerment: Clear error messages with troubleshooting guidance
+    - State preservation: Configuration saved even on failures
+    - Recovery options: Instructions for manual continuation
 
-        Exception handling:
-        - KeyboardInterrupt: Clean cancellation without system changes
-        - Configuration errors: Diagnostic information with recovery steps
-        - Training failures: Checkpoint preservation and troubleshooting guidance
-        - System errors: Comprehensive error reporting for issue resolution
+    Exception handling:
+    - KeyboardInterrupt: Clean cancellation without system changes
+    - Configuration errors: Diagnostic information with recovery steps
+    - Training failures: Checkpoint preservation and troubleshooting guidance
+    - System errors: Comprehensive error reporting for issue resolution
 
-        Side effects:
-        - May create temporary configuration files (cleaned up automatically)
-        - Updates config.ini with new dataset definitions (BigQuery imports)
-        - Creates training output directories and model checkpoints
-        - Generates comprehensive training logs and metrics
+    Side effects:
+    - May create temporary configuration files (cleaned up automatically)
+    - Updates config.ini with new dataset definitions (BigQuery imports)
+    - Creates training output directories and model checkpoints
+    - Generates comprehensive training logs and metrics
 
-        Example workflow:
-            $ python wizard.py
+    Example workflow:
+        $ python wizard.py
 
-            Welcome Screen: "Ready for training ✅"
-            Method Selection: "🚀 Standard Fine-Tune (SFT) ⭐ Recommended"
-            Model Selection: "gemma-3n (244M) - ~2.5 hours, 4.2GB memory ⭐ Recommended"
-            Dataset Selection: "📁 my_dataset - Local dataset with 3 CSV files"
-            Configuration: [Smart defaults applied automatically]
-            Confirmation: "Start training with this configuration? Yes"
-            Training: [Progress monitoring with checkpoints]
-            Completion: "✅ Training completed successfully! Model saved in output/"
+        Welcome Screen: "Ready for training ✅"
+        Method Selection: "🚀 Standard Fine-Tune (SFT) ⭐ Recommended"
+        Model Selection: "gemma-3n (244M) - ~2.5 hours, 4.2GB memory ⭐ Recommended"
+        Dataset Selection: "📁 my_dataset - Local dataset with 3 CSV files"
+        Configuration: [Smart defaults applied automatically]
+        Confirmation: "Start training with this configuration? Yes"
+        Training: [Progress monitoring with checkpoints]
+        Completion: "✅ Training completed successfully! Model saved in output/"
     """
     try:
         # Step 0: Elegant introduction with system profiling
@@ -421,7 +421,7 @@ def wizard_main():
             # Graceful cancellation with guidance for future use
             console.print("\n[yellow]Training cancelled by user.[/yellow]")
             console.print("[dim]Run the wizard again anytime with: python wizard.py[/dim]")
-            console.print("[dim]Or use the management interface: python manage.py finetune-wizard[/dim]")
+            console.print("[dim]Or start the wizard again: python wizard.py[/dim]")
 
     except KeyboardInterrupt:
         # Clean interruption handling with system state preservation

@@ -202,6 +202,9 @@ def get_table_schema(project_id: str, dataset_id: str, table_id: str) -> List[Ta
 
     Returns empty list if the table is not accessible.
     """
+    _assert_safe_identifier(project_id, "project_id")
+    _assert_safe_identifier(dataset_id, "dataset_id")
+    _assert_safe_identifier(table_id, "table_id")
     try:
         import google.auth  # type: ignore
         from google.cloud import bigquery  # type: ignore
@@ -231,7 +234,9 @@ def verify_table(
     """
     # Validate identifiers to prevent SQL injection via backtick breakout
     for name, label in ((project_id, "project_id"), (dataset_id, "dataset_id"), (table_id, "table_id")):
-        _assert_safe_column_name(name)  # reuse existing alphanumeric+underscore check
+        # Use _assert_safe_identifier (not _assert_safe_column_name) — GCP project IDs
+        # routinely contain hyphens (e.g. my-project-123) which column names cannot.
+        _assert_safe_identifier(name, label)
     try:
         import google.auth  # type: ignore
         from google.cloud import bigquery  # type: ignore
@@ -292,6 +297,10 @@ def get_distinct_languages(
     no sanitization. Use the `language_column` and `location` params to constrain the
     query; all filtering beyond that should happen after the values are returned.
     """
+    _assert_safe_identifier(project_id, "project_id")
+    _assert_safe_identifier(dataset_id, "dataset_id")
+    _assert_safe_identifier(table_id, "table_id")
+    # language_column is already validated by _assert_safe_column_name below
     try:
         import google.auth  # type: ignore
         from google.cloud import bigquery  # type: ignore
@@ -327,10 +336,14 @@ def _sanitize_dataset_name_component(value: str) -> str:
 def generate_dataset_name(base_dataset: str, base_table: str) -> str:
     """Generate a reproducible, readable dataset name for local CSV materialization.
 
-    Format: bq_{dataset}_{YYYYMMDD}
+    Format: bq_{dataset}_{table}_{YYYYMMDD}
+
+    Both base_dataset and base_table are included so that two different tables
+    from the same dataset exported on the same day get distinct directory names
+    rather than silently overwriting each other.
     """
     today = datetime.utcnow().strftime(Defaults.DATE_FORMAT)
-    return f"bq_{_sanitize_dataset_name_component(base_dataset)}_{today}"
+    return f"bq_{_sanitize_dataset_name_component(base_dataset)}_{_sanitize_dataset_name_component(base_table)}_{today}"
 
 
 def build_query_and_export(
@@ -372,6 +385,11 @@ def build_query_and_export(
         raise ValueError("at least one (dataset, table) must be provided")
     if not transcript_target:
         raise ValueError("transcript_target column name is required")
+
+    _assert_safe_identifier(project_id, "project_id")
+    for _tbl_dataset_id, _tbl_table_id in tables:
+        _assert_safe_identifier(_tbl_dataset_id, "dataset_id")
+        _assert_safe_identifier(_tbl_table_id, "table_id")
 
     # Verify userland dataframe dependencies before invoking BigQuery APIs
     _verify_dataframe_dependencies()

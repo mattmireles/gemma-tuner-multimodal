@@ -1,5 +1,5 @@
 """
-Configuration Testing Suite for Whisper Fine-Tuning System
+Configuration Testing Suite for Gemma Fine-Tuning System
 
 This module provides comprehensive test coverage for the configuration management
 system, ensuring robust profile validation, type coercion, and error handling
@@ -69,7 +69,7 @@ def make_cfg(sections: dict) -> configparser.ConfigParser:
     Args:
         sections: Nested dictionary defining INI structure
             Format: {"section_name": {"key": value, ...}, ...}
-            Example: {"profile:test": {"model": "whisper-base", "batch_size": 4}}
+            Example: {"profile:test": {"model": "gemma-4-e2b-it", "batch_size": 4}}
 
     Returns:
         ConfigParser instance ready for configuration testing
@@ -79,7 +79,7 @@ def make_cfg(sections: dict) -> configparser.ConfigParser:
     Example usage:
         cfg = make_cfg({
             "profile:test": {
-                "model": "whisper-small",
+                "model": "gemma-4-e2b-it",
                 "batch_size": 4,
                 "gradient_checkpointing": True
             },
@@ -125,9 +125,9 @@ def test_validate_profile_defaults_and_types():
     - Required parameters must be present or validation raises ValueError
     """
     conf = {
-        "model": "whisper-small",
+        "model": "gemma-4-e2b-it",
         "dataset": "dummy",
-        "base_model": "openai/whisper-small",
+        "base_model": "google/gemma-4-E2B-it",
         "train_split": "train",
         "validation_split": "validation",
         "text_column": "text",
@@ -185,7 +185,7 @@ def test_load_profile_config_missing_profile_raises():
     cfg = make_cfg(
         {
             "DEFAULT": {},
-            "profile:foo": {"model": "whisper-small", "dataset": "ds"},
+            "profile:foo": {"model": "gemma-4-e2b-it", "dataset": "ds"},
         }
     )
     with pytest.raises(ValueError, match=r"not found in config"):
@@ -197,7 +197,7 @@ def test_load_profile_config_required_keys_enforced():
     cfg = make_cfg(
         {
             "DEFAULT": {},
-            "model:whisper-small": {"group": "whisper", "base_model": "openai/whisper-small"},
+            "model:gemma-4-e2b-it": {"group": "gemma", "base_model": "google/gemma-4-E2B-it"},
             "dataset:dummy": {
                 "source": "dummy_source",
                 "text_column": "text",
@@ -206,7 +206,7 @@ def test_load_profile_config_required_keys_enforced():
                 "train_split": "train",
                 "validation_split": "validation",
             },
-            "profile:p": {"model": "whisper-small", "dataset": "dummy"},
+            "profile:p": {"model": "gemma-4-e2b-it", "dataset": "dummy"},
         }
     )
 

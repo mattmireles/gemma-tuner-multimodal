@@ -161,7 +161,7 @@ class EvalDataCollator:
     - Language metadata preservation (strict mode groups by language)
 
     Args:
-        processor: WhisperProcessor for feature extraction and tokenization
+        processor: AutoProcessor for feature extraction and tokenization
         language_mode: Language processing mode ("mixed", "strict", "override:lang")
     """
 
@@ -344,7 +344,7 @@ def make_prepare_dataset_fn(processor, text_column_name, max_label_length, force
     - scripts/blacklist.py:create_blacklist() -- passed to raw_datasets.map()
 
     Args:
-        processor: WhisperProcessor instance
+        processor: AutoProcessor instance
         text_column_name (str): Column name for reference text
         max_label_length (int): Maximum label token length
         forced_language (str | None): Language override, or None for auto-detect

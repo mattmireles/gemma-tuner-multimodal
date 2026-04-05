@@ -37,7 +37,6 @@ Command structure:
 - evaluate: Model evaluation on test datasets
 - export: Model conversion to deployment formats
 - blacklist: Quality-based sample filtering
-- streaming: Real-time ASR inference
 - runs: Run management and analysis (list, overview, details, cleanup)
 - wizard: Interactive fine-tuning configuration wizard
 
@@ -194,7 +193,7 @@ def prepare(
         - Generates prepared CSV files for training
     """
     init_logging(LoggingDefaults.DEFAULT_LEVEL, json_format=json_logging)
-    ops.prepare({"dataset": dataset})
+    ops.prepare({"dataset": dataset}, config_path=config)
 
 
 @app.command(name="prepare-granary")
