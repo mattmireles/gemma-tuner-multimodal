@@ -278,19 +278,33 @@ def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> "P
 
     out: Dict = _load_model_dataset_config_dict(cfg, model_name, dataset_name)
 
-    # Layer 6: Profile overrides (highest precedence)
-    # Only apply keys explicitly set in the profile section, not inherited DEFAULT keys.
-    # cfg[section] includes all DEFAULT keys via configparser inheritance, which would
-    # silently reset model/group overrides back to DEFAULT values.
-    # cfg.options(section) returns section-local keys + DEFAULT keys, so we filter out
-    # any key that also appears in cfg.defaults() to get only the profile's own keys.
+    # Layer 6: Profile overrides (highest precedence) — own keys only, no DEFAULT bleed.
     if cfg.has_section(section):
-        profile_own = {k: cfg[section][k] for k in cfg.options(section) if k not in cfg.defaults()}
-        out.update(profile_own)
+        out.update(_section_own_keys(cfg, section))
 
     # Validate the merged configuration
     _validate_profile_config(out, required_keys=ConfigConstants.REQUIRED_PROFILE_KEYS)
     return ProfileConfig.from_dict(out)
+
+
+def _section_own_keys(cfg: configparser.ConfigParser, section: str) -> Dict:
+    """Return only the keys explicitly set in a section, excluding DEFAULT bleed.
+
+    configparser makes every key from [DEFAULT] appear in every section via
+    cfg[section] and cfg.options(section). Using raw cfg[section] in a merge
+    chain causes earlier-layer overrides to be silently reset when a later
+    layer's section happens to inherit the same key from DEFAULT.
+
+    This helper returns only the keys that are genuinely local to the section
+    by subtracting cfg.defaults() from cfg.options(section). The returned dict
+    is safe to use in out.update() at any merge layer.
+
+    Called by:
+    - _load_model_dataset_config_dict() for group, model, and dataset layers
+    - load_profile_config() already uses the same pattern inline for layer 6
+    """
+    defaults = set(cfg.defaults().keys())
+    return {k: cfg[section][k] for k in cfg.options(section) if k not in defaults}
 
 
 def load_model_dataset_config(cfg: configparser.ConfigParser, model_name: str, dataset_name: str) -> "ProfileConfig":
@@ -388,26 +402,26 @@ def _load_model_dataset_config_dict(cfg: configparser.ConfigParser, model_name: 
     if cfg.has_section(ConfigConstants.DATASET_DEFAULTS_SECTION):
         out.update(cfg[ConfigConstants.DATASET_DEFAULTS_SECTION])
 
-    # Layer 3: Model group configuration
+    # Layer 3: Model group configuration — own keys only, no DEFAULT bleed.
     # Use fallback=None so a missing "group" key returns None instead of raising
     # configparser.NoOptionError (which callers don't catch — they only catch ValueError).
     group_name = cfg.get(model_section, "group", fallback=None)
     if group_name is not None:
         group_section = f"{ConfigConstants.GROUP_PREFIX}{group_name}"
         if cfg.has_section(group_section):
-            out.update(cfg[group_section])
+            out.update(_section_own_keys(cfg, group_section))
 
-    # Layer 4: Model-specific configuration
-    out.update(cfg[model_section])
+    # Layer 4: Model-specific configuration — own keys only, no DEFAULT bleed.
+    out.update(_section_own_keys(cfg, model_section))
 
-    # Layer 5: Dataset-specific configuration (overrides model settings)
-    out.update(cfg[dataset_section])
+    # Layer 5: Dataset-specific configuration — own keys only, no DEFAULT bleed.
+    out.update(_section_own_keys(cfg, dataset_section))
 
     # Extract audio source paths for multi-corpus datasets like Granary
     # This enables external audio corpus integration by parsing audio_source_* keys
     # Example: audio_source_voxpopuli = /path/to/voxpopuli → {"voxpopuli": "/path/to/voxpopuli"}
     audio_sources = {}
-    for key, value in cfg[dataset_section].items():
+    for key, value in _section_own_keys(cfg, dataset_section).items():
         if key.startswith("audio_source_"):
             # Extract source name: "audio_source_voxpopuli" → "voxpopuli"
             source_name = key[len("audio_source_") :]
