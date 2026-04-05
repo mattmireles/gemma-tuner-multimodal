@@ -113,10 +113,14 @@ import logging
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
 from gemma_tuner.core.run_queries import load_metadata
+
+# Anchor all data paths to the project root so gather works from any cwd.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +243,7 @@ def gather_predictions(profiles, output_dir="output"):
                     )
                     dataset_languages = {}
                 else:
-                    prepared_csv_path = os.path.join("data", "datasets", dataset_name, f"{dataset_name}_prepared.csv")
+                    prepared_csv_path = str(_PROJECT_ROOT / "data" / "datasets" / dataset_name / f"{dataset_name}_prepared.csv")
                     try:
                         prepared_df = pd.read_csv(prepared_csv_path)
                         dataset_languages = dict(zip(prepared_df["id"], prepared_df["language"]))

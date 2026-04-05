@@ -359,7 +359,7 @@ def create_blacklist(profile_config, output_dir):
     # Provides detailed diagnostics and statistical analysis
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     blacklist_filename = f"blacklist-{profile_config['dataset']}-{timestamp}.csv"
-    blacklist_path = os.path.join("output", blacklist_filename)
+    blacklist_path = str(_PROJECT_ROOT / "output" / blacklist_filename)
 
     # Quality Threshold Configuration
     # Apply split-specific WER thresholds for optimal training data curation
