@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 import questionary
 
+from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 from gemma_tuner.wizard import config_store as _config_store
 from gemma_tuner.wizard import granary as _granary
 from gemma_tuner.wizard.base import apple_style, console
@@ -253,7 +254,7 @@ def generate_profile_config(
                 "lora_dropout": method_config.get("lora_dropout", 0.1),  # Sensible default
                 # Use canonical key expected by trainer; leave as list, not string
                 # Prefer canonical Gemma naming (o_proj not out_proj)
-                "lora_target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "fc1", "fc2"],
+                "lora_target_modules": GemmaTrainingConstants.LORA_TARGET_MODULES,
             }
         )
         # Gemma-specific safety: if selected model belongs to group:gemma, enforce eager attention

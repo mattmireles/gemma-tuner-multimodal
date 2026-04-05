@@ -30,6 +30,7 @@ import questionary
 from rich.console import Console
 
 # Import existing utilities
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants
 from gemma_tuner.utils.device import get_device
 
 # ---------------------------------------------------------------------------
@@ -75,8 +76,10 @@ class WizardConstants:
     CPU_PERFORMANCE_MULTIPLIER = 3.0  # CPU training is ~3x slower than Apple Silicon MPS
 
     # Audio Processing
-    # Default audio sample rate for Gemma audio tower (USM-based)
-    DEFAULT_SAMPLING_RATE = 16000
+    # Default audio sample rate for Gemma audio tower (USM-based).
+    # Single source of truth lives in AudioProcessingConstants; aliased here for
+    # local readability without magic numbers.
+    DEFAULT_SAMPLING_RATE = AudioProcessingConstants.DEFAULT_SAMPLING_RATE
 
     # Dataset Detection Patterns
     # File extensions and patterns for automatic dataset discovery
