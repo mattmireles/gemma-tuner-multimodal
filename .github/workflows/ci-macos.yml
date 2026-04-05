@@ -50,7 +50,6 @@ jobs:
           import gemma_tuner
           from gemma_tuner.cli_typer import app
           from gemma_tuner.main import main as legacy_main
-          from gemma_tuner.manage import main as legacy_manage
           from gemma_tuner.scripts import evaluate
           from gemma_tuner.models.gemma.finetune import main as gemma_finetune
           print('OK: package imports')
@@ -59,7 +58,6 @@ jobs:
       - name: Legacy shim smoke (help paths)
         run: |
           python main.py --help
-          python manage.py --help
 
       - name: CLI smoke
         run: |

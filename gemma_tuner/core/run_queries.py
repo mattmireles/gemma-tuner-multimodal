@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
-METADATA_FILENAME = "metadata.json"
-COMPLETION_MARKER = "completed"
-EVAL_PREFIX = "eval"
-FAILED_STATUSES = {"failed", "cancelled"}
+from gemma_tuner.core.runs import RunConstants
+
+METADATA_FILENAME = RunConstants.METADATA_FILE
+COMPLETION_MARKER = RunConstants.COMPLETION_MARKER
+EVAL_PREFIX = RunConstants.EVAL_SUBDIR
+FAILED_STATUSES = {RunConstants.STATUS_FAILED, RunConstants.STATUS_CANCELLED}
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 DATE_FORMAT = "%Y-%m-%d"
 

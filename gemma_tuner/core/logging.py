@@ -38,21 +38,13 @@ from pathlib import Path
 from typing import Optional
 
 
-# Logging configuration constants
-class LoggingConstants:
-    """Named constants for logging configuration."""
-
-    # Default log levels
-    DEFAULT_LEVEL = "INFO"
-    URLLIB3_LEVEL = logging.WARNING  # Suppress connection pool messages
-    TRANSFORMERS_LEVEL = logging.INFO  # Keep model loading messages
-
-    # Format strings
-    HUMAN_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
-    TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-
-    # Handler configuration
-    DEFAULT_STREAM = sys.stdout  # Use stdout for container compatibility
+# Logging configuration — inline constants to avoid an unnecessary namespace class.
+_DEFAULT_LEVEL = "INFO"
+_URLLIB3_LEVEL = logging.WARNING  # Suppress connection pool messages
+_TRANSFORMERS_LEVEL = logging.INFO  # Keep model loading messages
+_HUMAN_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+_DEFAULT_STREAM = sys.stdout  # Use stdout for container compatibility
 
 
 class _JsonFormatter(logging.Formatter):
@@ -95,7 +87,7 @@ class _JsonFormatter(logging.Formatter):
             str: JSON-formatted log line
         """
         payload = {
-            "time": self.formatTime(record, datefmt=LoggingConstants.TIME_FORMAT),
+            "time": self.formatTime(record, datefmt=_TIME_FORMAT),
             "level": record.levelname,
             "name": record.name,
             "message": record.getMessage(),
@@ -155,18 +147,18 @@ def init_logging(level: str | int = "INFO", json_format: bool = False) -> None:
         root.removeHandler(h)
 
     # Configure console handler with appropriate formatter
-    handler = logging.StreamHandler(LoggingConstants.DEFAULT_STREAM)
+    handler = logging.StreamHandler(_DEFAULT_STREAM)
     if json_format:
         handler.setFormatter(_JsonFormatter())
     else:
-        handler.setFormatter(logging.Formatter(LoggingConstants.HUMAN_FORMAT))
+        handler.setFormatter(logging.Formatter(_HUMAN_FORMAT))
 
     root.setLevel(lvl)
     root.addHandler(handler)
 
     # Suppress noisy third-party libraries
-    logging.getLogger("urllib3").setLevel(LoggingConstants.URLLIB3_LEVEL)
-    logging.getLogger("transformers").setLevel(LoggingConstants.TRANSFORMERS_LEVEL)
+    logging.getLogger("urllib3").setLevel(_URLLIB3_LEVEL)
+    logging.getLogger("transformers").setLevel(_TRANSFORMERS_LEVEL)
 
 
 def add_file_handler(log_path: str, json_format: bool = False, level: Optional[int] = None) -> None:
@@ -217,7 +209,7 @@ def add_file_handler(log_path: str, json_format: bool = False, level: Optional[i
     if json_format:
         handler.setFormatter(_JsonFormatter())
     else:
-        handler.setFormatter(logging.Formatter(LoggingConstants.HUMAN_FORMAT))
+        handler.setFormatter(logging.Formatter(_HUMAN_FORMAT))
 
     # Set handler-specific level if provided
     if level is not None:

@@ -16,7 +16,7 @@ Called by:
 
 Integrates with:
 - wizard.base: WizardConstants, ModelSpecs, TrainingMethod, detect_datasets,
-  get_device_info, apple_style, console
+  get_wizard_device_info, apple_style, console
 - wizard.config: _read_config (used by select_model and show_confirmation_screen)
 - wizard.estimator: configure_method_specifics, estimate_training_time (called after UI steps)
 """
@@ -36,7 +36,7 @@ from gemma_tuner.wizard.base import (
     apple_style,
     console,
     detect_datasets,
-    get_device_info,
+    get_wizard_device_info,
 )
 
 
@@ -54,7 +54,7 @@ def show_welcome_screen():
     - Development and demonstration environments for visual appeal
 
     Calls to:
-    - get_device_info() for comprehensive system capability detection (line 311)
+    - get_wizard_device_info() for comprehensive system capability detection (line 311)
     - rich.console for Apple-inspired visual formatting and layout
     - rich.panel for elegant bordered content presentation
 
@@ -107,7 +107,7 @@ def show_welcome_screen():
               🍎 Fine-Tuner for Apple Silicon
     """
 
-    device_info = get_device_info()
+    device_info = get_wizard_device_info()
 
     welcome_text = f"""
 [bold cyan]Welcome to the Gemma Fine-Tuning Wizard![/bold cyan]
@@ -164,7 +164,7 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
 
     console.print("\n[bold]Step 2: Choose your model[/bold]")
 
-    device_info = get_device_info()
+    device_info = get_wizard_device_info()
     available_memory = device_info["available_memory_gb"]
 
     # Dynamically discover available models from config.ini
@@ -390,7 +390,7 @@ def show_confirmation_screen(
         estimates["eta"].strftime("%I:%M %p today" if estimates["hours"] < 12 else "%I:%M %p tomorrow"),
     )
 
-    device_info = get_device_info()
+    device_info = get_wizard_device_info()
     config_table.add_row("Training Device", device_info["display_name"])
 
     # Status indicators

@@ -14,7 +14,7 @@ Called by:
 - wizard/__init__.py re-exports for backward compatibility
 
 Integrates with:
-- wizard.base: ModelSpecs, get_device_info, apple_style, console
+- wizard.base: ModelSpecs, get_wizard_device_info, apple_style, console
 """
 
 from datetime import datetime, timedelta
@@ -24,9 +24,10 @@ import questionary
 
 from gemma_tuner.wizard.base import (
     ModelSpecs,
+    WizardConstants,
     apple_style,
     console,
-    get_device_info,
+    get_wizard_device_info,
 )
 
 
@@ -40,13 +41,10 @@ def configure_method_specifics(
         console.print("\n[bold]Step 5: LoRA Configuration[/bold]")
         console.print("[dim]LoRA (Low-Rank Adaptation) parameters for efficient fine-tuning[/dim]")
 
-        # LoRA rank
+        # LoRA rank — built from WizardConstants.LORA_RANK_OPTIONS (single source of truth)
         rank_choices = [
-            {"name": "4 (Ultra lightweight)", "value": 4},
-            {"name": "8 (Lightweight)", "value": 8},
-            {"name": "16 (Balanced) ⭐ Recommended", "value": 16},
-            {"name": "32 (High capacity)", "value": 32},
-            {"name": "64 (Maximum capacity)", "value": 64},
+            {"name": f"{opt['rank']} ({opt['description']})", "value": opt["rank"]}
+            for opt in WizardConstants.LORA_RANK_OPTIONS
         ]
 
         config["lora_r"] = questionary.select(
@@ -54,9 +52,10 @@ def configure_method_specifics(
         ).ask()
 
         # Guard: questionary returns None on non-TTY stdin (e.g. piped input, CI).
-        # Default to rank 16 (the "Balanced" recommended option) rather than crashing.
+        # Default to the middle "Balanced" option from LORA_RANK_OPTIONS.
         if config["lora_r"] is None:
-            config["lora_r"] = 16
+            _default_rank_opt = WizardConstants.LORA_RANK_OPTIONS[len(WizardConstants.LORA_RANK_OPTIONS) // 2]
+            config["lora_r"] = _default_rank_opt["rank"]
 
         # LoRA alpha (smart default based on rank)
         default_alpha = config["lora_r"] * 2
@@ -92,7 +91,7 @@ def estimate_training_time(
 ) -> Dict[str, Any]:
     """Estimate training time and resource usage"""
 
-    device_info = get_device_info()
+    device_info = get_wizard_device_info()
 
     # Look up model specs, defaulting to the smaller Gemma variant
     default_specs = ModelSpecs.MODELS.get("gemma-4-e2b-it", list(ModelSpecs.MODELS.values())[0])

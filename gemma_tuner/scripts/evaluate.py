@@ -283,9 +283,6 @@ def run_evaluation(profile_config, output_dir):
                             if len(unique_langs) == 1:
                                 # Homogeneous batch -- fast path
                                 lang = batch_languages[0]
-                                model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-                                    language=lang, task="transcribe"
-                                )
                                 generated_tokens = generate(
                                     model=model,
                                     processor=processor,
@@ -304,9 +301,6 @@ def run_evaluation(profile_config, output_dir):
                                 for lang in unique_langs:
                                     indices = [j for j, l in enumerate(batch_languages) if l == lang]
                                     lang_features = input_features[indices]
-                                    model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-                                        language=lang, task="transcribe"
-                                    )
                                     lang_tokens = generate(
                                         model=model,
                                         processor=processor,
@@ -318,6 +312,15 @@ def run_evaluation(profile_config, output_dir):
                                     )
                                     for k, idx in enumerate(indices):
                                         generated_parts[idx] = lang_tokens[k]
+
+                                # Validate all parts were filled
+                                unfilled = [i for i, p in enumerate(generated_parts) if p is None]
+                                if unfilled:
+                                    raise RuntimeError(
+                                        f"Heterogeneous batch assembly failed: indices {unfilled} were not filled. "
+                                        f"Languages in batch: {batch_languages}"
+                                    )
+
                                 # Pad ragged per-language arrays to the same seq length before stacking
                                 max_seq_len = max(p.shape[-1] for p in generated_parts)
                                 padded_parts = []
@@ -331,7 +334,6 @@ def run_evaluation(profile_config, output_dir):
                                 generated_tokens = np.stack(padded_parts)
 
                         elif language_mode == "mixed":
-                            model.generation_config.forced_decoder_ids = None
                             generated_tokens = generate(
                                 model=model,
                                 processor=processor,
@@ -342,9 +344,6 @@ def run_evaluation(profile_config, output_dir):
                                 gen_kwargs=gen_kwargs,
                             )
                         elif language_mode.startswith("override:"):
-                            model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-                                language=forced_language, task="transcribe"
-                            )
                             generated_tokens = generate(
                                 model=model,
                                 processor=processor,

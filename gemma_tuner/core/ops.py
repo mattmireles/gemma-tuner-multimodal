@@ -267,45 +267,32 @@ def evaluate(profile_config: Dict, output_dir: str):
 
 def export(model_path_or_profile: str) -> None:
     """
-    Exports fine-tuned model to deployment format (GGML/CoreML).
+    Exports a trained Gemma model to a self-contained SafeTensors directory.
 
-    This operation exports the model weights and config into a portable
-    Hugging Face/SafeTensors directory for downstream use.
+    Delegates entirely to scripts/export.py:export_model_dir(), which auto-detects
+    whether the source is a LoRA adapter directory or a full model:
+
+    - LoRA adapter (contains adapter_config.json): loads the base model, merges
+      adapter weights via PeftModel.merge_and_unload(), and saves the merged model.
+    - Full model or HuggingFace Hub id: loads and saves directly.
+
+    In both cases the processor (tokenizer + feature extractor) is saved alongside
+    the weights so the output directory is fully standalone.
 
     Called by:
-    - main.py:main() when operation="export" is specified
-    - Model deployment pipelines preparing models for production inference
-    - Mobile app build processes requiring CoreML or ONNX model formats
-    - Edge device deployment workflows optimizing models for resource constraints
-    - Model serving infrastructure preparing HuggingFace-compatible model directories
-    - Integration workflows packaging models for third-party platforms
+    - cli_typer.py:export() — the primary entry point via `gemma-macos-tuner export`
 
     Calls to:
-    - scripts.export.export_model_dir() for complete model directory export
-    - PyTorch model serialization utilities for SafeTensors format conversion
-    - HuggingFace Transformers configuration management for model compatibility
-    - File system utilities for directory structure creation and validation
-    - Model validation utilities ensuring export integrity and completeness
-
-    Export workflow:
-    1. Load fine-tuned PyTorch model
-    2. Extract model weights and configuration
-    3. Convert to target format (GGML/CoreML)
-    4. Optimize for deployment platform
-    5. Save converted model files
-    6. Validate conversion accuracy
+    - scripts.export.export_model_dir() for all export logic
 
     Args:
-        model_path_or_profile (str): Path to model or profile name
+        model_path_or_profile (str): Local path to a model or adapter directory,
+            or a HuggingFace Hub model id.
 
     Side effects:
-        - Creates exported model files in output directory
-        - Generates model metadata for deployment
-
-    Note:
-        This performs a pure Hugging Face model directory export (SafeTensors).
+        - Creates {model_path_or_profile}-export/ containing model weights,
+          config, and processor files.
     """
-    # Wrapper around scripts.export.export_model_dir for consistency
     from gemma_tuner.scripts.export import export_model_dir
 
     export_model_dir(model_path_or_profile)

@@ -2,103 +2,136 @@
 """
 Model Export and Conversion Utility
 
-This module provides streamlined model export functionality for converting trained
-Gemma models between different formats and optimization states. It handles device-aware
-model loading, format conversion, and optimized storage for deployment scenarios.
+Exports trained Gemma models to portable HF/SafeTensors directories.
+Handles two cases transparently:
 
-Key responsibilities:
-- Device-optimal model loading with dtype selection
-- Model format conversion and optimization
-- SafeTensors integration for secure model storage
-- Memory-efficient model processing for large models
-- Cross-platform model export with compatibility validation
+1. **LoRA adapter directory** (contains adapter_config.json):
+   - Reads base_model_name_or_path from adapter_config.json
+   - Loads base model + merges LoRA weights via PeftModel + merge_and_unload()
+   - Saves the merged full model to {source_dir}-export/
+
+2. **Full model directory or HuggingFace Hub id**:
+   - Loads directly with AutoModelForCausalLM
+   - Saves to {source_dir}-export/
 
 Called by:
-- Manual execution for model conversion tasks
-- Deployment pipelines requiring model format conversion
-- Model optimization workflows
-- Testing and validation scripts
+- core/ops.py:export() which is called by cli_typer.py:export()
+- scripts/export_gemma_lora.py:main() as a direct entry point
 
 Calls to:
-- utils/device.py for optimal device selection and configuration
-- transformers library for model loading and saving operations
-- torch for tensor operations and dtype management
-
-Export workflow:
-1. Device detection and dtype optimization
-2. Model loading from checkpoint with memory optimization
-3. Format validation and compatibility checking
-4. Optimized model saving with SafeTensors integration
-5. Export validation and integrity verification
-
-Device optimization:
-- Apple Silicon (MPS): Uses float16 for unified memory efficiency
-- NVIDIA CUDA: Uses float16 for GPU memory optimization
-- CPU: Uses float32 for maximum compatibility and precision
-- Memory management: low_cpu_mem_usage for large model handling
-
-Format support:
-- HuggingFace transformers format (primary)
-- SafeTensors format for secure storage
-- Cross-platform compatibility validation
-- Optimization for deployment scenarios
-
-Memory optimization:
-- Efficient model loading with minimal memory footprint
-- Device-specific dtype selection for optimal performance
-- Memory pressure management during conversion
-- Large model handling with streaming operations
-
-Use cases:
-- Converting training checkpoints to deployment format
-- Optimizing models for specific hardware platforms
-- Creating distributable model packages
-- Validating model export compatibility
-
-Compatibility:
-- HuggingFace transformers: Modern model loading and saving
-- SafeTensors: Secure tensor storage format
-- PyTorch: Device-agnostic tensor operations
-- Cross-platform: macOS, Linux, Windows support
+- utils/device.py:get_device() for device selection
+- transformers.AutoModelForCausalLM for model loading
+- peft.PeftModel for LoRA adapter merging
 """
 
+import json
 import logging
+from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 from gemma_tuner.utils.device import get_device
 
 logger = logging.getLogger(__name__)
 
+# Filename written by PEFT's save_pretrained() to mark a directory as a LoRA adapter.
+# Presence of this file is the canonical signal that we need to merge before exporting.
+_ADAPTER_CONFIG_FILENAME = "adapter_config.json"
 
-def export_model_dir(model_path_or_profile):
-    """Exports a trained model to a portable HF/SafeTensors directory.
+
+def export_model_dir(model_path_or_profile: str) -> str:
+    """Export a trained Gemma model (full or LoRA adapter) to a SafeTensors directory.
+
+    Auto-detects whether the source is a LoRA adapter directory or a full model
+    and handles each case correctly. LoRA adapters are merged into the base model
+    before saving so the output is a self-contained, deployment-ready checkpoint.
+
+    Called by:
+    - core/ops.py:export()
+    - scripts/export_gemma_lora.py:main()
 
     Args:
-        model_path_or_profile: Either a path to a local model directory or
-            a Hugging Face model id. If a profile name is provided, caller
-            should resolve it to a path before calling.
+        model_path_or_profile: Local directory path or HuggingFace model id.
+
+    Returns:
+        str: Path to the exported model directory.
+
+    Raises:
+        FileNotFoundError: If model_path_or_profile is a local path that does not exist.
+        KeyError: If adapter_config.json is missing base_model_name_or_path.
     """
     device = get_device()
-    torch_dtype = torch.float16 if device.type in ["cuda", "mps"] else torch.float32
+    # bfloat16 is preferred on MPS/CUDA for memory efficiency; CPU uses float32 for compat.
+    torch_dtype = torch.bfloat16 if device.type in ["cuda", "mps"] else torch.float32
 
-    # Resolve a profile name to latest completed run directory, if metadata exists
-    model_id = model_path_or_profile
+    source_path = Path(model_path_or_profile)
+    adapter_config_path = source_path / _ADAPTER_CONFIG_FILENAME
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
-    )
+    if adapter_config_path.exists():
+        # --- LoRA adapter path: merge weights into base model before saving ---
+        logger.info("Detected LoRA adapter directory: %s", source_path)
+        logger.info("Reading base model path from %s", _ADAPTER_CONFIG_FILENAME)
 
-    # Save next to source or to default ./exported_model
-    out_dir = "exported_model" if not isinstance(model_id, str) else f"{model_id}-export"
+        with open(adapter_config_path) as f:
+            adapter_cfg = json.load(f)
+
+        base_model_id = adapter_cfg["base_model_name_or_path"]
+        logger.info("Loading base model: %s", base_model_id)
+
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_id,
+            torch_dtype=torch_dtype,
+            low_cpu_mem_usage=True,
+        )
+
+        # PeftModel loads the adapter weights on top of the base model, then
+        # merge_and_unload() folds them into the base weights and returns a
+        # plain AutoModelForCausalLM with no PEFT overhead.
+        from peft import PeftModel
+
+        logger.info("Loading LoRA adapter weights from: %s", source_path)
+        peft_model = PeftModel.from_pretrained(base_model, str(source_path))
+
+        logger.info("Merging LoRA weights into base model...")
+        model = peft_model.merge_and_unload()
+        # Processor comes from the base model so downstream users can load
+        # tokenizer + feature extractor from the exported directory alone.
+        processor_source = base_model_id
+
+    else:
+        # --- Full model path or HuggingFace Hub id ---
+        logger.info("Loading full model: %s", model_path_or_profile)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path_or_profile,
+            torch_dtype=torch_dtype,
+            low_cpu_mem_usage=True,
+        )
+        processor_source = model_path_or_profile
+
+    out_dir = str(source_path) + "-export"
+    logger.info("Saving exported model to: %s", out_dir)
     model.save_pretrained(out_dir)
 
-    logger.info(f"Model exported successfully to {out_dir}")
-    logger.info(f"Source model: {model_id}")
-    logger.info(f"Device used: {device}")
-    logger.info(f"Data type: {torch_dtype}")
-    logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    # Save processor (tokenizer + feature extractor) alongside the weights so
+    # the exported directory is fully self-contained: any caller can do
+    # AutoProcessor.from_pretrained(out_dir) without needing the original source.
+    try:
+        processor = AutoProcessor.from_pretrained(processor_source)
+        processor.save_pretrained(out_dir)
+        logger.info("  Processor saved alongside model weights.")
+    except Exception as exc:
+        # Non-fatal: some base models may not have an AutoProcessor; log and continue.
+        logger.warning("Could not save processor to export dir (non-fatal): %s", exc)
+
+    logger.info("Export complete.")
+    logger.info("  Source : %s", model_path_or_profile)
+    logger.info("  Output : %s", out_dir)
+    logger.info("  Device : %s", device)
+    logger.info("  Dtype  : %s", torch_dtype)
+    logger.info("  Params : %s", f"{sum(p.numel() for p in model.parameters()):,}")
+
+    return out_dir
 
 
 if __name__ == "__main__":
