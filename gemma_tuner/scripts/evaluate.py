@@ -24,11 +24,9 @@ import os
 
 import torch
 from tabulate import tabulate
-from tqdm import tqdm
 from transformers import set_seed
-from transformers.models.whisper.english_normalizer import EnglishTextNormalizer
 
-from gemma_tuner.core.inference import decode_and_score, generate
+from gemma_tuner.core.inference import decode_and_score
 from gemma_tuner.scripts.inference_common import (
     DataTrainingArguments,
     EvalDataCollator,
@@ -39,6 +37,7 @@ from gemma_tuner.scripts.inference_common import (
     load_model_and_processor,
     make_prepare_dataset_fn,
     parse_language_mode,
+    run_inference_loop,
     vectorize_dataset,
 )
 from gemma_tuner.utils.dataset_utils import load_dataset_split
@@ -234,9 +233,6 @@ def run_evaluation(profile_config, output_dir):
         predictions_writer = csv.writer(predictions_file)
         predictions_writer.writerow(["ID", "Target", "Pred", "Norm Target", "Norm Pred", "WER", "CER"])
 
-        all_preds = []
-        references = []
-        ids = []
         # Build all_ids AFTER the .filter() call above so this list aligns 1-to-1
         # with what the DataLoader will yield. Building from a pre-filter snapshot
         # produces a longer list and causes ID-to-prediction misalignment in the CSV.
@@ -260,138 +256,29 @@ def run_evaluation(profile_config, output_dir):
 
         logger.info("***** Running Evaluation *****")
         current_batch_size = int(profile_config["per_device_eval_batch_size"])
-        tried_smaller_batch = False
-        id_offset = 0
-        i = 0
-        while True:
-            try:
-                for i, batch in enumerate(tqdm(eval_dataloader, desc="Evaluating")):
-                    input_features = batch["input_features"].to(device, dtype=dtype)
-                    labels = batch["labels"].to(device)
-                    batch_size = input_features.shape[0]
-                    batch_ids = all_ids[id_offset : id_offset + batch_size]
-
-                    with torch.no_grad():
-                        # Set the language and task for generation.
-                        # In strict mode a batch may contain samples from
-                        # multiple languages.  Detect that case and generate
-                        # per-language groups separately so each sample gets
-                        # the correct forced decoder prompt.
-                        if language_mode == "strict":
-                            batch_languages = batch.get("language", [None])
-                            unique_langs = set(batch_languages)
-
-                            if len(unique_langs) == 1:
-                                # Homogeneous batch -- fast path
-                                lang = batch_languages[0]
-                                generated_tokens = generate(
-                                    model=model,
-                                    processor=processor,
-                                    input_features=input_features,
-                                    language_mode=language_mode,
-                                    forced_language=forced_language,
-                                    batch_language=lang,
-                                    gen_kwargs=gen_kwargs,
-                                )
-                            else:
-                                # Heterogeneous batch -- generate per-language
-                                # groups and reassemble in original sample order.
-                                import numpy as np
-
-                                generated_parts = [None] * input_features.shape[0]
-                                for lang in unique_langs:
-                                    indices = [j for j, l in enumerate(batch_languages) if l == lang]
-                                    lang_features = input_features[indices]
-                                    lang_tokens = generate(
-                                        model=model,
-                                        processor=processor,
-                                        input_features=lang_features,
-                                        language_mode=language_mode,
-                                        forced_language=forced_language,
-                                        batch_language=lang,
-                                        gen_kwargs=gen_kwargs,
-                                    )
-                                    for k, idx in enumerate(indices):
-                                        generated_parts[idx] = lang_tokens[k]
-
-                                # Validate all parts were filled
-                                unfilled = [i for i, p in enumerate(generated_parts) if p is None]
-                                if unfilled:
-                                    raise RuntimeError(
-                                        f"Heterogeneous batch assembly failed: indices {unfilled} were not filled. "
-                                        f"Languages in batch: {batch_languages}"
-                                    )
-
-                                # Pad ragged per-language arrays to the same seq length before stacking
-                                max_seq_len = max(p.shape[-1] for p in generated_parts)
-                                padded_parts = []
-                                for p in generated_parts:
-                                    if p.shape[-1] < max_seq_len:
-                                        pad_width = max_seq_len - p.shape[-1]
-                                        p = np.pad(
-                                            p, ((0, pad_width),), constant_values=processor.tokenizer.pad_token_id
-                                        )
-                                    padded_parts.append(p)
-                                generated_tokens = np.stack(padded_parts)
-
-                        elif language_mode == "mixed":
-                            generated_tokens = generate(
-                                model=model,
-                                processor=processor,
-                                input_features=input_features,
-                                language_mode=language_mode,
-                                forced_language=forced_language,
-                                batch_language=None,
-                                gen_kwargs=gen_kwargs,
-                            )
-                        elif language_mode.startswith("override:"):
-                            generated_tokens = generate(
-                                model=model,
-                                processor=processor,
-                                input_features=input_features,
-                                language_mode=language_mode,
-                                forced_language=forced_language,
-                                batch_language=None,
-                                gen_kwargs=gen_kwargs,
-                            )
-                        else:
-                            raise ValueError(f"Invalid language mode: {language_mode}")
-
-                    # Decode generated tokens for the entire batch
-                    batch_preds = processor.batch_decode(generated_tokens, skip_special_tokens=True)
-                    batch_labels = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
-
-                    all_preds.extend(batch_preds)
-                    references.extend(batch_labels)
-                    ids.extend(batch_ids)
-                    id_offset += batch_size
-                break
-            except RuntimeError as e:
-                msg = str(e).lower()
-                oom = (
-                    ("out of memory" in msg)
-                    or ("cuda" in msg and "memory" in msg)
-                    or (device.type == "mps" and "failed to allocate" in msg)
-                )
-                if not oom or tried_smaller_batch or current_batch_size <= 1:
-                    raise
-                tried_smaller_batch = True
-                current_batch_size = max(1, current_batch_size // 2)
-                logger.warning(
-                    f"OOM detected during evaluation. Retrying with smaller batch size: {current_batch_size}"
-                )
-                # Clear accumulated results to avoid duplicates on retry
-                all_preds.clear()
-                references.clear()
-                ids.clear()
-                id_offset = 0
-                eval_dataloader = build_eval_dataloader(
-                    vectorized_datasets=vectorized_datasets,
-                    batch_size=current_batch_size,
-                    data_collator=data_collator,
-                    device=device,
-                    num_workers_override=configured_dl_workers,
-                )
+        all_preds, references, ids = run_inference_loop(
+            eval_dataloader=eval_dataloader,
+            vectorized_datasets=vectorized_datasets,
+            all_ids=all_ids,
+            model=model,
+            processor=processor,
+            tokenizer=tokenizer,
+            device=device,
+            dtype=dtype,
+            language_mode=language_mode,
+            forced_language=forced_language,
+            gen_kwargs=gen_kwargs,
+            desc="Evaluating",
+            oom_retry=True,
+            make_dataloader=lambda bs: build_eval_dataloader(
+                vectorized_datasets=vectorized_datasets,
+                batch_size=bs,
+                data_collator=data_collator,
+                device=device,
+                num_workers_override=configured_dl_workers,
+            ),
+            initial_batch_size=current_batch_size,
+        )
 
         # Compute metrics via shared helper
         # normalizer=None lets decode_and_score use its built-in EnglishTextNormalizer()

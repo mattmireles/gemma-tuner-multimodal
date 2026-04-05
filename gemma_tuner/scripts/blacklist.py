@@ -31,11 +31,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 import pandas as pd
 import torch
-from tqdm import tqdm
 from transformers import set_seed
-from transformers.models.whisper.english_normalizer import EnglishTextNormalizer
 
-from gemma_tuner.core.inference import decode_and_score, generate
+from gemma_tuner.core.inference import decode_and_score
 from gemma_tuner.scripts.inference_common import (
     DataTrainingArguments,
     EvalDataCollator,
@@ -46,6 +44,7 @@ from gemma_tuner.scripts.inference_common import (
     load_model_and_processor,
     make_prepare_dataset_fn,
     parse_language_mode,
+    run_inference_loop,
     vectorize_dataset,
 )
 from gemma_tuner.utils.dataset_utils import load_dataset_split
@@ -222,10 +221,6 @@ def create_blacklist(profile_config, output_dir):
     data_collator = EvalDataCollator(processor=processor, language_mode=language_mode)
 
     # 6. Quality Analysis Inference Pipeline
-    all_preds = []
-    references = []
-    ids = []
-    audio_urls = []
     all_ids = [str(item["id"]) for item in vectorized_datasets]
 
     eval_dataloader = build_eval_dataloader(
@@ -277,57 +272,26 @@ def create_blacklist(profile_config, output_dir):
 
     logger.info("Overridden ids loaded")
 
-    # Quality Analysis Execution
-    # Begin comprehensive dataset quality assessment with progress tracking
+    # Quality Analysis Execution via shared inference loop
+    # run_inference_loop handles all language modes (strict with per-language-group
+    # generation for heterogeneous batches, mixed, override) and returns aligned
+    # (preds, references, ids) lists ready for metric computation.
     logger.info("***** Running Blacklist Creation *****")
-    id_offset = 0
-    for i, batch in enumerate(tqdm(eval_dataloader, desc="Searching for outliers")):
-        input_features = batch["input_features"].to(device, dtype=dtype)
-        labels = batch["labels"].to(device)
-        batch_size = input_features.shape[0]
-
-        if batch_size == 0:
-            continue
-
-        with torch.no_grad():
-            # Determine batch_language for strict mode (generate() handles forced_decoder_ids)
-            batch_language = None
-            if language_mode == "strict":
-                languages = [
-                    vectorized_datasets[idx]["language"]
-                    for idx in range(id_offset, min(id_offset + batch_size, len(vectorized_datasets)))
-                ]
-                unique_langs = set(lang for lang in languages if lang != "??")
-                if len(unique_langs) == 1:
-                    batch_language = unique_langs.pop()
-                elif len(unique_langs) > 1:
-                    # Heterogeneous batch — use the most common language.
-                    from collections import Counter
-
-                    lang_counts = Counter(lang for lang in languages if lang != "??")
-                    batch_language = lang_counts.most_common(1)[0][0]
-
-            generated_tokens = generate(
-                model=model,
-                processor=processor,
-                input_features=input_features,
-                language_mode=language_mode,
-                forced_language=forced_language,
-                batch_language=batch_language,
-                gen_kwargs=gen_kwargs,
-            )
-
-        # Decode generated tokens for the entire batch
-        batch_preds = processor.batch_decode(generated_tokens, skip_special_tokens=True)
-        batch_labels = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
-
-        all_preds.extend(batch_preds)
-        references.extend(batch_labels)
-
-        # Extract IDs from the original dataset, not the batch
-        batch_ids = all_ids[id_offset : id_offset + batch_size]
-        ids.extend(batch_ids)
-        id_offset += batch_size
+    all_preds, references, ids = run_inference_loop(
+        eval_dataloader=eval_dataloader,
+        vectorized_datasets=vectorized_datasets,
+        all_ids=all_ids,
+        model=model,
+        processor=processor,
+        tokenizer=tokenizer,
+        device=device,
+        dtype=dtype,
+        language_mode=language_mode,
+        forced_language=forced_language,
+        gen_kwargs=gen_kwargs,
+        desc="Searching for outliers",
+        oom_retry=False,
+    )
 
     # Quality Metrics Calculation and Analysis via shared helper
     # normalizer=None lets decode_and_score use its built-in EnglishTextNormalizer()

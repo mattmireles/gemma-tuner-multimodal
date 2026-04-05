@@ -28,8 +28,9 @@ Design rationale:
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from transformers import (
@@ -543,3 +544,205 @@ def compute_per_row_metrics(norm_pred_str: list, norm_label_str: list) -> tuple:
             wer_scores.append(None)
             cer_scores.append(None)
     return wer_scores, cer_scores
+
+
+def run_inference_loop(
+    eval_dataloader: DataLoader,
+    vectorized_datasets,
+    all_ids: List,
+    model,
+    processor,
+    tokenizer,
+    device: torch.device,
+    dtype: torch.dtype,
+    language_mode: str,
+    forced_language: Optional[str],
+    gen_kwargs: Dict,
+    desc: str = "Running inference",
+    oom_retry: bool = False,
+    make_dataloader: Optional[Callable[[int], DataLoader]] = None,
+    initial_batch_size: Optional[int] = None,
+) -> Tuple[List, List, List]:
+    """Run the shared batch-inference loop used by evaluate.py and blacklist.py.
+
+    Handles all language modes (strict with per-language-group generation for
+    heterogeneous batches, mixed, override:*), collects predictions and
+    references, and optionally retries with a halved batch size on OOM errors.
+
+    Called by:
+    - scripts/evaluate.py:run_evaluation() (with oom_retry=True)
+    - scripts/blacklist.py:create_blacklist() (with oom_retry=False)
+
+    Calls to:
+    - core/inference.py:generate() for token generation
+    - tqdm for progress reporting
+
+    Args:
+        eval_dataloader: Pre-built DataLoader ready to iterate.
+        vectorized_datasets: Vectorized HF dataset (used to look up language per sample
+            in strict mode when the batch does not carry a language field).
+        all_ids: Flat list of sample IDs aligned with vectorized_datasets order.
+        model: Loaded Gemma model.
+        processor: Corresponding AutoProcessor.
+        tokenizer: Tokenizer extracted from processor.
+        device: Target device (mps/cuda/cpu).
+        dtype: Tensor dtype for input_features cast.
+        language_mode: One of "strict", "mixed", "override:<lang>", or "auto".
+        forced_language: Language code forced by parse_language_mode(), or None.
+        gen_kwargs: Generation kwargs dict passed to generate().
+        desc: tqdm progress bar label.
+        oom_retry: When True, catch OOM RuntimeErrors and rebuild the dataloader
+            with half the batch size. Requires make_dataloader and initial_batch_size.
+        make_dataloader: Callable(batch_size: int) -> DataLoader, used when
+            oom_retry=True to rebuild the loader after an OOM.
+        initial_batch_size: Starting batch size for OOM retry tracking.
+            Required when oom_retry=True.
+
+    Returns:
+        Tuple of (all_preds, references, ids) where each is a flat list of strings
+        aligned by sample position.
+
+    Raises:
+        RuntimeError: OOM not recoverable (already at batch_size=1, or
+            make_dataloader not provided), or other inference failure.
+        ValueError: Invalid language_mode.
+    """
+    # Late import avoids a circular dependency at module load time:
+    # inference_common is imported by evaluate and blacklist, while generate
+    # lives in core/inference which does not import inference_common.
+    from gemma_tuner.core.inference import generate
+
+    from tqdm import tqdm
+
+    def _run_one_pass(loader: DataLoader) -> Tuple[List, List, List]:
+        """Single full pass over the DataLoader; returns (preds, refs, ids)."""
+        _preds: List = []
+        _refs: List = []
+        _ids: List = []
+        id_offset = 0
+
+        for batch in tqdm(loader, desc=desc):
+            input_features = batch["input_features"].to(device, dtype=dtype)
+            batch_size = input_features.shape[0]
+
+            if batch_size == 0:
+                continue
+
+            batch_ids = all_ids[id_offset : id_offset + batch_size]
+
+            with torch.no_grad():
+                if language_mode == "strict":
+                    # Prefer the language field carried in the batch; fall back to
+                    # looking it up from vectorized_datasets by offset index.
+                    batch_languages = batch.get("language") or [
+                        vectorized_datasets[idx].get("language", "??")
+                        for idx in range(id_offset, id_offset + batch_size)
+                    ]
+
+                    unique_langs = {lang for lang in batch_languages if lang and lang != "??"}
+
+                    if len(unique_langs) <= 1:
+                        # Homogeneous (or unknown-language) batch — fast path.
+                        lang = next(iter(unique_langs), None)
+                        generated_tokens = generate(
+                            model=model,
+                            processor=processor,
+                            input_features=input_features,
+                            language_mode=language_mode,
+                            forced_language=forced_language,
+                            batch_language=lang,
+                            gen_kwargs=gen_kwargs,
+                        )
+                    else:
+                        # Heterogeneous batch: generate separately per language
+                        # then reassemble in original sample order.  This gives
+                        # each sample the correct forced-language prompt rather
+                        # than using the majority language for the whole batch.
+                        generated_parts: List = [None] * batch_size
+                        for lang in unique_langs:
+                            indices = [j for j, l in enumerate(batch_languages) if l == lang]
+                            lang_tokens = generate(
+                                model=model,
+                                processor=processor,
+                                input_features=input_features[indices],
+                                language_mode=language_mode,
+                                forced_language=forced_language,
+                                batch_language=lang,
+                                gen_kwargs=gen_kwargs,
+                            )
+                            for k, idx in enumerate(indices):
+                                generated_parts[idx] = lang_tokens[k]
+
+                        unfilled = [j for j, p in enumerate(generated_parts) if p is None]
+                        if unfilled:
+                            raise RuntimeError(
+                                f"Heterogeneous batch assembly failed: indices {unfilled} "
+                                f"were not filled. Languages: {batch_languages}"
+                            )
+
+                        # Pad ragged per-language arrays to the same seq length before stacking.
+                        max_seq_len = max(p.shape[-1] for p in generated_parts)
+                        padded = []
+                        for p in generated_parts:
+                            if p.shape[-1] < max_seq_len:
+                                pad_width = max_seq_len - p.shape[-1]
+                                p = np.pad(
+                                    p,
+                                    ((0, pad_width),),
+                                    constant_values=processor.tokenizer.pad_token_id,
+                                )
+                            padded.append(p)
+                        generated_tokens = np.stack(padded)
+
+                elif language_mode == "mixed" or language_mode.startswith("override:"):
+                    generated_tokens = generate(
+                        model=model,
+                        processor=processor,
+                        input_features=input_features,
+                        language_mode=language_mode,
+                        forced_language=forced_language,
+                        batch_language=None,
+                        gen_kwargs=gen_kwargs,
+                    )
+                else:
+                    raise ValueError(f"Invalid language_mode: {language_mode!r}")
+
+            batch_preds = processor.batch_decode(generated_tokens, skip_special_tokens=True)
+            batch_labels = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
+
+            _preds.extend(batch_preds)
+            _refs.extend(batch_labels)
+            _ids.extend(batch_ids)
+            id_offset += batch_size
+
+        return _preds, _refs, _ids
+
+    if not oom_retry:
+        return _run_one_pass(eval_dataloader)
+
+    # OOM-retry path: halve batch size once on the first memory error.
+    current_batch_size = initial_batch_size or getattr(eval_dataloader, "batch_size", None) or 1
+    tried_smaller_batch = False
+
+    while True:
+        try:
+            return _run_one_pass(eval_dataloader)
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            oom = (
+                "out of memory" in msg
+                or ("cuda" in msg and "memory" in msg)
+                or (device.type == "mps" and "failed to allocate" in msg)
+            )
+            if not oom or tried_smaller_batch or current_batch_size <= 1:
+                raise
+            if make_dataloader is None:
+                raise RuntimeError(
+                    "OOM detected during inference but make_dataloader was not provided; cannot retry."
+                ) from exc
+            tried_smaller_batch = True
+            current_batch_size = max(1, current_batch_size // 2)
+            logger.warning(
+                "OOM detected during inference. Retrying with batch_size=%d", current_batch_size
+            )
+            eval_dataloader = make_dataloader(current_batch_size)
