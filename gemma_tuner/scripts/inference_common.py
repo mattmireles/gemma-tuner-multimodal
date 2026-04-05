@@ -489,3 +489,56 @@ def build_eval_dataloader(vectorized_datasets, batch_size, data_collator, device
         collate_fn=data_collator,
         num_workers=effective_workers,
     )
+
+
+# Module-level cache for per-row metric objects. evaluate.load() performs
+# filesystem stat and module import verification on every call; caching avoids
+# that overhead across repeated invocations within the same process.
+_wer_metric_cache = None
+_cer_metric_cache = None
+
+
+def _get_row_metrics():
+    """Return (wer_metric, cer_metric), loading once and caching for the process lifetime."""
+    global _wer_metric_cache, _cer_metric_cache
+    if _wer_metric_cache is None or _cer_metric_cache is None:
+        import evaluate as _evaluate
+        _wer_metric_cache = _evaluate.load("wer")
+        _cer_metric_cache = _evaluate.load("cer")
+    return _wer_metric_cache, _cer_metric_cache
+
+
+def compute_per_row_metrics(norm_pred_str: list, norm_label_str: list) -> tuple:
+    """Compute per-row WER and CER for parallel normalized prediction/label sequences.
+
+    This helper deduplicates the identical per-row metric computation loops that
+    exist in both evaluate.py and blacklist.py. Both scripts need per-sample scores
+    (evaluate.py for prediction logging, blacklist.py for quality-based filtering).
+
+    Called by:
+    - scripts/evaluate.py:run_evaluation() when log_predictions is enabled
+    - scripts/blacklist.py:create_blacklist() for per-sample WER/CER scoring
+
+    Calls to:
+    - evaluate library (via _get_row_metrics cache) for WER and CER computation
+
+    Args:
+        norm_pred_str (list): Normalized prediction strings.
+        norm_label_str (list): Normalized reference/label strings.
+
+    Returns:
+        tuple[list, list]: (wer_scores, cer_scores) where each entry is a float
+            on the 0-100 scale or None when computation fails for that row.
+    """
+    wer_metric, cer_metric = _get_row_metrics()
+    wer_scores: list = []
+    cer_scores: list = []
+    for i, (pred, ref) in enumerate(zip(norm_pred_str, norm_label_str)):
+        try:
+            wer_scores.append(100 * wer_metric.compute(predictions=[pred], references=[ref]))
+            cer_scores.append(100 * cer_metric.compute(predictions=[pred], references=[ref]))
+        except Exception as e:
+            logger.debug("compute_per_row_metrics: row %d failed (pred=%r, ref=%r): %s", i, pred, ref, e)
+            wer_scores.append(None)
+            cer_scores.append(None)
+    return wer_scores, cer_scores

@@ -87,6 +87,7 @@ from tabulate import tabulate
 import gemma_tuner.core.bootstrap  # noqa: F401  (early side-effects; deliberately unused)
 from gemma_tuner.core import ops
 from gemma_tuner.core.config import load_model_dataset_config, load_profile_config
+from gemma_tuner.core.profile_config import ProfileConfig  # noqa: F401  (re-export for consumers)
 from gemma_tuner.core.finalization import finalize_evaluation_run, finalize_training_run, now_str as _now
 from gemma_tuner.core.logging import add_file_handler, init_logging
 from gemma_tuner.core.run_queries import (
@@ -143,7 +144,7 @@ app = typer.Typer(
 )
 
 
-def _normalize_device_defaults(profile_config: dict) -> None:
+def _normalize_device_defaults(profile_config: ProfileConfig) -> None:
     """Apply device-specific configuration defaults for optimal performance.
 
     Called by:

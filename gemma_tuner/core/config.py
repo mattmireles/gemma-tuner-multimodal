@@ -37,6 +37,7 @@ Example configuration flow:
 import configparser
 from typing import Dict
 
+from gemma_tuner.core.profile_config import ProfileConfig
 from gemma_tuner.utils.device import to_bool
 
 
@@ -195,7 +196,7 @@ class ConfigConstants:
     GRANARY_MINIMUM_EXTERNAL_CORPORA = {"voxpopuli", "ytc", "librilight"}
 
 
-def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> Dict:
+def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> "ProfileConfig":
     """
     Loads and merges hierarchical configuration for a named training profile.
 
@@ -275,7 +276,7 @@ def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> Di
     model_name = cfg.get(section, "model")
     dataset_name = cfg.get(section, "dataset")
 
-    out: Dict = load_model_dataset_config(cfg, model_name, dataset_name)
+    out: Dict = _load_model_dataset_config_dict(cfg, model_name, dataset_name)
 
     # Layer 6: Profile overrides (highest precedence)
     # Only apply keys explicitly set in the profile section, not inherited DEFAULT keys.
@@ -289,10 +290,16 @@ def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> Di
 
     # Validate the merged configuration
     _validate_profile_config(out, required_keys=ConfigConstants.REQUIRED_PROFILE_KEYS)
-    return out
+    return ProfileConfig.from_dict(out)
 
 
-def load_model_dataset_config(cfg: configparser.ConfigParser, model_name: str, dataset_name: str) -> Dict:
+def load_model_dataset_config(cfg: configparser.ConfigParser, model_name: str, dataset_name: str) -> "ProfileConfig":
+    """Public wrapper that returns a ProfileConfig. See _load_model_dataset_config_dict for full docs."""
+    out = _load_model_dataset_config_dict(cfg, model_name, dataset_name)
+    return ProfileConfig.from_dict(out)
+
+
+def _load_model_dataset_config_dict(cfg: configparser.ConfigParser, model_name: str, dataset_name: str) -> Dict:
     """
     Loads and merges configuration for direct model+dataset training without profiles.
 

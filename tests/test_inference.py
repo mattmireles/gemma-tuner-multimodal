@@ -43,9 +43,9 @@ def test_prepare_features_with_array_and_path(tmp_path, monkeypatch):
 
 def test_decode_and_score_basic():
     # With empty strings, returns Nones for metrics
-    wer, cer, pred, label, n_pred, n_label = decode_and_score(None, ["", "hi"], ["ref", ""], normalizer=lambda x: x)
+    wer, cer, pred, label, n_pred, n_label = decode_and_score(["", "hi"], ["ref", ""], normalizer=lambda x: x)
     assert wer is None and cer is None
 
     # With simple strings, uses provided normalizer
-    wer, cer, pred, label, n_pred, n_label = decode_and_score(None, ["a"], ["a"], normalizer=lambda x: x)
+    wer, cer, pred, label, n_pred, n_label = decode_and_score(["a"], ["a"], normalizer=lambda x: x)
     assert wer == 0.0 and cer == 0.0

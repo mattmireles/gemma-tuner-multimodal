@@ -72,7 +72,7 @@ def to_bool(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def apply_device_defaults(profile_config: dict[str, Any]) -> None:
+def apply_device_defaults(profile_config: "ProfileConfig | dict[str, Any]") -> None:
     """
     Apply device-specific configuration defaults in-place.
 

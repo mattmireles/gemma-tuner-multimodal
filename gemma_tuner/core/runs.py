@@ -101,6 +101,20 @@ class RunConstants:
     INITIAL_RUN_ID = 1
 
 
+def _open_private_file(path: str):
+    """Open path for writing with 0o600 permissions, closing the fd on failure.
+
+    Returns an open file object. Guarantees the raw file descriptor is not
+    leaked if os.fdopen raises (e.g. when the process hits its FD limit).
+    """
+    _fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        return os.fdopen(_fd, "w")
+    except Exception:
+        os.close(_fd)
+        raise
+
+
 def get_next_run_id(output_dir: str) -> int:
     """
     Generates the next sequential run ID with thread-safe file locking.
@@ -326,9 +340,11 @@ def mark_run_as_completed(run_dir: str) -> None:
         Both marker file and metadata update ensure backward compatibility
         and redundancy in completion detection.
     """
-    # Create marker file for backward compatibility
+    # Create marker file for backward compatibility.
+    # Use os.open() with 0o600 so the marker is owner-readable only — it may
+    # contain model identifiers that should not be world-readable on shared systems.
     marker_path = os.path.join(run_dir, RunConstants.COMPLETION_MARKER)
-    with open(marker_path, "w") as f:
+    with _open_private_file(marker_path) as f:
         f.write("completed")
 
     # Also update metadata if present
@@ -468,9 +484,10 @@ def create_run_directory(
             finetuning_run_id = base.split("-")[0] if "-" in base else base
             metadata["finetuning_run_id"] = finetuning_run_id
 
-    # Write initial metadata
+    # Write initial metadata with owner-only permissions (run dirs may sit in a
+    # shared output directory; metadata includes model paths and hyperparameters).
     metadata_path = os.path.join(run_dir, RunConstants.METADATA_FILE)
-    with open(metadata_path, "w") as f:
+    with _open_private_file(metadata_path) as f:
         json.dump(metadata, f, indent=4)
 
     return run_dir
@@ -541,12 +558,17 @@ def update_run_metadata(run_dir: str, **kwargs) -> None:
         )
         meta = {"run_dir": run_dir}
 
-    # Merge updates with existing metadata
-    meta.update(kwargs)
+    # Merge updates with existing metadata.
+    # Convert any ProfileConfig values to plain dicts for JSON serialization.
+    # Build a new dict rather than mutating kwargs in-place while iterating —
+    # mutating a dict's values during iteration is CPython-implementation-defined.
+    serializable = {k: (v.to_dict() if hasattr(v, "to_dict") else v) for k, v in kwargs.items()}
+    meta.update(serializable)
 
-    # Write updated metadata atomically to prevent partial writes
+    # Write updated metadata atomically via tmp+replace to prevent partial writes.
+    # Create tmp file with 0o600 so the replaced target inherits restrictive perms.
     tmp_path = meta_path + ".tmp"
-    with open(tmp_path, "w") as f:
+    with _open_private_file(tmp_path) as f:
         json.dump(meta, f, indent=4)
     os.replace(tmp_path, meta_path)
 
@@ -617,9 +639,9 @@ def write_metrics(run_dir: str, metrics: Dict[str, Any]) -> None:
     existing.update(metrics)
 
     # Write updated metrics atomically (tmp + os.replace) to prevent truncated JSON on crash.
-    # Matches the same pattern used by update_run_metadata above.
+    # Create tmp file with 0o600 — metrics include WER/CER and may expose dataset info.
     tmp_path = str(metrics_path) + ".tmp"
-    with open(tmp_path, "w") as f:
+    with _open_private_file(tmp_path) as f:
         json.dump(existing, f, indent=2)
     os.replace(tmp_path, metrics_path)
 

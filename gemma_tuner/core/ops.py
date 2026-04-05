@@ -13,9 +13,14 @@ Uses deferred imports to avoid loading heavy ML dependencies at module import ti
 reducing CLI startup time from ~2000ms to ~5ms.
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
+
+if TYPE_CHECKING:
+    from gemma_tuner.core.profile_config import ProfileConfig
 
 
 # Operation dispatch and lifecycle management constants
@@ -102,7 +107,7 @@ def _resolve_config_path(explicit_path: str | None = None) -> Path:
     )
 
 
-def prepare(profile_config: Dict, config_path: str | None = None) -> None:
+def prepare(profile_config: ProfileConfig | Dict, config_path: str | None = None) -> None:
     """
     Prepares dataset for fine-tuning by downloading and preprocessing CSV data files.
 
@@ -151,7 +156,7 @@ def prepare(profile_config: Dict, config_path: str | None = None) -> None:
     prepare_data(dataset_name, cfg_path, no_download)
 
 
-def finetune(profile_config: Dict, output_dir: str) -> dict[str, Any]:
+def finetune(profile_config: ProfileConfig, output_dir: str) -> dict[str, Any]:
     """
     Executes model fine-tuning with the specified configuration.
 
@@ -203,7 +208,7 @@ def finetune(profile_config: Dict, output_dir: str) -> dict[str, Any]:
     return result if isinstance(result, dict) else {}
 
 
-def evaluate(profile_config: Dict, output_dir: str):
+def evaluate(profile_config: ProfileConfig, output_dir: str):
     """
     Evaluates a fine-tuned Gemma model on the validation dataset.
 
@@ -284,7 +289,7 @@ def export(model_path_or_profile: str) -> None:
     export_model_dir(model_path_or_profile)
 
 
-def blacklist(profile_config: Dict, run_dir: str) -> None:
+def blacklist(profile_config: ProfileConfig, run_dir: str) -> None:
     """
     Generates blacklist of problematic training samples based on evaluation results.
 

@@ -23,6 +23,11 @@ import logging
 import os
 from datetime import datetime
 from glob import glob
+from pathlib import Path
+
+# Anchor all data-patch paths to the project root so blacklist generation
+# works regardless of the CWD the CLI is invoked from.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 import pandas as pd
 import torch
@@ -37,6 +42,7 @@ from gemma_tuner.scripts.inference_common import (
     build_dataset_config,
     build_eval_dataloader,
     build_gen_kwargs,
+    compute_per_row_metrics,
     load_model_and_processor,
     make_prepare_dataset_fn,
     parse_language_mode,
@@ -157,7 +163,7 @@ def create_blacklist(profile_config, output_dir):
     """
 
     # 1. Configuration Parsing and Validation
-    do_not_blacklist_dir = os.path.join("data_patches", profile_config["dataset"], "do_not_blacklist")
+    do_not_blacklist_dir = str(_PROJECT_ROOT / "data_patches" / profile_config["dataset"] / "do_not_blacklist")
 
     data_args = DataTrainingArguments(
         dataset_name=profile_config["dataset"],
@@ -251,7 +257,7 @@ def create_blacklist(profile_config, output_dir):
     # Load samples with manual text corrections applied
     # These samples should not be blacklisted as their quality issues are resolved
     overridden_ids = set()
-    patches_path = os.path.join("data_patches", source)
+    patches_path = str(_PROJECT_ROOT / "data_patches" / source)
     override_dirs = {
         "text_perfect": os.path.join(patches_path, "override_text_perfect"),
         "text_verbatim": os.path.join(patches_path, "override_text_verbatim"),
@@ -339,24 +345,14 @@ def create_blacklist(profile_config, output_dir):
     id_to_wer = {}
     id_to_cer = {}
 
-    # Load metrics once outside the loop to avoid per-sample overhead
-    import evaluate as _evaluate
-
-    _wer_metric = _evaluate.load("wer")
-    _cer_metric = _evaluate.load("cer")
+    # Per-sample WER/CER via shared helper (also used by evaluate.py for prediction logging)
+    row_wers, row_cers = compute_per_row_metrics(norm_pred_str, norm_label_str)
 
     for i, id_val in enumerate(ids):
         id_to_ground_truth[id_val] = label_str[i]
         id_to_prediction[id_val] = pred_str[i]
-        # For blacklist we need per-sample WER/CER; recompute quickly per row using normalized strings
-        try:
-            _wer = _wer_metric.compute(predictions=[norm_pred_str[i]], references=[norm_label_str[i]])
-            _cer = _cer_metric.compute(predictions=[norm_pred_str[i]], references=[norm_label_str[i]])
-            id_to_wer[id_val] = 100 * _wer
-            id_to_cer[id_val] = 100 * _cer
-        except Exception:
-            id_to_wer[id_val] = None
-            id_to_cer[id_val] = None
+        id_to_wer[id_val] = row_wers[i] if i < len(row_wers) else None
+        id_to_cer[id_val] = row_cers[i] if i < len(row_cers) else None
 
     # 9. Blacklist Generation and Quality Assessment
     # Generate comprehensive blacklist based on quality thresholds and manual overrides

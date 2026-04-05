@@ -32,7 +32,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Dict
+from typing import TYPE_CHECKING, Dict
+
+if TYPE_CHECKING:
+    from gemma_tuner.core.profile_config import ProfileConfig
 
 from gemma_tuner.constants import TrainingDefaults
 
@@ -66,7 +69,7 @@ class TrainingArgConstants:
     TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
 
-def get_effective_preprocessing_workers(profile_config: Dict, device) -> int | None:
+def get_effective_preprocessing_workers(profile_config: ProfileConfig | Dict, device) -> int | None:
     """
     Determines optimal preprocessing worker count using real-time system resources.
 
@@ -153,7 +156,7 @@ def get_effective_preprocessing_workers(profile_config: Dict, device) -> int | N
     return safe_workers
 
 
-def get_effective_dataloader_workers(profile_config: Dict, device) -> int:
+def get_effective_dataloader_workers(profile_config: ProfileConfig | Dict, device) -> int:
     """
     Determines optimal DataLoader worker count for training based on platform.
 

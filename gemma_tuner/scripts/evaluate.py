@@ -35,6 +35,7 @@ from gemma_tuner.scripts.inference_common import (
     build_dataset_config,
     build_eval_dataloader,
     build_gen_kwargs,
+    compute_per_row_metrics,
     load_model_and_processor,
     make_prepare_dataset_fn,
     parse_language_mode,
@@ -412,24 +413,11 @@ def run_evaluation(profile_config, output_dir):
             # Log predictions
             if data_args.log_predictions:
                 str_data = []
-                # Load metrics once outside the loop to avoid per-sample overhead
-                import evaluate as _evaluate
-
-                _wer_metric = _evaluate.load("wer")
-                _cer_metric = _evaluate.load("cer")
+                # Compute per-row WER/CER via shared helper (also used by blacklist.py)
+                row_wers, row_cers = compute_per_row_metrics(norm_pred_str, norm_label_str)
                 for i in range(len(pred_str)):
-                    # Best-effort alignment using normalized arrays; compute per-row quickly
-                    row_wer = 0.0
-                    row_cer = 0.0
-                    try:
-                        _wer = _wer_metric.compute(predictions=[norm_pred_str[i]], references=[norm_label_str[i]])
-                        _cer = _cer_metric.compute(predictions=[norm_pred_str[i]], references=[norm_label_str[i]])
-                        row_wer = 100 * _wer
-                        row_cer = 100 * _cer
-                    except Exception as e:
-                        logger.debug(f"Per-row metric computation failed for row {i}: {e}")
-                        row_wer = None
-                        row_cer = None
+                    row_wer = row_wers[i] if i < len(row_wers) else None
+                    row_cer = row_cers[i] if i < len(row_cers) else None
                     str_data.append(
                         [
                             ids[i] if i < len(ids) else "",

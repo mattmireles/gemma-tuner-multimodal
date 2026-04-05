@@ -8,6 +8,16 @@ class DummyProcessor:
     def __init__(self):
         class Tok:
             pad_token_id = 0
+            bos_token_id = 0  # Matches the zeros in dummy input_ids
+            unk_token_id = 3
+
+            def convert_tokens_to_ids(self, token):
+                # Return unk_token_id for any special token — signals "not found"
+                # so the collator skips prompt masking gracefully.
+                return self.unk_token_id
+
+            def encode(self, text, add_special_tokens=False):
+                return [99]
 
         self.tokenizer = Tok()
         self.sampling_rate = 16000
