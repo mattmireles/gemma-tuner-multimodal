@@ -102,6 +102,12 @@ import re
 import subprocess
 import threading
 import urllib.request
+from pathlib import Path
+
+# Anchor all output paths to the project root so that `prepare_data()` writes
+# to the correct location regardless of where the CLI is invoked from.
+# Structure: prepare_data.py -> scripts/ -> gemma_tuner/ -> project root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 import librosa
 import pandas as pd
@@ -364,9 +370,9 @@ def prepare_data(dataset_name, config_path, no_download=False):
     # Output Path Construction
     # Build organized directory structure for dataset files
     dataset_file = config.get(dataset_section, "source")  # Assuming 'source' key holds the source CSV name
-    prepared_csv_path = os.path.join("data", "datasets", dataset_name, f"{dataset_name}_prepared.csv")
-    train_split_path = os.path.join("data", "datasets", dataset_name, "train.csv")
-    val_split_path = os.path.join("data", "datasets", dataset_name, "validation.csv")
+    prepared_csv_path = str(_PROJECT_ROOT / "data" / "datasets" / dataset_name / f"{dataset_name}_prepared.csv")
+    train_split_path = str(_PROJECT_ROOT / "data" / "datasets" / dataset_name / "train.csv")
+    val_split_path = str(_PROJECT_ROOT / "data" / "datasets" / dataset_name / "validation.csv")
 
     # Directory Structure Creation
     # Ensure output directories exist before processing
@@ -383,7 +389,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
         languages = [lang.strip() for lang in languages_str.split(",")]
 
     # 1. Audio Processing Pipeline
-    df = pd.read_csv(os.path.join("data", f"{dataset_file}.csv"))
+    df = pd.read_csv(str(_PROJECT_ROOT / "data" / f"{dataset_file}.csv"))
     initial_rows = len(df)
 
     # Column Standardization
@@ -406,7 +412,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
     else:
         # Traditional mode: Download and convert audio files
         # Process all audio files with parallel download and format conversion
-        audio_dir = os.path.join("data", "audio")
+        audio_dir = str(_PROJECT_ROOT / "data" / "audio")
         os.makedirs(audio_dir, exist_ok=True)
 
         # Error Tracking Initialization

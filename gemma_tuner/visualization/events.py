@@ -85,7 +85,9 @@ def _extract_audio_features(batch: Optional[dict[str, Any]]) -> Optional[list[li
         return None
     # Gemma 3n batches use "audio_values"; older Whisper-style batches use "input_features".
     # Try both keys so this function works for all model families.
-    raw = batch.get("input_features") or batch.get("audio_values")
+    raw = batch.get("input_features")
+    if raw is None:
+        raw = batch.get("audio_values")
     if raw is None:
         return None
     mel = raw[0].detach().cpu().numpy()

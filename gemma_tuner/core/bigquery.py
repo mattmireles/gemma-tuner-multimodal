@@ -394,6 +394,14 @@ def build_query_and_export(
     # Verify userland dataframe dependencies before invoking BigQuery APIs
     _verify_dataframe_dependencies()
 
+    # Validate all column names BEFORE defining _select_for, which captures them
+    # via closure. Doing this first ensures no unsanitized name reaches the SQL
+    # template even if the function is refactored to call _select_for earlier.
+    # Backtick quoting prevents reserved-word conflicts but a backtick *inside* a
+    # name would break the quoting and allow injection — reject anything non-identifier.
+    for col_name in filter(None, [audio_col, transcript_col, transcript_target, language_col]):
+        _assert_safe_column_name(col_name)
+
     # Import SDK lazily
     import google.auth  # type: ignore
     from google.cloud import bigquery  # type: ignore
@@ -405,6 +413,11 @@ def build_query_and_export(
         id_source_col:
             - If provided, CAST that column to STRING as `id`
             - Otherwise, synthesize a stable `id` via ROW_NUMBER()
+
+        Note: language_col is validated by _assert_safe_column_name before this
+        function is defined. has_language (set after schema discovery) determines
+        whether language_col is actually present in the table; _select_for uses
+        NULL AS language when the column is absent.
         """
         # Backtick-quote all column identifiers to handle reserved words and names with spaces.
         lang_sel = f", `{language_col}` AS language" if language_col else ", NULL AS language"
@@ -424,12 +437,6 @@ def build_query_and_export(
     field_names_lower = set(field_lower_to_original.keys())
     # Map field names to their types for type checking
     field_type_map = {f.name.lower(): f.field_type for f in fields}
-
-    # Validate all column names before they are interpolated into SQL strings.
-    # Backtick quoting prevents reserved-word conflicts but a backtick *inside* a
-    # name would break the quoting and allow injection — reject anything non-identifier.
-    for col_name in filter(None, [audio_col, transcript_col, transcript_target, language_col]):
-        _assert_safe_column_name(col_name)
 
     if audio_col.lower() not in field_names_lower:
         raise ValueError(f"Audio column '{audio_col}' not found in {tables[0][0]}.{tables[0][1]}")

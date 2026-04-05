@@ -2,6 +2,7 @@ import os
 
 import pandas as pd
 
+import gemma_tuner.utils.dataset_utils as _du_mod
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 
 
@@ -49,6 +50,7 @@ max_duration = 30
 
     # Monkeypatch cwd so dataset_utils reads our config.ini
     cwd = os.getcwd()
+    _du_mod._config = None  # Reset lazy singleton so it reads from new cwd
     try:
         os.chdir(str(tmp_path))
         ds, source = load_dataset_split(
@@ -60,6 +62,7 @@ max_duration = 30
         )
     finally:
         os.chdir(cwd)
+        _du_mod._config = None  # Reset so other tests aren't affected
 
     # Expect id=3 removed; id=2 kept; id=1 text overridden
     ids = set(int(r["id"]) for r in ds)
@@ -97,6 +100,7 @@ max_duration = 30
     _write_csv(str(patches_root / "delete" / "b.csv"), [{"id": 11}])
 
     cwd = os.getcwd()
+    _du_mod._config = None
     try:
         os.chdir(str(tmp_path))
         ds, _ = load_dataset_split(
@@ -108,6 +112,7 @@ max_duration = 30
         samples = list(ds)
     finally:
         os.chdir(cwd)
+        _du_mod._config = None
 
     ids = [int(r["id"]) for r in samples]
     assert ids == [10]
@@ -135,6 +140,7 @@ max_duration = 30
 """)
 
     cwd = os.getcwd()
+    _du_mod._config = None
     try:
         os.chdir(str(tmp_path))
         ds, source = load_dataset_split(
@@ -144,6 +150,7 @@ max_duration = 30
         )
     finally:
         os.chdir(cwd)
+        _du_mod._config = None
 
     assert source == "granary-en"
     assert len(ds) == 1
@@ -172,6 +179,7 @@ max_duration = 30
 """)
 
     cwd = os.getcwd()
+    _du_mod._config = None
     try:
         os.chdir(str(tmp_path))
         ds, source = load_dataset_split(
@@ -181,6 +189,7 @@ max_duration = 30
         )
     finally:
         os.chdir(cwd)
+        _du_mod._config = None
 
     assert source == "analytics-en"
     assert len(ds) == 1
@@ -214,6 +223,7 @@ max_duration = 30
     _write_csv(str(patches_root / "delete" / "blacklist.csv"), [{"id": 2}, {"id": "3.0"}])
 
     cwd = os.getcwd()
+    _du_mod._config = None
     try:
         os.chdir(str(tmp_path))
         ds, _ = load_dataset_split(
@@ -223,6 +233,7 @@ max_duration = 30
         )
     finally:
         os.chdir(cwd)
+        _du_mod._config = None
 
     ids = sorted(int(row["id"]) for row in ds)
     assert ids == [2]

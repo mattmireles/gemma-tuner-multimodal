@@ -99,10 +99,27 @@ logger = logging.getLogger(__name__)
 # Anchored config.ini path — resolves relative to the project root regardless of cwd.
 _CONFIG_INI = Path(__file__).resolve().parent.parent.parent / "config.ini"
 
-# Module-level config singleton — config.ini is static at runtime so we read it once.
-# All callers use _config instead of creating a new ConfigParser on every call.
-_config = configparser.ConfigParser()
-_config.read(_CONFIG_INI)
+# Lazy-loaded config singleton. Deferred so tests can os.chdir() or monkeypatch
+# _CONFIG_INI before the first call to load_dataset_split(). Thread-safe for
+# single-threaded training pipelines (all current callers).
+_config: configparser.ConfigParser | None = None
+
+
+def _get_config() -> configparser.ConfigParser:
+    """Return the module-level ConfigParser, reading config.ini on first access.
+
+    Checks CWD for config.ini first (so tests that chdir work), then falls back
+    to the anchored _CONFIG_INI path computed at import time.
+    """
+    global _config
+    if _config is None:
+        _config = configparser.ConfigParser()
+        cwd_ini = Path("config.ini")
+        if cwd_ini.exists():
+            _config.read(cwd_ini)
+        else:
+            _config.read(_CONFIG_INI)
+    return _config
 
 
 @dataclass
@@ -222,7 +239,7 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
         max_samples=max_samples,
         patches_dir=patches_dir,
         streaming_enabled=streaming_enabled,
-        config=_config,
+        config=_get_config(),
     )
     source = adapter.patch_source(context)
 
@@ -471,7 +488,11 @@ def _apply_patch_bundle(dataset, patch_bundle, configured_text_col, num_workers,
             if sample_id in _overrides:
                 # Sample has a manual correction: apply it and mirror to the base text col.
                 value = _overrides[sample_id]
-                new_example[_column] = value
+                # Only write the override column if it already exists in the row to
+                # avoid introducing a new column that not every row has (which breaks
+                # the Arrow schema). The base text column is always written.
+                if _column in example:
+                    new_example[_column] = value
                 if _text_col:
                     new_example[_text_col] = value
                 _counter[0] += 1

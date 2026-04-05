@@ -45,6 +45,7 @@ import configparser
 import pytest
 
 from gemma_tuner.core.config import ConfigConstants, _validate_profile_config, load_profile_config
+from gemma_tuner.core.profile_config import ProfileConfig
 
 
 def make_cfg(sections: dict) -> configparser.ConfigParser:
@@ -213,3 +214,134 @@ def test_load_profile_config_required_keys_enforced():
     # Missing training hyperparameters trigger required check
     with pytest.raises(ValueError, match=r"Missing required config keys"):
         load_profile_config(cfg, "p")
+
+
+# ── ProfileConfig dataclass tests ──
+
+
+class TestProfileConfig:
+    """Tests for the ProfileConfig typed container and its dict-compatible interface."""
+
+    def test_from_dict_known_keys(self):
+        """Known keys are assigned to typed dataclass fields."""
+        d = {"model": "gemma-4", "dataset": "librispeech", "max_label_length": 128}
+        pc = ProfileConfig.from_dict(d)
+        assert pc.model == "gemma-4"
+        assert pc.dataset == "librispeech"
+        assert pc.max_label_length == 128
+
+    def test_from_dict_unknown_keys_go_to_extras(self):
+        """Unknown keys are accessible via dict interface but stored in _extras."""
+        d = {"model": "gemma-4", "some_custom_key": "custom_value"}
+        pc = ProfileConfig.from_dict(d)
+        assert pc["some_custom_key"] == "custom_value"
+        assert "some_custom_key" in pc
+
+    def test_dict_style_read_write(self):
+        """Dict-style [] access works for both known and unknown keys."""
+        pc = ProfileConfig(model="gemma-4")
+        assert pc["model"] == "gemma-4"
+        pc["model"] = "gemma-5"
+        assert pc.model == "gemma-5"
+        pc["new_key"] = 42
+        assert pc["new_key"] == 42
+
+    def test_get_with_default(self):
+        """.get() returns default when key is missing."""
+        pc = ProfileConfig()
+        assert pc.get("model_name_or_path") is None
+        assert pc.get("nonexistent", "fallback") == "fallback"
+
+    def test_contains(self):
+        """'in' operator works for known and unknown keys."""
+        pc = ProfileConfig.from_dict({"model": "gemma-4", "extra": True})
+        assert "model" in pc
+        assert "extra" in pc
+        assert "nonexistent_xyz" not in pc
+
+    def test_update(self):
+        """.update() merges keys into the config."""
+        pc = ProfileConfig(model="old")
+        pc.update({"model": "new", "custom": 123})
+        assert pc.model == "new"
+        assert pc["custom"] == 123
+
+    def test_setdefault(self):
+        """.setdefault() only sets if key is missing from extras."""
+        pc = ProfileConfig()
+        pc.setdefault("new_key", "value")
+        assert pc["new_key"] == "value"
+        pc.setdefault("new_key", "other")
+        assert pc["new_key"] == "value"
+
+    def test_pop(self):
+        """.pop() removes and returns extras keys."""
+        pc = ProfileConfig.from_dict({"extra_key": "val"})
+        assert pc.pop("extra_key") == "val"
+        assert "extra_key" not in pc
+        assert pc.pop("missing", "default") == "default"
+
+    def test_keys_values_items(self):
+        """keys(), values(), items() include both known and extras."""
+        pc = ProfileConfig.from_dict({"model": "gemma-4", "custom": True})
+        k = pc.keys()
+        assert "model" in k
+        assert "custom" in k
+        items = dict(pc.items())
+        assert items["model"] == "gemma-4"
+        assert items["custom"] is True
+
+    def test_iteration_enables_dict_conversion(self):
+        """dict(config) produces a plain dict with all keys."""
+        pc = ProfileConfig.from_dict({"model": "gemma-4", "extra": 99})
+        d = dict(pc)
+        assert d["model"] == "gemma-4"
+        assert d["extra"] == 99
+        assert isinstance(d, dict)
+
+    def test_to_dict(self):
+        """.to_dict() returns a plain dict."""
+        pc = ProfileConfig.from_dict({"model": "gemma-4", "extra": True})
+        d = pc.to_dict()
+        assert isinstance(d, dict)
+        assert d["model"] == "gemma-4"
+        assert d["extra"] is True
+
+    def test_load_profile_config_returns_profile_config(self):
+        """load_profile_config() returns a ProfileConfig, not a plain dict."""
+        cfg = make_cfg(
+            {
+                "DEFAULT": {
+                    "learning_rate": "1e-4",
+                },
+                "model:gemma-4-e2b-it": {
+                    "group": "gemma",
+                    "base_model": "google/gemma-4-E2B-it",
+                },
+                "group:gemma": {},
+                "dataset:dummy": {
+                    "source": "dummy_source",
+                    "text_column": "text",
+                    "max_label_length": "128",
+                    "max_duration": "30",
+                    "train_split": "train",
+                    "validation_split": "validation",
+                },
+                "profile:test": {
+                    "model": "gemma-4-e2b-it",
+                    "dataset": "dummy",
+                    "per_device_train_batch_size": "4",
+                    "num_train_epochs": "2",
+                    "logging_steps": "10",
+                    "save_steps": "50",
+                    "save_total_limit": "2",
+                    "gradient_accumulation_steps": "1",
+                },
+            }
+        )
+        result = load_profile_config(cfg, "test")
+        assert isinstance(result, ProfileConfig)
+        assert result.model == "gemma-4-e2b-it"
+        assert result["dataset"] == "dummy"
+        assert isinstance(result.max_label_length, int)
+        assert result.max_label_length == 128

@@ -57,7 +57,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Union
+
+if TYPE_CHECKING:
+    from gemma_tuner.core.profile_config import ProfileConfig
 
 import torch
 from datasets import Dataset as HFDataset
@@ -201,7 +204,7 @@ def _discover_candidate_target_modules(model) -> List[str]:
     return sorted(present)
 
 
-def main(profile_config: Dict, output_dir: str):
+def main(profile_config: "ProfileConfig", output_dir: str):
     """Main Gemma 3n LoRA training entry.
 
     Orchestrates dataset loading, model+processor initialization, LoRA injection,

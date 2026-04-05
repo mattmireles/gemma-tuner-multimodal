@@ -25,7 +25,10 @@ Integrates with:
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from gemma_tuner.core.profile_config import ProfileConfig
 
 import questionary
 
@@ -34,6 +37,8 @@ from gemma_tuner.wizard import granary as _granary
 from gemma_tuner.wizard.base import apple_style, console
 
 setup_granary_dataset = _granary.setup_granary_dataset
+_read_config = _config_store._read_config
+_add_dataset_to_config = _config_store._add_dataset_to_config
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +224,7 @@ def select_bigquery_table_and_export() -> Dict[str, Any]:
 
 def generate_profile_config(
     method: Dict[str, Any], model: str, dataset: Dict[str, Any], method_config: Dict[str, Any]
-) -> Dict[str, Any]:
+) -> "ProfileConfig":
     """Generate config dict for the existing training infrastructure by leveraging the core config loader."""
 
     from gemma_tuner.core.config import load_model_dataset_config

@@ -20,9 +20,15 @@ Each model-specific module must implement:
 - Consistent output directory structure for downstream evaluation
 """
 
+from __future__ import annotations
+
 import argparse
 import importlib
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_tuner.core.profile_config import ProfileConfig
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +57,7 @@ class ModelDetectionConstants:
     VISUALIZATION_OPEN_BROWSER = False
 
 
-def main(profile_config, output_dir):
+def main(profile_config: "ProfileConfig", output_dir: str):
     """
     Orchestrates Gemma fine-tuning by routing to the Gemma training implementation.
 
