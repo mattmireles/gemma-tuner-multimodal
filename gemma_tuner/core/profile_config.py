@@ -30,11 +30,19 @@ Consumed by:
 Design decisions:
 - Uses dataclass with field(default=...) for optional keys, NOT __init__ params,
   so construction from a validated dict is clean via from_dict().
+- All known fields default to the module-level _UNSET sentinel.  from_dict()
+  only sets fields that appear in the source dict; fields absent from the source
+  remain _UNSET.  __contains__ (and therefore .get(), .keys(), .items()) treats
+  a field with value _UNSET as "not present", matching plain-dict semantics.
 - Dict-like methods delegate to dataclasses.fields() for known keys and _extras
   for unknown keys. This means profile_config["model"] and profile_config.model
   both work.
 - Mutation is allowed (not frozen) because the CLI layer, device layer, and
   training modules all mutate the config after construction.
+- No __setattr__ override is needed: setting any known field to a real value
+  (not _UNSET) automatically makes it visible via __contains__ because that
+  check is always live (getattr(...) is not _UNSET).  pop() resets a field back
+  to _UNSET to hide it again.
 """
 
 from __future__ import annotations
@@ -44,7 +52,9 @@ from typing import Any, Dict, Iterator, List, Optional, Union
 
 
 # Sentinel for "field not set" — distinct from None (which is a valid value
-# for some optional fields like max_samples).
+# for some optional fields like max_samples).  All known ProfileConfig fields
+# default to this value; __contains__ returns False for any field still holding
+# _UNSET, matching plain-dict "key not present" semantics.
 _UNSET = object()
 
 
@@ -52,9 +62,9 @@ _UNSET = object()
 class ProfileConfig:
     """Typed configuration container for the Gemma fine-tuning pipeline.
 
-    All known configuration keys are declared as typed fields. Unknown keys
-    (from INI passthrough, wizard additions, etc.) are stored in _extras and
-    accessible via the dict-style interface.
+    All known configuration keys are declared as typed fields with _UNSET as
+    their default.  Unknown keys (from INI passthrough, wizard additions, etc.)
+    are stored in _extras and accessible via the same dict-style interface.
 
     Construction:
         Use ProfileConfig.from_dict(validated_dict) after _validate_profile_config()
@@ -78,113 +88,108 @@ class ProfileConfig:
 
     # ── Required identity keys (always present after profile/model+dataset load) ──
 
-    model: str = ""
-    dataset: str = ""
-    base_model: str = ""
+    model: str = _UNSET  # type: ignore[assignment]
+    dataset: str = _UNSET  # type: ignore[assignment]
+    base_model: str = _UNSET  # type: ignore[assignment]
 
     # ── Required training keys (enforced by REQUIRED_PROFILE_KEYS) ──
 
-    train_split: str = ""
-    validation_split: str = ""
-    text_column: str = ""
-    max_label_length: int = 0
-    max_duration: float = 0.0
-    per_device_train_batch_size: int = 1
-    num_train_epochs: int = 1
-    logging_steps: int = 10
-    save_steps: int = 50
-    save_total_limit: int = 2
-    gradient_accumulation_steps: int = 1
+    train_split: str = _UNSET  # type: ignore[assignment]
+    validation_split: str = _UNSET  # type: ignore[assignment]
+    text_column: str = _UNSET  # type: ignore[assignment]
+    max_label_length: int = _UNSET  # type: ignore[assignment]
+    max_duration: float = _UNSET  # type: ignore[assignment]
+    per_device_train_batch_size: int = _UNSET  # type: ignore[assignment]
+    num_train_epochs: int = _UNSET  # type: ignore[assignment]
+    logging_steps: int = _UNSET  # type: ignore[assignment]
+    save_steps: int = _UNSET  # type: ignore[assignment]
+    save_total_limit: int = _UNSET  # type: ignore[assignment]
+    gradient_accumulation_steps: int = _UNSET  # type: ignore[assignment]
 
     # ── Optional training hyperparameters ──
 
-    per_device_eval_batch_size: Optional[int] = None
-    warmup_steps: Optional[int] = None
-    learning_rate: Optional[float] = None
-    weight_decay: Optional[float] = None
-    lora_r: Optional[int] = None
-    lora_alpha: Optional[int] = None
-    lora_dropout: Optional[float] = None
-    lora_target_modules: Optional[List[str]] = None
-    temperature: Optional[float] = None
-    distillation_temperature: Optional[float] = None
-    distillation_alpha: Optional[float] = None
-    kl_weight: Optional[float] = None
-    num_beams: Optional[int] = None
+    per_device_eval_batch_size: Optional[int] = _UNSET  # type: ignore[assignment]
+    warmup_steps: Optional[int] = _UNSET  # type: ignore[assignment]
+    learning_rate: Optional[float] = _UNSET  # type: ignore[assignment]
+    weight_decay: Optional[float] = _UNSET  # type: ignore[assignment]
+    lora_r: Optional[int] = _UNSET  # type: ignore[assignment]
+    lora_alpha: Optional[int] = _UNSET  # type: ignore[assignment]
+    lora_dropout: Optional[float] = _UNSET  # type: ignore[assignment]
+    lora_target_modules: Optional[List[str]] = _UNSET  # type: ignore[assignment]
+    temperature: Optional[float] = _UNSET  # type: ignore[assignment]
+    distillation_temperature: Optional[float] = _UNSET  # type: ignore[assignment]
+    distillation_alpha: Optional[float] = _UNSET  # type: ignore[assignment]
+    kl_weight: Optional[float] = _UNSET  # type: ignore[assignment]
+    num_beams: Optional[int] = _UNSET  # type: ignore[assignment]
 
     # ── Optional dataset/evaluation keys ──
 
-    max_samples: Optional[int] = None
-    id_column: Optional[str] = None
-    validation_wer_threshold: Optional[float] = None
-    wer_threshold: Optional[float] = None
-    sample_validation_rate: float = 1.0
+    max_samples: Optional[int] = _UNSET  # type: ignore[assignment]
+    id_column: Optional[str] = _UNSET  # type: ignore[assignment]
+    validation_wer_threshold: Optional[float] = _UNSET  # type: ignore[assignment]
+    wer_threshold: Optional[float] = _UNSET  # type: ignore[assignment]
+    sample_validation_rate: float = _UNSET  # type: ignore[assignment]
 
     # ── Device and precision ──
 
-    dtype: Optional[str] = None
-    attn_implementation: Optional[str] = None
-    fp16: bool = False
-    bf16: bool = False
+    dtype: Optional[str] = _UNSET  # type: ignore[assignment]
+    attn_implementation: Optional[str] = _UNSET  # type: ignore[assignment]
+    fp16: bool = _UNSET  # type: ignore[assignment]
+    bf16: bool = _UNSET  # type: ignore[assignment]
 
     # ── Feature flags with defaults (from FALLBACK_DEFAULTS) ──
 
-    language_mode: str = "strict"
-    languages: Union[str, List[str]] = "all"
-    force_languages: bool = False
-    streaming_enabled: bool = False
-    gradient_checkpointing: bool = False
-    skip_audio_validation: bool = False
-    preprocessing_num_workers: int = 0
-    dataloader_num_workers: int = 4
+    language_mode: str = _UNSET  # type: ignore[assignment]
+    languages: Union[str, List[str]] = _UNSET  # type: ignore[assignment]
+    force_languages: bool = _UNSET  # type: ignore[assignment]
+    streaming_enabled: bool = _UNSET  # type: ignore[assignment]
+    gradient_checkpointing: bool = _UNSET  # type: ignore[assignment]
+    skip_audio_validation: bool = _UNSET  # type: ignore[assignment]
+    preprocessing_num_workers: int = _UNSET  # type: ignore[assignment]
+    dataloader_num_workers: int = _UNSET  # type: ignore[assignment]
 
     # ── Evaluation / save strategy ──
 
-    eval_strategy: Optional[str] = None
-    save_strategy: Optional[str] = None
-    load_validation: Optional[bool] = None
-    visualize: Optional[bool] = None
-    use_peft: Optional[bool] = None
+    eval_strategy: Optional[str] = _UNSET  # type: ignore[assignment]
+    save_strategy: Optional[str] = _UNSET  # type: ignore[assignment]
+    load_validation: Optional[bool] = _UNSET  # type: ignore[assignment]
+    visualize: Optional[bool] = _UNSET  # type: ignore[assignment]
+    use_peft: Optional[bool] = _UNSET  # type: ignore[assignment]
 
     # ── CLI-injected keys (set after config load) ──
 
-    model_name_or_path: Optional[str] = None
-    split: Optional[str] = None
+    model_name_or_path: Optional[str] = _UNSET  # type: ignore[assignment]
+    split: Optional[str] = _UNSET  # type: ignore[assignment]
 
     # ── Wizard-only keys ──
 
-    peft_method: Optional[str] = None
-    dataset_name: Optional[str] = None
-    dataset_config: Optional[str] = None
-    eval_split: Optional[str] = None
-    dataset_source_type: Optional[str] = None
-    train_dataset_path: Optional[str] = None
-    eval_dataset_path: Optional[str] = None
+    peft_method: Optional[str] = _UNSET  # type: ignore[assignment]
+    dataset_name: Optional[str] = _UNSET  # type: ignore[assignment]
+    dataset_config: Optional[str] = _UNSET  # type: ignore[assignment]
+    eval_split: Optional[str] = _UNSET  # type: ignore[assignment]
+    dataset_source_type: Optional[str] = _UNSET  # type: ignore[assignment]
+    train_dataset_path: Optional[str] = _UNSET  # type: ignore[assignment]
+    eval_dataset_path: Optional[str] = _UNSET  # type: ignore[assignment]
 
     # ── Granary-only keys ──
 
-    hf_subset: Optional[str] = None
-    hf_name: Optional[str] = None
-    local_path: Optional[str] = None
-    audio_sources: Optional[Dict[str, str]] = None
+    hf_subset: Optional[str] = _UNSET  # type: ignore[assignment]
+    hf_name: Optional[str] = _UNSET  # type: ignore[assignment]
+    local_path: Optional[str] = _UNSET  # type: ignore[assignment]
+    audio_sources: Optional[Dict[str, str]] = _UNSET  # type: ignore[assignment]
 
     # ── Misc keys that flow through from INI ──
 
-    profile: Optional[str] = None
-    group: Optional[str] = None
-    source: Optional[str] = None
-    concatenate_audio: Optional[bool] = None
-    enable_8bit: Optional[bool] = None
-    streaming: Optional[bool] = None
+    profile: Optional[str] = _UNSET  # type: ignore[assignment]
+    group: Optional[str] = _UNSET  # type: ignore[assignment]
+    source: Optional[str] = _UNSET  # type: ignore[assignment]
+    concatenate_audio: Optional[bool] = _UNSET  # type: ignore[assignment]
+    enable_8bit: Optional[bool] = _UNSET  # type: ignore[assignment]
+    streaming: Optional[bool] = _UNSET  # type: ignore[assignment]
 
     # ── Overflow for unknown keys ──
 
     _extras: Dict[str, Any] = field(default_factory=dict, repr=False)
-
-    # Tracks which known fields were explicitly set via from_dict().
-    # Used by __contains__ to match dict-like "key in config" semantics:
-    # a known field that was never in the source dict reports as "not in".
-    _set_fields: set = field(default_factory=set, repr=False)
 
     # ─────────────────────────────────────────────────────────────────────
     # Construction
@@ -194,9 +199,8 @@ class ProfileConfig:
     def from_dict(cls, d: Dict[str, Any]) -> ProfileConfig:
         """Construct a ProfileConfig from a validated configuration dict.
 
-        Known keys are assigned to their typed fields; unknown keys go to _extras.
-        Tracks which known fields were explicitly present in d so that __contains__
-        matches dict-like "key in config" semantics.
+        Known keys are assigned to their typed fields (leaving all others at
+        the _UNSET sentinel).  Unknown keys go to _extras.
 
         This is the canonical construction path — called by load_profile_config()
         and load_model_dataset_config() after _validate_profile_config() has
@@ -208,20 +212,16 @@ class ProfileConfig:
         Returns:
             ProfileConfig instance with all values assigned.
         """
-        internal = {"_extras", "_set_fields"}
-        known_names = {f.name for f in fields(cls) if f.name not in internal}
+        known_names = {f.name for f in fields(cls) if f.name not in _INTERNAL_FIELDS}
         known = {}
         extras = {}
-        set_fields: set = set()
         for k, v in d.items():
             if k in known_names:
                 known[k] = v
-                set_fields.add(k)
             else:
                 extras[k] = v
         instance = cls(**known)
         instance._extras = extras
-        instance._set_fields = set_fields
         return instance
 
     # ─────────────────────────────────────────────────────────────────────
@@ -229,60 +229,39 @@ class ProfileConfig:
     # ─────────────────────────────────────────────────────────────────────
 
     # Internal fields that should never appear in the dict-like interface.
-    _INTERNAL_FIELDS = frozenset({"_extras", "_set_fields"})
+    # Note: this is a class variable, not a dataclass field.
 
-    def __setattr__(self, key: str, value: Any) -> None:
-        """Override attribute assignment to keep _set_fields in sync.
-
-        When caller writes `config.model = "x"` directly (attribute style),
-        this ensures "model" is added to _set_fields so that `"model" in config`
-        and `config.get("model")` return the expected values — matching the
-        behavior of `config["model"] = "x"` (which goes through __setitem__).
-
-        During dataclass __init__, _set_fields is not yet initialized (it is
-        declared last in the field list), so we guard with a hasattr-style check
-        via __dict__ lookup to avoid infinite recursion.
-        """
-        object.__setattr__(self, key, value)
-        # Only track known domain fields — not internals, not extras.
-        if key not in self._INTERNAL_FIELDS:
-            # __dict__ lookup avoids calling __getattribute__ which could recurse.
-            sf = self.__dict__.get("_set_fields")
-            if sf is not None:
-                sf.add(key)
-
-    def _known_field_names(self) -> set[str]:
+    def _known_field_names(self) -> set:
         """Return the set of known (non-internal) field names."""
-        return {f.name for f in fields(self) if f.name not in self._INTERNAL_FIELDS}
+        return {f.name for f in fields(self) if f.name not in _INTERNAL_FIELDS}
 
     def __getitem__(self, key: str) -> Any:
-        known = self._known_field_names()
-        if key in known:
-            return getattr(self, key)
+        if key in self._known_field_names():
+            value = getattr(self, key)
+            if value is _UNSET:
+                raise KeyError(key)
+            return value
         if key in self._extras:
             return self._extras[key]
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
-        known = self._known_field_names()
-        if key in known:
+        if key in self._known_field_names():
             object.__setattr__(self, key, value)
-            self._set_fields.add(key)
         else:
             self._extras[key] = value
 
     def __contains__(self, key: object) -> bool:
         """Dict-like membership test.
 
-        For known fields, only returns True if the field was explicitly set
-        (via from_dict() or __setitem__). This matches plain-dict semantics
-        where a key is "in" the dict only if it was actually inserted.
-        Unknown keys check _extras as usual.
+        Returns True only if the key was explicitly set (field value is not
+        _UNSET, or key is present in _extras).  Known fields that were never
+        assigned report as "not in", matching plain-dict semantics.
         """
         if not isinstance(key, str):
             return False
-        if key in self._set_fields:
-            return True
+        if key in self._known_field_names():
+            return getattr(self, key, _UNSET) is not _UNSET
         return key in self._extras
 
     def __delitem__(self, key: str) -> None:
@@ -294,15 +273,15 @@ class ProfileConfig:
             raise KeyError(key)
 
     def _is_set(self, key: str) -> bool:
-        """Return True if key was explicitly set (known field in _set_fields or in _extras)."""
-        return key in self._set_fields or key in self._extras
+        """Return True if key was explicitly set (known field not _UNSET, or in _extras)."""
+        return key in self
 
     def get(self, key: str, default: Any = None) -> Any:
         """Dict-compatible .get() with default value support.
 
-        For known fields that were never explicitly set, returns the caller's
-        default (matching plain-dict semantics). For set known fields and
-        extras keys, returns the stored value.
+        For known fields that were never explicitly set (_UNSET), returns the
+        caller's default (matching plain-dict semantics). For set known fields
+        and extras keys, returns the stored value.
         """
         if key in self:
             return self[key]
@@ -311,17 +290,17 @@ class ProfileConfig:
     def pop(self, key: str, *args: Any) -> Any:
         """Dict-compatible .pop() — removes key from dict view and returns value.
 
-        For known fields: removes from _set_fields so the field no longer
+        For known fields: resets the field back to _UNSET so it no longer
         appears in __contains__, get(), keys(), or items(). The underlying
-        attribute value is preserved (dataclass fields can't be deleted) but
-        is no longer reachable via the dict-style interface.
+        dataclass attribute is set to _UNSET (the field cannot be deleted).
 
         For extras keys: removes from _extras entirely.
         """
-        if key in self._set_fields:
-            value = getattr(self, key)
-            self._set_fields.discard(key)
-            return value
+        if key in self._known_field_names():
+            value = getattr(self, key, _UNSET)
+            if value is not _UNSET:
+                object.__setattr__(self, key, _UNSET)
+                return value
         if key in self._extras:
             return self._extras.pop(key)
         if args:
@@ -345,20 +324,24 @@ class ProfileConfig:
             self[k] = v
 
     def keys(self) -> List[str]:
-        """Return all explicitly-set keys (known fields that were set + extras).
+        """Return all explicitly-set keys (known fields not _UNSET + extras).
 
-        Only includes known fields that were explicitly provided via from_dict()
-        or set via __setitem__. This matches plain-dict iteration semantics.
+        Only includes known fields whose value is not _UNSET (i.e., were
+        explicitly provided via from_dict() or set via __setitem__). This
+        matches plain-dict iteration semantics.
         """
-        known = [f.name for f in fields(self)
-                 if f.name not in self._INTERNAL_FIELDS and f.name in self._set_fields]
+        known = [
+            f.name
+            for f in fields(self)
+            if f.name not in _INTERNAL_FIELDS and getattr(self, f.name, _UNSET) is not _UNSET
+        ]
         return known + list(self._extras.keys())
 
     def values(self) -> List[Any]:
         """Return all values in key order."""
         return [self[k] for k in self.keys()]
 
-    def items(self) -> List[tuple[str, Any]]:
+    def items(self) -> List[tuple]:
         """Return all (key, value) pairs."""
         return [(k, self[k]) for k in self.keys()]
 
@@ -367,8 +350,18 @@ class ProfileConfig:
         return iter(self.keys())
 
     def __len__(self) -> int:
-        return len(self._set_fields) + len(self._extras)
+        set_count = sum(
+            1
+            for f in fields(self)
+            if f.name not in _INTERNAL_FIELDS and getattr(self, f.name, _UNSET) is not _UNSET
+        )
+        return set_count + len(self._extras)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a plain dict (for JSON serialization, metadata, etc.)."""
         return dict(self.items())
+
+
+# Module-level constant (not a dataclass field) — keeps _INTERNAL_FIELDS out of
+# fields(ProfileConfig) so it doesn't appear in any dict-interface operations.
+_INTERNAL_FIELDS: frozenset = frozenset({"_extras"})
