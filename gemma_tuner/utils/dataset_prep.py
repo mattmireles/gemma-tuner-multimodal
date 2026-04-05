@@ -108,6 +108,8 @@ from typing import Any, Optional, Tuple
 import librosa
 import numpy as np
 
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,7 +126,10 @@ class DatasetPrepConstants:
     """Named constants for dataset preprocessing configuration and optimization."""
 
     # Audio Processing Configuration
-    DEFAULT_SAMPLING_RATE = 16000  # Required audio sampling rate
+    # Single source of truth lives in AudioProcessingConstants; aliased here for
+    # backwards-compatibility so callers that use DatasetPrepConstants.DEFAULT_SAMPLING_RATE
+    # continue to work without change.
+    DEFAULT_SAMPLING_RATE = AudioProcessingConstants.DEFAULT_SAMPLING_RATE
     FALLBACK_SILENCE_DURATION = 1.0  # Duration of silence fallback in seconds
 
     # Audio Loading Configuration

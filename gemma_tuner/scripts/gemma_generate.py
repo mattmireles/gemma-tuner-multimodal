@@ -108,6 +108,7 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants
 from gemma_tuner.utils.device import probe_bfloat16
 
 
@@ -132,7 +133,7 @@ class GemmaInferenceConstants:
 
     # Audio Processing
     # USM audio tower requires 16kHz sampling rate for optimal performance
-    TARGET_SAMPLING_RATE = 16000  # Gemma 3n audio processing requirement
+    TARGET_SAMPLING_RATE = AudioProcessingConstants.DEFAULT_SAMPLING_RATE  # Gemma 3n audio processing requirement
 
     # Generation Parameters
     MAX_NEW_TOKENS = 128  # Conservative token limit for transcription

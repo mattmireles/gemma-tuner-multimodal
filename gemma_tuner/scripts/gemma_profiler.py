@@ -130,6 +130,7 @@ import psutil
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants
 from gemma_tuner.utils.device import probe_bfloat16
 
 
@@ -142,7 +143,7 @@ class GemmaProfilerConstants:
     # Synthetic Audio Configuration
     # Realistic audio parameters for representative performance testing
     SYNTHETIC_AUDIO_DURATION_SECONDS = 3  # Audio length for consistent testing
-    DEFAULT_SAMPLING_RATE = 16000  # Fallback sampling rate for USM audio tower
+    DEFAULT_SAMPLING_RATE = AudioProcessingConstants.DEFAULT_SAMPLING_RATE  # Fallback sampling rate for USM audio tower
 
     # Model Configuration
     ATTENTION_IMPLEMENTATION = "eager"  # Conservative attention for compatibility

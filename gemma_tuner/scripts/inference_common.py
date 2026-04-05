@@ -39,6 +39,7 @@ from transformers import (
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants
 from gemma_tuner.utils.dataset_prep import (
     encode_labels,
     load_audio_local_or_gcs,
@@ -56,7 +57,7 @@ require_version("datasets>=4.0.0", "To fix: pip install -U datasets")
 logger = logging.getLogger(__name__)
 
 # Inference Constants for Consistent Processing
-GEMMA_SAMPLING_RATE = 16000  # Required sampling rate for Gemma models
+GEMMA_SAMPLING_RATE = AudioProcessingConstants.DEFAULT_SAMPLING_RATE  # Required sampling rate for Gemma models
 EVALUATION_SEED = 42  # Fixed seed for reproducible inference results
 
 
