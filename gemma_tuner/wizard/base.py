@@ -135,12 +135,15 @@ class ModelSpecs:
     """Model specifications for estimation calculations."""
 
     MODELS = {
-        # Gemma 3n Models
-        "gemma-3n-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 10.0, "hf_id": "google/gemma-3n-E2B-it"},
-        "gemma-3n-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 18.0, "hf_id": "google/gemma-3n-E4B-it"},
-        # Gemma 4 Models
+        # Gemma 4 — primary targets (pre-trained base; recommended for audio LoRA fine-tuning)
+        "gemma-4-e2b": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 9.0, "hf_id": "google/gemma-4-E2B"},
+        "gemma-4-e4b": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 16.0, "hf_id": "google/gemma-4-E4B"},
+        # Gemma 4 — instruction-tuned variants
         "gemma-4-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 9.0, "hf_id": "google/gemma-4-E2B-it"},
         "gemma-4-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 16.0, "hf_id": "google/gemma-4-E4B-it"},
+        # Gemma 3n — retained for backwards compatibility
+        "gemma-3n-e2b-it": {"params": "~2B", "memory_gb": 10.0, "hours_100k": 10.0, "hf_id": "google/gemma-3n-E2B-it"},
+        "gemma-3n-e4b-it": {"params": "~4B", "memory_gb": 18.0, "hours_100k": 18.0, "hf_id": "google/gemma-3n-E4B-it"},
     }
 
 

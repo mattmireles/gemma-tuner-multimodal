@@ -93,8 +93,8 @@ def estimate_training_time(
 
     device_info = get_wizard_device_info()
 
-    # Look up model specs, defaulting to the smaller Gemma variant
-    default_specs = ModelSpecs.MODELS.get("gemma-4-e2b-it", list(ModelSpecs.MODELS.values())[0])
+    # Look up model specs, defaulting to the primary Gemma 4 E2B variant
+    default_specs = ModelSpecs.MODELS.get("gemma-4-e2b", list(ModelSpecs.MODELS.values())[0])
     model_specs = ModelSpecs.MODELS.get(model, default_specs)
 
     # Rough estimation based on dataset size

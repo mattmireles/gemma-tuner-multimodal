@@ -26,10 +26,14 @@ class GemmaTrainingConstants:
     LORA_R = 16
     LORA_ALPHA = 32
     LORA_DROPOUT = 0.05
-    # Attention projections + MLP gates; includes fc1/fc2 for Gemma 3n audio MLP layers.
-    # Extended from 4 → 6 modules to match wizard defaults and train the full Gemma 3n
-    # audio tower MLP alongside attention. Existing configs that set lora_target_modules
-    # explicitly are unaffected; only the implicit fallback in finetune.py changes.
+    # Attention projections + MLP gates; includes fc1/fc2 to train the audio tower MLP
+    # alongside attention. Both Gemma 4 E2B/E4B and Gemma 3n share the same USM-style
+    # audio encoder architecture, so this module set applies to both.
+    # Google recommends freezing encoders for Gemma 4 general fine-tuning, but this repo
+    # targets audio transcription quality — training fc1/fc2 adapts the audio MLP to
+    # domain-specific characteristics (accents, noise conditions, codec artifacts).
+    # Existing configs that set lora_target_modules explicitly are unaffected; only the
+    # implicit fallback in finetune.py uses this constant.
     LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "fc1", "fc2"]
 
     # Special token handling

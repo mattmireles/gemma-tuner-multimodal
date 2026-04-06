@@ -31,18 +31,20 @@ dtype = bfloat16
 attn_implementation = eager
 optim = adamw_torch
 
-[model:gemma-3n-e2b-it]
-base_model = google/gemma-3n-E2B-it
+# Gemma 4 — primary targets (pre-trained base, recommended for audio LoRA fine-tuning)
+[model:gemma-4-e2b]
+base_model = google/gemma-4-E2B
 group = gemma
 per_device_train_batch_size = 2
 per_device_eval_batch_size = 2
 
-[model:gemma-3n-e4b-it]
-base_model = google/gemma-3n-E4B-it
+[model:gemma-4-e4b]
+base_model = google/gemma-4-E4B
 group = gemma
 per_device_train_batch_size = 1
 per_device_eval_batch_size = 1
 
+# Gemma 4 — instruction-tuned variants (alternative starting point)
 [model:gemma-4-e2b-it]
 base_model = google/gemma-4-E2B-it
 group = gemma
@@ -55,10 +57,23 @@ group = gemma
 per_device_train_batch_size = 1
 per_device_eval_batch_size = 1
 
+# Gemma 3n — retained for backwards compatibility
+[model:gemma-3n-e2b-it]
+base_model = google/gemma-3n-E2B-it
+group = gemma
+per_device_train_batch_size = 2
+per_device_eval_batch_size = 2
+
+[model:gemma-3n-e4b-it]
+base_model = google/gemma-3n-E4B-it
+group = gemma
+per_device_train_batch_size = 1
+per_device_eval_batch_size = 1
+
 # Example LoRA fine-tuning profile.
 # Copy and rename this section; set model, dataset, and hyperparameters.
 [profile:my-lora-run]
-model = gemma-4-e2b-it
+model = gemma-4-e2b
 dataset = my-dataset
 train_split = train
 validation_split = validation

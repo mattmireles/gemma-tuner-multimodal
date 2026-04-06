@@ -116,7 +116,7 @@ def execute_training(profile_config: Dict[str, Any]):
     Example:
         # Wizard-generated configuration for LoRA fine-tuning
         profile_config = {
-            "model": "gemma-3n-e4b-it",
+            "model": "gemma-4-e2b",
             "dataset": "librispeech_subset",
             "use_peft": True,
             "lora_r": 16,
@@ -361,7 +361,7 @@ def wizard_main():
 
         Welcome Screen: "Ready for training ✅"
         Method Selection: "🚀 Standard Fine-Tune (SFT) ⭐ Recommended"
-        Model Selection: "gemma-3n (244M) - ~2.5 hours, 4.2GB memory ⭐ Recommended"
+        Model Selection: "gemma-4-e2b (~2B) - ~7.2 hours, 8.0GB memory ⭐ Recommended"
         Dataset Selection: "📁 my_dataset - Local dataset with 3 CSV files"
         Configuration: [Smart defaults applied automatically]
         Confirmation: "Start training with this configuration? Yes"
