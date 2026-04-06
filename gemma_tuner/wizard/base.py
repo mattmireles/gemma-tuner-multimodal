@@ -105,14 +105,6 @@ class WizardConstants:
     DEFAULT_BQ_LIMIT = 1000  # Default row limit for BQ exports
     BQ_SAMPLING_OPTIONS = ["random", "first"]  # Available sampling strategies
 
-    # Common HuggingFace Dataset Presets
-    # Curated list of popular datasets for training
-    RECOMMENDED_HF_DATASETS = [
-        {"name": "mozilla-foundation/common_voice_13_0", "description": "Common Voice multilingual dataset"},
-        {"name": "openslr/librispeech_asr", "description": "LibriSpeech English ASR dataset"},
-        {"name": "facebook/voxpopuli", "description": "VoxPopuli multilingual dataset"},
-    ]
-
 
 class TrainingMethod:
     """Training method configurations with resource estimation multipliers.
@@ -132,7 +124,13 @@ class TrainingMethod:
 
 
 class ModelSpecs:
-    """Model specifications for estimation calculations."""
+    """Model specifications for estimation calculations.
+
+    Entries here must match ``[model:…]`` keys in ``config.ini`` and models that load
+    through ``gemma_tuner/models/gemma/finetune.py`` (audio LoRA, any-to-any E2B/E4B
+    family). Larger Gemma 4 releases (e.g. 26B, 31B on Hugging Face) use a different
+    model class and are intentionally omitted until that training path exists.
+    """
 
     MODELS = {
         # Gemma 4 — primary targets (pre-trained base; recommended for audio LoRA fine-tuning)
@@ -316,7 +314,7 @@ def detect_datasets() -> List[Dict[str, Any]]:
         {
             "name": "Import from Google BigQuery",
             "type": "bigquery_import",
-            "description": "Query BQ, export surgical slice to _prepared.csv",
+            "description": "Import from Google BigQuery",
         }
     )
 
@@ -325,22 +323,14 @@ def detect_datasets() -> List[Dict[str, Any]]:
         {
             "name": "Setup NVIDIA Granary Dataset",
             "type": "granary_setup",
-            "description": "🚀 Large-scale multilingual dataset (~643k hours across 25 languages)",
+            "description": "NVIDIA Granary speech corpus (~643k hours across 25 languages)",
         }
     )
 
-    # Add common Hugging Face datasets
-    hf_datasets = [
-        {
-            "name": "mozilla-foundation/common_voice_13_0",
-            "type": "huggingface",
-            "description": "Common Voice multilingual dataset",
-        },
-        {"name": "openslr/librispeech_asr", "type": "huggingface", "description": "LibriSpeech English ASR dataset"},
-        {"name": "facebook/voxpopuli", "type": "huggingface", "description": "VoxPopuli multilingual dataset"},
-    ]
-
-    datasets.extend(hf_datasets)
+    # Hugging Face Hub presets were removed: Gemma training uses config.ini [dataset:*]
+    # sections and CSV (or Granary/BigQuery) loaders in dataset_utils — there is no Hub
+    # adapter in resolve_dataset_source_adapter(). Use prepare + local data, Granary,
+    # BigQuery import, or add your own [dataset:mydata] with source under data/datasets/.
 
     # Add custom dataset option
     datasets.append({"name": "custom", "type": "custom", "description": "I'll specify my dataset path manually"})

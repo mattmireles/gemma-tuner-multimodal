@@ -211,8 +211,8 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
 
         choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
 
-        # Add recommendation for the smaller variant (fits on most Apple Silicon)
-        if display_name == "gemma-4-e2b":
+        # Recommend the small Gemma 4 instruct checkpoint (best default for most Macs)
+        if display_name == "gemma-4-e2b-it":
             choice_text += " ⭐ Recommended"
 
         choices.append(
@@ -253,8 +253,6 @@ def select_dataset(method: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     for dataset in datasets:
         if dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
             choice_text = f"📁 {dataset['name']} - {dataset['description']}"
-        elif dataset["type"] == "huggingface":
-            choice_text = f"🤗 {dataset['name']} - {dataset['description']}"
         else:
             choice_text = f"⚙️ {dataset['description']}"
 

@@ -230,6 +230,14 @@ def generate_profile_config(
 
     from gemma_tuner.core.config import load_model_dataset_config
 
+    if dataset.get("type") == "huggingface":
+        raise ValueError(
+            "Hugging Face Hub dataset presets are not supported in this training path. "
+            "Add a [dataset:…] section in config.ini and place prepared CSVs under "
+            "data/datasets/<name>/, or use BigQuery import / Granary / a local folder via "
+            "'custom' in the wizard."
+        )
+
     # Load the base configuration from config.ini using the robust, hierarchical loader.
     # This ensures that all central defaults are respected.
     cfg = _config_store._read_config()
@@ -263,15 +271,7 @@ def generate_profile_config(
             profile_config["attn_implementation"] = "eager"
 
     # Dataset-specific configuration
-    if dataset["type"] == "huggingface":
-        profile_config["dataset_name"] = dataset["name"]
-        # Use the language/config the user selected during dataset setup if available.
-        # Fallback to "en" only when no config key was captured — avoids silently
-        # forcing English on users who selected a non-English HuggingFace dataset.
-        profile_config["dataset_config"] = dataset.get("config") or dataset.get("language") or "en"
-        profile_config["train_split"] = "train"
-        profile_config["eval_split"] = "validation"
-    elif dataset["type"] == "granary_configured":
+    if dataset["type"] == "granary_configured":
         # Granary datasets are configured but may not yet be fully prepared (manifest
         # generation is a separate step run via `gemma-macos-tuner prepare-granary`).
         # Set dataset_source_type so the training pipeline knows to look up the
