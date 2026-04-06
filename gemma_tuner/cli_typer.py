@@ -813,21 +813,15 @@ def run_wizard() -> None:
     - Integration with existing run management system
 
     Error handling:
-    - ImportError: wizard module not available (missing dependencies)
-    - User interruption (Ctrl+C): graceful exit with partial configuration saved
-    - Invalid selections: retry prompts with helpful guidance
+    - Ctrl+C / cancel: wizard prints status; process exits 130 (same convention as SIGINT)
+    - Other failures: wizard_main prints a Rich error and exits 1 (no duplicate Typer messages)
 
     Note: This is a legacy interface maintained for backward compatibility.
     Consider using direct CLI commands for automation and CI/CD workflows.
     """
-    try:
-        from gemma_tuner.wizard import wizard_main
+    from gemma_tuner.wizard import wizard_main
 
-        wizard_main()
-    except Exception as e:
-        typer.echo(f"❌ Wizard failed: {e}", err=True)
-        typer.echo("Tip: For the modern CLI, use 'gemma-macos-tuner <command>'.", err=True)
-        raise typer.Exit(ExitCodes.GENERAL_ERROR)
+    wizard_main()
 
 
 # -------- Legacy commands wrapper --------

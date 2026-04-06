@@ -337,7 +337,7 @@ def show_confirmation_screen(
     """Step 6: Confirmation screen — shows full training configuration for final approval."""
     from gemma_tuner.wizard.config_store import _read_config
 
-    console.print("\n[bold cyan]Step 6: Ready to Train![/bold cyan]")
+    console.print("\n[bold cyan]Step 7: Ready to Train![/bold cyan]")
 
     # Create a beautiful configuration table
     config_table = Table(show_header=False, box=None, padding=(0, 2))

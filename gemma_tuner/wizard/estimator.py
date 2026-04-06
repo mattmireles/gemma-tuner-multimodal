@@ -70,7 +70,10 @@ def configure_method_specifics(
             "LoRA alpha (controls adaptation strength):", choices=alpha_choices, style=apple_style
         ).ask()
 
-        if alpha == "custom":
+        # Non-TTY stdin: questionary returns None — match lora_r fallback behavior
+        if alpha is None:
+            alpha = default_alpha
+        elif alpha == "custom":
             alpha_str = questionary.text(
                 "Enter custom alpha value:", default=str(default_alpha), style=apple_style
             ).ask()

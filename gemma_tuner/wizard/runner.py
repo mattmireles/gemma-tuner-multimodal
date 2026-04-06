@@ -153,8 +153,8 @@ def execute_training(profile_config: Dict[str, Any]):
     # critical parameters like num_train_epochs, learning_rate, logging_steps
     try:
         config["DEFAULT"] = dict(main_config["DEFAULT"])  # Always present in parsed config
-    except Exception:
-        # Fallback minimal defaults for malformed configuration recovery
+    except KeyError:
+        # Fallback minimal defaults if DEFAULT is missing (corrupt or empty config)
         config["DEFAULT"] = {
             "output_dir": "output",
             "logging_dir": "logs",
@@ -203,7 +203,7 @@ def execute_training(profile_config: Dict[str, Any]):
         # Subprocess training execution with environment isolation
         # Uses module invocation for package compatibility and clean resource management
         module_cwd = Path(__file__).resolve().parent.parent.parent
-        result = subprocess.run(
+        subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -229,13 +229,20 @@ def execute_training(profile_config: Dict[str, Any]):
         console.print(f"\n[red]❌ Training failed with exit code {e.returncode}[/red]")
         console.print("[red]Check the logs for detailed error information[/red]")
         console.print(f"[dim]Log file: output/wizard_{timestamp}/run.log[/dim]")
+        rc = e.returncode if e.returncode else 1
+        raise SystemExit(rc) from e
 
     except KeyboardInterrupt:
         # User interruption with checkpoint preservation confirmation
         keep_config = True
         console.print("\n[yellow]⚠️ Training interrupted by user[/yellow]")
         console.print("[yellow]Progress saved at latest checkpoint[/yellow]")
-        console.print(f"[dim]Resume with: python main.py finetune {profile_name} --config {temp_config_path}[/dim]")
+        resume = (
+            f"python -m main finetune {profile_name} --config {temp_config_path}  "
+            f"(or: gemma-macos-tuner finetune {profile_name} --config {temp_config_path})"
+        )
+        console.print(f"[dim]Resume with: {resume}[/dim]")
+        raise SystemExit(130)
 
     except Exception as e:
         # General error recovery with troubleshooting guidance
@@ -243,6 +250,7 @@ def execute_training(profile_config: Dict[str, Any]):
         console.print(f"\n[red]❌ Training execution failed: {str(e)}[/red]")
         console.print("[red]Check your configuration and try again[/red]")
         console.print(f"[dim]Configuration saved at: {temp_config_path}[/dim]")
+        raise SystemExit(1) from e
 
     finally:
         # Temporary file cleanup with error tolerance
@@ -298,7 +306,7 @@ def wizard_main():
     - Sets expectations for the complete workflow
 
     Step 1 (Training Method Selection):
-    - Three clear options: Standard, LoRA, Knowledge Distillation
+    - LoRA fine-tuning for Gemma (only method exposed in the current UI)
     - Quality vs efficiency trade-offs explained simply
     - Smart defaults highlighted with recommendation badges
     - Technical complexity hidden until needed
@@ -311,8 +319,7 @@ def wizard_main():
 
     Step 3 (Dataset Selection):
     - Automatic local dataset discovery with file counting
-    - BigQuery integration for enterprise workflows
-    - Popular HuggingFace datasets with descriptions
+    - BigQuery import and Granary setup options
     - Custom dataset path support for advanced users
 
     Step 4 (Training Parameters):
@@ -321,10 +328,7 @@ def wizard_main():
     - Safe defaults for beginners
 
     Step 5 (Method-Specific Configuration):
-    - Revealed only for selected training method
-    - LoRA: Rank and alpha with smart defaults
-    - Distillation: Teacher model and temperature selection
-    - Custom hybrid: Encoder/decoder architecture building
+    - LoRA rank and alpha with smart defaults (Gemma LoRA path)
 
     Step 6 (Resource Estimation):
     - Realistic time and memory requirements
@@ -360,8 +364,8 @@ def wizard_main():
         $ python wizard.py
 
         Welcome Screen: "Ready for training ✅"
-        Method Selection: "🚀 Standard Fine-Tune (SFT) ⭐ Recommended"
-        Model Selection: "gemma-4-e2b (~2B) - ~7.2 hours, 8.0GB memory ⭐ Recommended"
+        Method Selection: "🎨 LoRA Fine-Tune"
+        Model Selection: "gemma-4-e2b-it (~2B) - ~7.2 hours, 8.0GB memory ⭐ Recommended"
         Dataset Selection: "📁 my_dataset - Local dataset with 3 CSV files"
         Configuration: [Smart defaults applied automatically]
         Confirmation: "Start training with this configuration? Yes"
@@ -420,21 +424,19 @@ def wizard_main():
         else:
             # Graceful cancellation with guidance for future use
             console.print("\n[yellow]Training cancelled by user.[/yellow]")
-            console.print("[dim]Run the wizard again anytime with: python wizard.py[/dim]")
-            console.print("[dim]Or start the wizard again: python wizard.py[/dim]")
+            console.print("[dim]Run the wizard again: python wizard.py  or  gemma-macos-tuner wizard[/dim]")
 
     except KeyboardInterrupt:
         # Clean interruption handling with system state preservation
         console.print("\n\n[yellow]Wizard interrupted by user.[/yellow]")
-        console.print("[dim]No changes made to your system.[/dim]")
-        console.print("[dim]Your configuration choices were not saved.[/dim]")
+        console.print(
+            "[dim]Interactive profile choices were not saved. If you already ran BigQuery import "
+            "or Granary setup, config.ini may have been updated in those steps.[/dim]"
+        )
+        raise SystemExit(130)
 
     except Exception as e:
-        # Comprehensive error handling with debugging support
         console.print(f"\n[red]❌ Wizard error: {str(e)}[/red]")
         console.print("[red]Please report this issue or try manual configuration.[/red]")
-        console.print("[dim]For manual setup: python main.py --help[/dim]")
-
-        # Re-raise for debugging in development environments
-        # This ensures stack traces are available for issue resolution
-        raise
+        console.print("[dim]For manual setup: gemma-macos-tuner --help[/dim]")
+        raise SystemExit(1) from e
