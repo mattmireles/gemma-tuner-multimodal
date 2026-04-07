@@ -5,7 +5,11 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from gemma_tuner.models.common.collators import DataCollatorGemmaText, ensure_gemma_mm_token_type_ids
+from gemma_tuner.models.common.collators import (
+    DataCollatorGemmaText,
+    _find_subsequence_ids,
+    ensure_gemma_mm_token_type_ids,
+)
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 
 
@@ -41,8 +45,10 @@ class _FakeInstructionTokenizer:
         add_generation_prompt: bool = False,
         truncation: bool = True,
         max_length: int = 2048,
+        return_assistant_tokens_mask: bool = False,
+        **kwargs,
     ):
-        del tokenize, return_tensors, padding, return_dict, add_generation_prompt, truncation, max_length
+        del tokenize, return_tensors, padding, return_dict, add_generation_prompt, truncation, max_length, kwargs
         batch = len(messages_batch)
         input_ids = torch.zeros(batch, 12, dtype=torch.long)
         attention_mask = torch.ones(batch, 12, dtype=torch.long)
@@ -55,7 +61,44 @@ class _FakeInstructionTokenizer:
             input_ids[i, 8] = 100
             input_ids[i, 9] = 42
             attention_mask[i, -2:] = 0
+        out = {"input_ids": input_ids, "attention_mask": attention_mask}
+        if return_assistant_tokens_mask:
+            am = torch.zeros_like(input_ids)
+            am[:, 8:10] = 1
+            out["assistant_masks"] = am
+        return out
+
+
+class _FakeTokenizerGapBeforeModelHeader(_FakeInstructionTokenizer):
+    """Extra token between last <start_of_turn> and model\\n ids — fixed offset would fail."""
+
+    def apply_chat_template(self, messages_batch, **kwargs):
+        kwargs.pop("return_assistant_tokens_mask", None)
+        batch = len(messages_batch)
+        input_ids = torch.zeros(batch, 13, dtype=torch.long)
+        attention_mask = torch.ones(batch, 13, dtype=torch.long)
+        for i in range(batch):
+            input_ids[i, 0] = self.bos_token_id
+            input_ids[i, 2] = 7
+            input_ids[i, 5] = 7
+            input_ids[i, 6] = 99
+            input_ids[i, 7:9] = torch.tensor([20, 21])
+            input_ids[i, 9] = 100
+            input_ids[i, 10] = 42
+            attention_mask[i, -2:] = 0
         return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+
+class _SlowTokenizerRejected(_FakeInstructionTokenizer):
+    """Simulates slow tokenizer: assistant mask unsupported, fallback path runs."""
+
+    def apply_chat_template(self, messages_batch, **kwargs):
+        if kwargs.pop("return_assistant_tokens_mask", False):
+            raise ValueError(
+                "`return_assistant_tokens_mask` is not possible with slow tokenizers. "
+                "Make sure you have `tokenizers` installed."
+            )
+        return super().apply_chat_template(messages_batch, **kwargs)
 
 
 class _FakeCompletionTokenizer:
@@ -67,6 +110,12 @@ class _FakeCompletionTokenizer:
         input_ids = torch.tensor([[5, 6, 0, 0], [7, 8, 9, 0]], dtype=torch.long)
         attention_mask = torch.tensor([[1, 1, 0, 0], [1, 1, 1, 0]], dtype=torch.long)
         return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+
+def test_find_subsequence_ids():
+    h = torch.tensor([1, 2, 20, 21, 5])
+    assert _find_subsequence_ids(h, [20, 21]) == 2
+    assert _find_subsequence_ids(h, [99]) == -1
 
 
 def test_instruction_submode_masks_prompt_and_padding():
@@ -99,6 +148,40 @@ def test_instruction_submode_masks_prompt_and_padding():
         assert non_ignore.numel() > 0
         first_pos = non_ignore[0].item()
         assert input_ids[i, first_pos].item() == first_word_id
+
+
+def test_instruction_fallback_subsequence_when_extra_tokens_before_model_header():
+    tok = _FakeTokenizerGapBeforeModelHeader()
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        prompt_column="prompt",
+        max_length=128,
+        sub_mode="instruction",
+    )
+    out = collator([{"prompt": "p", "response": "Hello"}])
+    labels, input_ids = out["labels"], out["input_ids"]
+    first_word_id = tok.encode("Hello", add_special_tokens=False)[0]
+    non_ignore = (labels[0] != GemmaTrainingConstants.IGNORE_TOKEN_ID).nonzero(as_tuple=True)[0]
+    assert non_ignore[0].item() == 9
+    assert input_ids[0, 9].item() == first_word_id
+
+
+def test_instruction_slow_tokenizer_falls_back_to_subsequence_mask():
+    tok = _SlowTokenizerRejected()
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        prompt_column="prompt",
+        max_length=128,
+        sub_mode="instruction",
+    )
+    out = collator([{"prompt": "p", "response": "Hello"}])
+    labels, input_ids = out["labels"], out["input_ids"]
+    first_word_id = tok.encode("Hello", add_special_tokens=False)[0]
+    non_ignore = (labels[0] != GemmaTrainingConstants.IGNORE_TOKEN_ID).nonzero(as_tuple=True)[0]
+    assert non_ignore[0].item() == 8
+    assert input_ids[0, 8].item() == first_word_id
 
 
 def test_completion_submode_masks_only_padding_not_eos_when_pad_equals_eos():
