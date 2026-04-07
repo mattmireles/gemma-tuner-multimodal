@@ -42,7 +42,8 @@ class GemmaTrainingConstants:
     # implicit fallback in finetune.py uses this constant.
     LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
-    # Default when profile omits base_model (SFT / chat: prefer -it per gemma4-guide.md).
+    # Default when profile omits base_model. Published multimodal instruct checkpoint:
+    # https://huggingface.co/google/gemma-4-E2B-it
     DEFAULT_BASE_MODEL_ID = "google/gemma-4-E2B-it"
 
     # Special token handling
@@ -64,9 +65,6 @@ class AudioProcessingConstants:
 
     # Default sampling rate for Gemma audio tower (USM-based, 16kHz)
     DEFAULT_SAMPLING_RATE = 16000
-
-    # Returns 1.0 second of silence when audio loading fails
-    FALLBACK_SILENCE_DURATION_SECONDS = 1.0
 
 
 def resolve_processor_sampling_rate(

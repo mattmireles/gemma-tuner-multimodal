@@ -1,103 +1,8 @@
-"""
-Shared Dataset Preprocessing Utilities for Gemma Fine-Tuning
+"""Shared dataset helpers: audio loading, label encoding, language resolution.
 
-This module provides the core dataset preprocessing infrastructure used across all training
-and evaluation workflows. It handles the three critical preprocessing tasks: audio loading,
-label encoding, and language resolution with robust error handling and cross-platform
-compatibility for Apple Silicon optimization.
-
-Key Responsibilities:
-- Universal audio loading from multiple sources (local files, GCS, in-memory data)
-- Consistent label encoding with Gemma tokenizer integration
-- Language resolution for multilingual training scenarios
-- Error recovery and fallback mechanisms for production reliability
-- Apple Silicon MPS optimization and memory efficiency
-
-Architecture Integration:
-This module serves as the foundation for all dataset processing workflows, providing
-consistent interfaces used by training collators, evaluation scripts, and data
-preparation utilities throughout the system.
-
-Called by:
-- models/*/finetune.py data collators for training data preprocessing
-- utils/gemma_dataset_prep.py for Gemma 3n-specific dataset preparation
-- evaluation scripts for test dataset processing
-- Data loading pipelines in distributed training workflows
-
-Calls to:
-- librosa for audio resampling and format conversion
-- Google Cloud Storage clients for remote data access
-- transformers tokenizers for consistent label encoding
-- soundfile and audioread for multi-format audio support
-
-Core Functions:
-
-1. load_audio_local_or_gcs():
-   - Universal audio loader supporting local files, GCS URIs, and in-memory data
-   - Automatic resampling to required sampling rates
-   - Robust error handling with silence fallback for CI/CD reliability
-   - Memory-efficient numpy array output for downstream processing
-
-2. encode_labels():
-   - Consistent tokenization using Gemma tokenizer interface
-   - Proper truncation and padding for fixed-length training
-   - Special token handling for sequence-to-sequence training
-   - Tensor output compatible with PyTorch training loops
-
-3. resolve_language():
-   - Language detection and resolution for multilingual datasets
-   - Support for mixed-language datasets with per-sample detection
-   - Override mechanisms for forced language specification
-   - Consistent language code normalization across the system
-
-Design Principles:
-- Single Source of Truth: All dataset processing uses these utilities
-- Error Resilience: Graceful degradation prevents training interruption
-- Memory Efficiency: Optimized for Apple Silicon unified memory architecture
-- Consistency: Identical preprocessing across training and evaluation
-- Extensibility: Plugin architecture for new audio formats and sources
-
-Apple Silicon Optimizations:
-- librosa resampling optimized for ARM64 architecture
-- Memory-efficient numpy arrays minimize unified memory pressure
-- Lazy loading patterns reduce peak memory consumption
-- MPS-compatible data types for seamless GPU transfer
-
-Performance Considerations:
-- Audio resampling: Optimized librosa configuration for Apple Silicon
-- Memory usage: Minimal allocation patterns for large dataset processing
-- I/O efficiency: Streaming audio loading for memory-constrained environments
-- Caching strategies: Intelligent audio caching for repeated access patterns
-
-Error Handling Philosophy:
-- Fail loudly: Audio loading failures raise AudioLoadError instead of silently corrupting
-  training data with synthetic silence.  Callers decide whether to skip or abort.
-- Comprehensive logging: Detailed error information for debugging
-- Retry mechanisms: Automatic recovery from transient network failures (GCS)
-- Clear exceptions: AudioLoadError carries the original path and root cause
-
-Integration Examples:
-
-Training Integration:
-```python
-# Used by data collators during training
-audio_array = load_audio_local_or_gcs(sample["audio_path"], 16000)
-labels = encode_labels(tokenizer, sample["text"], max_length=448)
-```
-
-Evaluation Integration:
-```python
-# Used by evaluation scripts for consistent preprocessing
-language, tokens = resolve_language("auto", sample.get("language"))
-```
-
-Multi-source Data Loading:
-```python
-# Supports various input formats seamlessly
-local_audio = load_audio_local_or_gcs("/path/to/file.wav", 16000)
-gcs_audio = load_audio_local_or_gcs("gs://bucket/file.wav", 16000)
-dict_audio = load_audio_local_or_gcs({"array": data, "sampling_rate": 44100}, 16000)
-```
+Audio: ``load_audio_local_or_gcs`` resamples to the requested rate, clips float
+waveforms to [-1, 1], and raises :class:`AudioLoadError` on load failure (no
+silent synthetic silence).
 """
 
 from __future__ import annotations
@@ -114,12 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class AudioLoadError(Exception):
-    """Raised when audio loading fails from any source (local, GCS, or raw input).
-
-    Callers should catch this to skip bad samples rather than allowing silent
-    data corruption from silence-fallback.  The error message includes the
-    original path and root cause for debugging.
-    """
+    """Raised when audio loading fails from a path or GCS."""
 
 
 class DatasetPrepConstants:
@@ -130,7 +30,6 @@ class DatasetPrepConstants:
     # backwards-compatibility so callers that use DatasetPrepConstants.DEFAULT_SAMPLING_RATE
     # continue to work without change.
     DEFAULT_SAMPLING_RATE = AudioProcessingConstants.DEFAULT_SAMPLING_RATE
-    FALLBACK_SILENCE_DURATION = 1.0  # Duration of silence fallback in seconds
 
     # Audio Loading Configuration
     DEFAULT_TIMEOUT_SECONDS = 10  # Network timeout for GCS audio loading
@@ -159,9 +58,6 @@ class DatasetPrepConstants:
     LANGUAGE_MODE_MIXED = "mixed"  # Mixed-language dataset support
     LANGUAGE_MODE_STRICT = "strict"  # Single language enforcement
 
-    # Error Recovery Configuration
-    SILENCE_AUDIO_VALUE = 0.0  # Value for silence fallback audio
-
     # Performance Optimization
     # Librosa configuration for Apple Silicon
     LIBROSA_RESAMPLE_TYPE = "kaiser_best"  # High-quality resampling algorithm
@@ -179,110 +75,14 @@ def load_audio_local_or_gcs(
     timeout: int = DatasetPrepConstants.DEFAULT_TIMEOUT_SECONDS,
     retries: int = DatasetPrepConstants.DEFAULT_RETRY_COUNT,
 ) -> np.ndarray:
-    """
-    Universal audio loader supporting multiple input sources with robust error handling.
+    """Load mono float32 audio; resample to ``sampling_rate`` (default 16 kHz); clip to [-1, 1].
 
-    This function provides the core audio loading infrastructure used throughout the
-    Gemma fine-tuning system. It handles the complexity of different audio sources
-    (local files, cloud storage, in-memory data) behind a unified interface with
-    automatic resampling and comprehensive error recovery.
-
-    Called by:
-    - models/*/finetune.py data collators during training batch preparation
-    - utils/gemma_dataset_prep.py for Gemma 3n dataset validation
-    - evaluation scripts for test dataset audio preprocessing
-    - Distributed training workers for consistent audio loading
-
-    Calls to:
-    - librosa.load() for local file audio loading and format conversion
-    - librosa.resample() for sampling rate conversion to Gemma requirements
-    - Google Cloud Storage clients for remote audio access (when available)
-    - numpy for efficient array operations and memory management
-
-    Supported Input Formats:
-
-    1. HuggingFace datasets.Audio dictionary:
-       Format: {"array": np.ndarray, "sampling_rate": int}
-       Use case: Pre-loaded audio data from HuggingFace datasets
-       Processing: Direct array access with automatic resampling
-
-    2. Local file paths:
-       Format: "/path/to/audio.wav" (string)
-       Supported formats: WAV, FLAC, MP3, M4A, and all librosa-supported formats
-       Processing: librosa.load() with automatic format detection
-
-    3. Google Cloud Storage URIs:
-       Format: "gs://bucket-name/path/to/audio.wav"
-       Requirements: GCS credentials configured in environment
-       Processing: Temporary download and local processing
-
-    4. Raw audio arrays:
-       Format: np.ndarray or list of audio samples
-       Processing: Direct conversion to numpy array with resampling
-
-    Audio Processing Pipeline:
-    1. Input format detection and normalization
-    2. Audio data extraction based on source type
-    3. Sampling rate validation and conversion to target rate
-    4. Mono conversion (if multi-channel audio detected)
-    5. Data type normalization to float32 for Apple Silicon optimization
-    6. Error recovery with silence fallback for training stability
-
-    Error Handling Strategy:
-    - Network failures: Automatic retry with exponential backoff
-    - File format errors: Graceful fallback to silence with logging
-    - Memory errors: Efficient processing with minimal allocation
-    - Missing files: Silence fallback prevents training interruption
-
-    Apple Silicon Optimizations:
-    - float32 output format optimized for MPS tensor conversion
-    - Efficient librosa configuration for ARM64 architecture
-    - Memory-conscious processing for unified memory architecture
-    - Optimized resampling algorithms for best quality/performance balance
-
-    Args:
-        path_or_audio (Any): Audio source in supported format:
-            - dict: HuggingFace datasets.Audio format
-            - str: Local file path or GCS URI
-            - array-like: Raw audio samples
-        sampling_rate (int | None): Target sampling rate for resampling
-            - None: Uses default Gemma sampling rate (16kHz)
-            - int: Specific target rate for model requirements
-        timeout (int): Network timeout for GCS operations in seconds
-        retries (int): Maximum retry attempts for failed operations
-
-    Returns:
-        np.ndarray: Mono audio array at target sampling rate
-            - dtype: float32 (optimized for Apple Silicon MPS)
-            - shape: (samples,) - 1D mono audio
-            - sample_rate: Matches requested sampling_rate parameter
-            - fallback: 1-second silence array if loading fails
+    Accepts: HuggingFace ``datasets.Audio`` dict (``array`` + ``sampling_rate``), local path,
+    ``gs://`` URI (retries on failure), or a raw 1-D array (already at target rate; no resample).
 
     Raises:
-        AudioLoadError: When audio cannot be loaded from any source (local, GCS).
-            Callers should catch this to decide whether to skip the sample or abort.
-        ValueError: When raw input is a scalar (possibly None) instead of an array.
-
-    Example Usage:
-        # Load from HuggingFace dataset
-        audio_dict = {"array": np.array([...]), "sampling_rate": 44100}
-        audio = load_audio_local_or_gcs(audio_dict, 16000)
-
-        # Load from local file
-        audio = load_audio_local_or_gcs("/path/to/audio.wav", 16000)
-
-        # Load from Google Cloud Storage
-        audio = load_audio_local_or_gcs("gs://bucket/audio.wav", 16000)
-
-        # Load from raw array
-        raw_samples = [0.1, 0.2, -0.1, 0.0]
-        audio = load_audio_local_or_gcs(raw_samples, 16000)
-
-    Performance Notes:
-    - Memory efficient: Processes audio without excessive allocation
-    - Network resilient: Automatic retries for transient failures
-    - Format flexible: Handles all common audio formats automatically
-    - Apple Silicon optimized: Uses float32 and efficient algorithms
+        AudioLoadError: Failed to load from a path or GCS after retries.
+        ValueError: Raw input is a scalar instead of a 1-D array.
     """
     # Normalize sampling rate to a safe default using named constants
     if sampling_rate is None:  # use `is None`, not falsy check — 0 is a valid explicit value
