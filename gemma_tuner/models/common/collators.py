@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import torch
 
@@ -199,8 +199,35 @@ def inject_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
 # Backwards compatibility for older imports.
 ensure_gemma_mm_token_type_ids = inject_mm_token_type_ids
 
-# Dedupe log spam when the same incompatible processor type is constructed many times (e.g. tests).
-_MISSING_IMAGE_SEQ_LENGTH_TYPES: set[str] = set()
+
+class _DedupeApplyImageBudgetWarning(logging.Filter):
+    """Emit at most one missing-``image_seq_length`` warning per processor class name (no module-level set)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._seen_types: Set[str] = set()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not isinstance(record.msg, str) or not record.msg.startswith("apply_image_token_budget_to_processor:"):
+            return True
+        if not record.args:
+            return True
+        tname = record.args[0]
+        if not isinstance(tname, str):
+            return True
+        if tname in self._seen_types:
+            return False
+        self._seen_types.add(tname)
+        return True
+
+
+_dedupe_apply_image_budget_warning = _DedupeApplyImageBudgetWarning()
+logger.addFilter(_dedupe_apply_image_budget_warning)
+
+
+def reset_apply_image_budget_warning_dedupe() -> None:
+    """Clear per-type dedupe state (tests only — avoids order-dependent assertions)."""
+    _dedupe_apply_image_budget_warning._seen_types.clear()
 
 
 def apply_image_token_budget_to_processor(processor: Any, budget: int) -> None:
@@ -212,15 +239,13 @@ def apply_image_token_budget_to_processor(processor: Any, budget: int) -> None:
     b = int(budget)
     if not hasattr(processor, "image_seq_length"):
         tname = type(processor).__name__
-        if tname not in _MISSING_IMAGE_SEQ_LENGTH_TYPES:
-            _MISSING_IMAGE_SEQ_LENGTH_TYPES.add(tname)
-            logger.warning(
-                "apply_image_token_budget_to_processor: processor %r has no image_seq_length; "
-                "cannot apply image_token_budget=%s (train/serve mismatch risk). "
-                "Use a Gemma multimodal processor or a compatible transformers revision.",
-                tname,
-                b,
-            )
+        logger.warning(
+            "apply_image_token_budget_to_processor: processor %r has no image_seq_length; "
+            "cannot apply image_token_budget=%s (train/serve mismatch risk). "
+            "Use a Gemma multimodal processor or a compatible transformers revision.",
+            tname,
+            b,
+        )
         return
     if int(getattr(processor, "image_seq_length", 0)) == b:
         return

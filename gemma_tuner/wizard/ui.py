@@ -383,7 +383,36 @@ def configure_text_columns(finetuning: Optional[Dict[str, Any]]) -> Dict[str, An
     return out
 
 
-def configure_image_columns(finetuning: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _validate_image_token_budget_against_processor(model_id: str, budget: int) -> None:
+    """Best-effort: compare chosen budget to ``AutoProcessor`` defaults (cached by Hugging Face)."""
+    try:
+        from transformers import AutoProcessor
+    except ImportError:
+        return
+    try:
+        proc = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    except Exception as e:
+        console.print(f"[dim]Could not load AutoProcessor for {model_id!r} to validate image_token_budget ({e}).[/dim]")
+        return
+    if not hasattr(proc, "image_seq_length"):
+        return
+    isl = int(getattr(proc, "image_seq_length", 0) or 0)
+    if isl <= 0:
+        return
+    b = int(budget)
+    if b != isl:
+        console.print(
+            f"[yellow]Processor default image_seq_length is {isl}; your image_token_budget is {b}. "
+            f"Training will align the processor to {b} — use the same value when serving.[/yellow]"
+        )
+    if b > isl * 4:
+        console.print(
+            f"[yellow]Warning: image_token_budget ({b}) is much larger than the processor default ({isl}); "
+            f"expect high memory use.[/yellow]"
+        )
+
+
+def configure_image_columns(finetuning: Optional[Dict[str, Any]], model: Optional[str] = None) -> Dict[str, Any]:
     """Prompt for CSV column names and vision budget when training on image+text data."""
     if not finetuning or finetuning.get("modality") != "image":
         return {}
@@ -418,6 +447,8 @@ def configure_image_columns(finetuning: Optional[Dict[str, Any]]) -> Dict[str, A
     if itb is None:
         itb = 280
     out["image_token_budget"] = int(itb)
+    if model:
+        _validate_image_token_budget_against_processor(model, out["image_token_budget"])
     return out
 
 
