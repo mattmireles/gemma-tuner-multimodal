@@ -315,8 +315,7 @@ class DataCollatorGemmaImage:
                 q = ex.get(self.prompt_column)
                 if q is None:
                     raise KeyError(
-                        f"DataCollatorGemmaImage: prompt column {self.prompt_column!r} missing. "
-                        f"Keys: {list(ex.keys())}"
+                        f"DataCollatorGemmaImage: prompt column {self.prompt_column!r} missing. Keys: {list(ex.keys())}"
                     )
                 user_content = [
                     {"type": "image", "image": img},
