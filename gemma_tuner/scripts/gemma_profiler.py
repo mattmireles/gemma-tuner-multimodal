@@ -268,9 +268,7 @@ def main(model_id: str = GemmaProfilerConstants.DEFAULT_MODEL_ID) -> None:
 
     # Generate synthetic audio workload for consistent performance testing
     # Uses realistic duration and sampling rate for representative measurements
-    effective_sampling_rate = resolve_processor_sampling_rate(
-        processor, default=constants.DEFAULT_SAMPLING_RATE
-    )
+    effective_sampling_rate = resolve_processor_sampling_rate(processor, default=constants.DEFAULT_SAMPLING_RATE)
     audio_sample_count = int(constants.SYNTHETIC_AUDIO_DURATION_SECONDS * effective_sampling_rate)
     synthetic_audio = torch.randn(audio_sample_count).tolist()
 

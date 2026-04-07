@@ -92,9 +92,7 @@ def assert_family_supported(family: GemmaFamily) -> None:
             "Install the Gemma 4 stack: pip install -r requirements-gemma4.txt "
             "(see README.md), or use a Gemma 3n model id."
         )
-    raise RuntimeError(
-        f"transformers {got} is below the minimum for Gemma 3n in this repo ({need})."
-    )
+    raise RuntimeError(f"transformers {got} is below the minimum for Gemma 3n in this repo ({need}).")
 
 
 # Entrypoints that still use ``AutoModelForCausalLM``-only paths; Gemma 4 is rejected until upgraded.
