@@ -2,8 +2,8 @@
 
 Uses ``AutoConfig`` + architecture hints to load multimodal checkpoints with
 ``AutoModelForMultimodalLM`` / ``AutoModelForImageTextToText`` when appropriate,
-so vision/audio towers stay attached. Callers that always use ``AutoModelForCausalLM``
-risk merging LoRA into a text-only view and dropping towers (see gemma4-guide.md).
+so vision/audio towers stay attached. If those loaders fail, we **raise** rather
+than fall back to ``AutoModelForCausalLM`` (which would drop towers; see gemma4-guide.md).
 
 Called by:
 - ``gemma_tuner.models.gemma.finetune`` — training
@@ -108,16 +108,15 @@ def load_base_model_for_gemma(
             last_err = e
             logger.debug("Loader %s failed for %s: %s", loader_cls.__name__, model_id, e)
 
-    logger.warning(
-        "Multimodal AutoModel loaders failed for %s (%s); falling back to AutoModelForCausalLM — "
-        "encoder towers may be missing. Upgrade transformers or use a compatible revision.",
+    logger.error(
+        "Multimodal AutoModel loaders failed for %s (%s); refusing AutoModelForCausalLM fallback — "
+        "vision/audio towers would be dropped and training would not match a real multimodal checkpoint. "
+        "Upgrade transformers, fix the checkpoint path, or use a compatible model revision.",
         model_id,
         last_err,
     )
-    return AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=torch_dtype,
-        attn_implementation=attn_implementation,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True,
-    )
+    raise RuntimeError(
+        f"Failed to load multimodal base model {model_id!r} with AutoModelForMultimodalLM / "
+        f"AutoModelForImageTextToText (last error: {last_err!r}). "
+        "Loading as CausalLM would omit encoder towers; aborting."
+    ) from last_err

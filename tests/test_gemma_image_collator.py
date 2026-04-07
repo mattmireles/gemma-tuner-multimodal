@@ -212,7 +212,7 @@ def test_apply_image_token_budget_rebuilds_sequence():
 
 
 def test_apply_image_token_budget_warns_without_image_seq_length(caplog):
-    collators_mod._MISSING_IMAGE_SEQ_LENGTH_TYPES.clear()
+    collators_mod.reset_apply_image_budget_warning_dedupe()
 
     class _NoImageSeq:
         pass
@@ -224,7 +224,7 @@ def test_apply_image_token_budget_warns_without_image_seq_length(caplog):
 
 
 def test_apply_image_token_budget_warns_once_per_processor_type(caplog):
-    collators_mod._MISSING_IMAGE_SEQ_LENGTH_TYPES.clear()
+    collators_mod.reset_apply_image_budget_warning_dedupe()
 
     class _NoImageSeq:
         pass

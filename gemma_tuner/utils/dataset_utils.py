@@ -97,29 +97,17 @@ from gemma_tuner.utils.dataset_sources import DatasetLoadContext, resolve_datase
 logger = logging.getLogger(__name__)
 
 
-def _ensure_text_modality_supported(context: DatasetLoadContext, adapter, streaming_enabled: bool) -> None:
-    """Text-only fine-tuning (v1) is limited to non-streaming local CSV loads."""
-    if context.modality != "text":
+def _ensure_modality_local_csv_only(
+    context: DatasetLoadContext, adapter, streaming_enabled: bool, modality: str
+) -> None:
+    """Text/image fine-tuning (v1) is limited to non-streaming local CSV loads."""
+    if context.modality != modality:
         return
     if streaming_enabled:
-        raise ValueError("modality=text requires non-streaming dataset loading in v1.")
+        raise ValueError(f"modality={modality} requires non-streaming dataset loading in v1.")
     if adapter.name != "local-csv":
         raise ValueError(
-            "modality=text is only supported for local CSV datasets in v1; "
-            f"got adapter {adapter.name!r} (source_type={context.source_type!r}). "
-            "Use a local [dataset:…] section with a CSV source, not Granary/BigQuery/GCS streaming."
-        )
-
-
-def _ensure_image_modality_supported(context: DatasetLoadContext, adapter, streaming_enabled: bool) -> None:
-    """Image fine-tuning (v1) is limited to non-streaming local CSV loads."""
-    if context.modality != "image":
-        return
-    if streaming_enabled:
-        raise ValueError("modality=image requires non-streaming dataset loading in v1.")
-    if adapter.name != "local-csv":
-        raise ValueError(
-            "modality=image is only supported for local CSV datasets in v1; "
+            f"modality={modality} is only supported for local CSV datasets in v1; "
             f"got adapter {adapter.name!r} (source_type={context.source_type!r}). "
             "Use a local [dataset:…] section with a CSV source, not Granary/BigQuery/GCS streaming."
         )
@@ -307,8 +295,8 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
         streaming_enabled=streaming_enabled,
         config=_get_config(),
     )
-    _ensure_text_modality_supported(context, adapter, streaming_enabled)
-    _ensure_image_modality_supported(context, adapter, streaming_enabled)
+    _ensure_modality_local_csv_only(context, adapter, streaming_enabled, "text")
+    _ensure_modality_local_csv_only(context, adapter, streaming_enabled, "image")
     source = adapter.patch_source(context)
 
     # Debug information for troubleshooting data loading issues

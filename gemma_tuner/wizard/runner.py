@@ -415,7 +415,7 @@ def wizard_main():
         # Merge training parameters into method_config for downstream display and merging
         method_config.update(training_params)
         method_config.update(configure_text_columns(finetuning))
-        method_config.update(configure_image_columns(finetuning))
+        method_config.update(configure_image_columns(finetuning, model))
         method_config["modality"] = finetuning["modality"]
         method_config["text_sub_mode"] = finetuning.get("text_sub_mode", "instruction")
         method_config["image_sub_mode"] = finetuning.get("image_sub_mode", "caption")
