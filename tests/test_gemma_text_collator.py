@@ -269,7 +269,9 @@ def test_completion_submode_masks_only_padding_not_eos_when_pad_equals_eos():
 def test_instruction_requires_prompt_column():
     tok = _FakeInstructionTokenizer()
     try:
-        DataCollatorGemmaText(tok, text_column="t", family=GemmaFamily.GEMMA_3N, prompt_column=None, sub_mode="instruction")
+        DataCollatorGemmaText(
+            tok, text_column="t", family=GemmaFamily.GEMMA_3N, prompt_column=None, sub_mode="instruction"
+        )
     except ValueError as e:
         assert "prompt_column" in str(e).lower()
     else:
