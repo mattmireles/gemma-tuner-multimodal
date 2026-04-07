@@ -5,6 +5,11 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover — training env always has Pillow
+    Image = None  # type: ignore[misc, assignment]
+
 from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
     GemmaValidationConstants,
@@ -193,6 +198,154 @@ def inject_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
 
 # Backwards compatibility for older imports.
 ensure_gemma_mm_token_type_ids = inject_mm_token_type_ids
+
+
+def apply_image_token_budget_to_processor(processor: Any, budget: int) -> None:
+    """Set ``image_seq_length`` / expanded image placeholder sequence on Gemma multimodal processors.
+
+    Hugging Face Gemma3 processors bake ``full_image_sequence`` from ``image_seq_length`` at init;
+    mutating ``image_seq_length`` alone is insufficient — rebuild the expanded sequence when possible.
+    """
+    b = int(budget)
+    if not hasattr(processor, "image_seq_length"):
+        return
+    if int(getattr(processor, "image_seq_length", 0)) == b:
+        return
+    processor.image_seq_length = b
+    img_tok = getattr(processor, "image_token", None)
+    boi = getattr(processor, "boi_token", None)
+    eoi = getattr(processor, "eoi_token", None)
+    if img_tok is not None and boi is not None and eoi is not None:
+        expanded = "".join([str(img_tok)] * b)
+        processor.full_image_sequence = f"\n\n{boi}{expanded}{eoi}\n\n"
+
+
+def _load_image_as_rgb(path: Any) -> Any:
+    """Open an image from path and return a PIL Image in RGB (handles CMYK / RGBA)."""
+    if Image is None:
+        raise RuntimeError("PIL is required for image fine-tuning; install Pillow.")
+    try:
+        with Image.open(path) as im:
+            return im.convert("RGB")
+    except Exception as e:
+        raise RuntimeError(f"Failed to load image {path!r}: {e}") from e
+
+
+class DataCollatorGemmaImage:
+    """Batch image+text examples for Gemma multimodal (captioning or VQA).
+
+    Uses ``apply_chat_template(..., tokenize=False)`` then ``processor(text=..., images=...)``.
+    RGB conversion is applied here so dataset loaders stay format-agnostic.
+    """
+
+    _CAPTION_INSTRUCTION = "Describe this image."
+
+    def __init__(
+        self,
+        processor,
+        text_column: str,
+        *,
+        family: GemmaFamily,
+        image_path_column: str = "image_path",
+        prompt_column: Optional[str] = None,
+        image_token_budget: int = 280,
+        sub_mode: str = "caption",
+    ):
+        if sub_mode not in ("caption", "vqa"):
+            raise ValueError(f"DataCollatorGemmaImage: sub_mode must be 'caption' or 'vqa', got {sub_mode!r}")
+        if sub_mode == "vqa" and not prompt_column:
+            raise ValueError("DataCollatorGemmaImage: prompt_column is required when sub_mode is 'vqa'")
+        self.processor = processor
+        self.text_column = text_column
+        self.image_path_column = image_path_column
+        self.prompt_column = prompt_column
+        self.image_token_budget = int(image_token_budget)
+        self.sub_mode = sub_mode
+        self._family = family
+        self._caps = family_capabilities(family)
+        self._warned_prompt_masking: List[bool] = [False]
+        apply_image_token_budget_to_processor(self.processor, self.image_token_budget)
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        images: List[Any] = []
+        messages_batch: List[Any] = []
+
+        for ex in features:
+            row_id = ex.get("id", ex.get("note_id", "<unknown>"))
+            path = ex.get(self.image_path_column)
+            if path is None:
+                raise KeyError(
+                    f"DataCollatorGemmaImage: image path column {self.image_path_column!r} missing. "
+                    f"Keys: {list(ex.keys())}"
+                )
+            try:
+                img = _load_image_as_rgb(path)
+            except Exception as e:
+                raise RuntimeError(f"DataCollatorGemmaImage: row id={row_id!r}: {e}") from e
+            images.append(img)
+
+            text_val = ex.get(self.text_column)
+            if text_val is None:
+                raise KeyError(
+                    f"DataCollatorGemmaImage: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+
+            if self.sub_mode == "caption":
+                user_content: List[Dict[str, Any]] = [
+                    {"type": "image", "image": img},
+                    {"type": "text", "text": self._CAPTION_INSTRUCTION},
+                ]
+            else:
+                assert self.prompt_column is not None
+                q = ex.get(self.prompt_column)
+                if q is None:
+                    raise KeyError(
+                        f"DataCollatorGemmaImage: prompt column {self.prompt_column!r} missing. "
+                        f"Keys: {list(ex.keys())}"
+                    )
+                user_content = [
+                    {"type": "image", "image": img},
+                    {"type": "text", "text": str(q)},
+                ]
+
+            messages_batch.append(
+                [
+                    {"role": "user", "content": user_content},
+                    {"role": "assistant", "content": [{"type": "text", "text": str(text_val)}]},
+                ]
+            )
+
+        prompts = self.processor.apply_chat_template(
+            messages_batch,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        encoded = self.processor(
+            text=prompts,
+            images=images,
+            return_tensors="pt",
+            padding=True,
+        )
+
+        if self._caps["needs_mm_token_type_ids_injection"]:
+            inject_mm_token_type_ids(encoded)
+
+        if hasattr(self.processor, "tokenizer"):
+            validate_bos_tokens_present(encoded, self.processor.tokenizer)
+
+        labels = encoded["input_ids"].clone()
+        mask_gemma_prompt_tokens(
+            labels,
+            encoded["input_ids"],
+            self.processor.tokenizer,
+            self._warned_prompt_masking,
+            control_token=self._caps["control_token"],
+        )
+        am = encoded.get("attention_mask")
+        if am is not None:
+            labels[am == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+        encoded["labels"] = labels
+        return encoded
 
 
 class DataCollatorGemmaText:

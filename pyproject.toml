@@ -36,6 +36,9 @@ dependencies = [
   "soundfile>=0.12.0,<0.13.0",
   "scikit-learn>=1.2.0",
 
+  # Images (Gemma image fine-tuning collator)
+  "Pillow>=10.0.0",
+
   # Utilities
   "numpy>=1.26.4",
   "pandas>=1.3.0",
