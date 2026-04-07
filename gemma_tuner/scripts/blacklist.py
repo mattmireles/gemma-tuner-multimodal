@@ -150,7 +150,7 @@ def create_blacklist(profile_config, output_dir):
 
     Example:
         profile_config = {
-            "model_name_or_path": "openai/gemma-3n-e4b-it",
+            "model_name_or_path": "google/gemma-4-e2b",
             "dataset": "librispeech",
             "wer_threshold": 75.0,
             "validation_wer_threshold": 80.0,
