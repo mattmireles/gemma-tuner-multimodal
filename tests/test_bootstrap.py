@@ -34,7 +34,7 @@ def test_bootstrap_sets_mps_env(monkeypatch):
 def test_bootstrap_loads_dotenv_from_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    (tmp_path / ".env").write_text('HF_TOKEN=dotenv-test-token\n', encoding="utf-8")
+    (tmp_path / ".env").write_text("HF_TOKEN=dotenv-test-token\n", encoding="utf-8")
 
     sys.modules.pop("gemma_tuner.core.bootstrap", None)
     import gemma_tuner.core.bootstrap
