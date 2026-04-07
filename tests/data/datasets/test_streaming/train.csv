@@ -1,2 +1,2 @@
 id,audio_path,text_perfect
-1,/Users/mattmireles/Documents/GitHub/whisper/whisper-fine-tuner-macos/tests/data/datasets/test_streaming/audio/tiny.wav,hello world
+1,audio/tiny.wav,hello world
