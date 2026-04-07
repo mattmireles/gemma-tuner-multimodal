@@ -17,6 +17,7 @@
 | | **This** | MLX-LM | Unsloth | axolotl |
 | --- | :-: | :-: | :-: | :-: |
 | Fine-tune Gemma (text-only CSV) | ✅ | ✅ | ✅ | ✅ |
+| Fine-tune Gemma **image + text** (caption / VQA CSV) | ✅ | ⚠️ varies | ⚠️ varies | ⚠️ varies |
 | Fine-tune Gemma **audio + text** | ✅ | ❌ | ❌ | ⚠️ CUDA only |
 | Runs on Apple Silicon (MPS) | ✅ | ✅ | ❌ | ❌ |
 | **Stream training data from cloud** | ✅ | ❌ | ❌ | ⚠️ partial |
@@ -24,7 +25,9 @@
 
 If you want to fine-tune Gemma on **audio** without renting an H100 or copying a terabyte of WAVs to your laptop, this is the only toolkit that does all three.
 
-**Text-only fine-tuning** (instruction or completion on CSV) is also supported: set `modality = text` in your profile and use local CSV splits under `data/datasets/<name>/`. See [Text-only fine-tuning](#text-only-fine-tuning) below.
+**Text-only fine-tuning** (instruction or completion on CSV) is supported: set `modality = text` in your profile and use local CSV splits under `data/datasets/<name>/`. See [Text-only fine-tuning](#text-only-fine-tuning) below.
+
+**Image + text fine-tuning** (captioning or VQA on local CSV) uses `modality = image`, `image_sub_mode`, and `image_token_budget`; see [Image fine-tuning](#image-fine-tuning) below. v1 is **local CSV only** (same constraint as text-only).
 
 Under the hood: Hugging Face Gemma checkpoints + PEFT LoRA, supervised fine-tuning in [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py), exported as a merged HF / SafeTensors tree by [`gemma_tuner/scripts/export.py`](gemma_tuner/scripts/export.py). For Core ML conversion and GGUF inference tooling, see [`README/guides/README.md`](README/guides/README.md) — this repo's *training* path is Gemma-only by design.
 
@@ -237,6 +240,38 @@ max_seq_length = 2048
 ```
 
 The checkpoint is still a multimodal Gemma `AutoModelForCausalLM`; the USM audio tower weights remain in memory in v1 even when you only train on text. See [`README/KNOWN_ISSUES.md`](README/KNOWN_ISSUES.md).
+
+---
+
+## Image fine-tuning
+
+Train on **image + text** pairs from **local CSV** splits under `data/datasets/<name>/` (`train.csv` / `validation.csv`). v1 supports **captioning** (`image_sub_mode = caption`) and **VQA** (`image_sub_mode = vqa`). See [`README/Datasets.md`](README/Datasets.md) for all keys.
+
+- **Caption / OCR-style:** user turn = image + fixed instruction (“Describe this image.”); assistant = your caption column.
+- **VQA:** user turn = image + question (`prompt_column`); assistant = answer (`text_column`).
+
+**Profile snippet (caption):**
+
+```ini
+modality = image
+image_sub_mode = caption
+text_column = caption
+image_path_column = image_path
+image_token_budget = 280
+```
+
+**Profile snippet (VQA):**
+
+```ini
+modality = image
+image_sub_mode = vqa
+prompt_column = question
+text_column = answer
+image_path_column = image_path
+image_token_budget = 560
+```
+
+`image_token_budget` must be one of **70, 140, 280, 560, 1120**. Use the **same** value at inference as during training. Higher budgets improve detail but increase memory and step time on MPS. Export saves the processor next to weights; if `metadata.json` from the run is present, export reapplies the stored budget to the processor for consistency.
 
 ---
 

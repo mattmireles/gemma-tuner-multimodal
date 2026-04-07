@@ -10,6 +10,7 @@
 ## General Issues
 
 - **Text mode still loads multimodal weights**: With `modality = text`, training uses `AutoTokenizer` and text batches only, but `AutoModelForCausalLM.from_pretrained` still loads the full Gemma checkpoint including the audio (USM) tower. Expect on the order of **~1–2 GB** extra resident RAM versus a hypothetical text-only variant; the tower is not exercised in the forward pass. Reducing this is out of scope for v1.
+- **Image mode throughput and memory**: Vision fine-tuning runs the image encoder every step; `image_token_budget = 1120` is realistic mainly at **batch size 1** on typical 32 GB unified-memory Macs, and wall time per step is often **several×** slower than text-only. **Train/serve:** use the same `image_token_budget` at inference as in training; mismatch can silently hurt quality.
 - **Cache not utilized properly**: Dataset preprocessing recomputes log-Mels on each run because the cache key includes the entire preprocessing config (including fp16/fp32 toggle). Need to implement caching based on audio SHA-1 instead.
 - **Blacklist/evaluate metadata collision**: The blacklist script rewrites Arrow files in-place and drops the "audio/_array" column that evaluate.py expects. Workaround: Run blacklist first, then evaluate, or use `--no-cache`.
 - **Documentation command syntax**: Some older documentation incorrectly shows `gemma-macos-tuner --profile <profile>` when it should be `gemma-macos-tuner finetune <profile>`. This has been fixed in most places but may still appear in some examples.

@@ -20,6 +20,11 @@ This guide covers common issues for Apple Silicon (MPS).
   - Reduce batch size; enable gradient accumulation.
   - Use attention slicing or gradient checkpointing (note: checkpointing can be unstable on MPS for some models).
 
+## Image fine-tuning (vision token budget)
+
+- **High `image_token_budget` (e.g. 1120)** on a 32 GB Mac: prefer `per_device_train_batch_size = 1` and scale with `gradient_accumulation_steps`. Throughput is often **much** lower than text-only training because of the vision encoder on MPS.
+- **Train/serve mismatch:** if inference uses a different `image_token_budget` than training, quality can drop silently. Match the profile value; export reapplies the budget from run `metadata.json` when present.
+
 ## Migrating to the Typer CLI
 
 - Legacy scripts `main.py` and `manage.py` are deprecated.
