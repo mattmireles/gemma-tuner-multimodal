@@ -71,9 +71,7 @@ def _left_trim_user_for_instruction_budget(tokenizer, user: str, assistant: str,
     return user[lo:]
 
 
-def _shrink_assistant_prefix_for_instruction_budget(
-    tokenizer, user: str, assistant: str, max_length: int
-) -> str:
+def _shrink_assistant_prefix_for_instruction_budget(tokenizer, user: str, assistant: str, max_length: int) -> str:
     """Keep the longest prefix of ``assistant`` that still fits with ``user`` (after user trim)."""
     if _instruction_seq_len(tokenizer, user, assistant) <= max_length:
         return assistant
