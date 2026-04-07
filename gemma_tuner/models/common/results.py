@@ -59,7 +59,7 @@ def persist_training_results(
                         break
 
         metrics = dict(metrics)
-        if str(modality).lower() == "text":
+        if str(modality).lower() in ("text", "image"):
             el = metrics.get("eval_loss")
             if el is not None:
                 try:

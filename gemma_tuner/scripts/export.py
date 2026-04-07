@@ -31,6 +31,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from gemma_tuner.models.common.collators import apply_image_token_budget_to_processor
 from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import get_device
 
@@ -121,6 +122,24 @@ def export_model_dir(model_path_or_profile: str) -> str:
     # AutoProcessor.from_pretrained(out_dir) without needing the original source.
     try:
         processor = AutoProcessor.from_pretrained(processor_source)
+        for meta_base in (source_path, source_path.parent):
+            meta_path = meta_base / "metadata.json"
+            if not meta_path.is_file():
+                continue
+            try:
+                with open(meta_path) as mf:
+                    meta = json.load(mf)
+                cfg = meta.get("config") or {}
+                if str(cfg.get("modality", "")).lower() == "image" and cfg.get("image_token_budget") is not None:
+                    apply_image_token_budget_to_processor(processor, int(cfg["image_token_budget"]))
+                    logger.info(
+                        "Applied image_token_budget=%s from %s for train/serve consistency.",
+                        cfg["image_token_budget"],
+                        meta_path,
+                    )
+            except Exception as exc_meta:
+                logger.warning("Could not read image_token_budget from metadata (%s): %s", meta_path, exc_meta)
+            break
         processor.save_pretrained(out_dir)
         logger.info("  Processor saved alongside model weights.")
     except Exception as exc:

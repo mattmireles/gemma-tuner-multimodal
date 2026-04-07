@@ -78,7 +78,12 @@ from transformers import (
 )
 from transformers.utils import logging as hf_logging
 
-from gemma_tuner.models.common.collators import DataCollatorGemmaAudio, DataCollatorGemmaText
+from gemma_tuner.models.common.collators import (
+    DataCollatorGemmaAudio,
+    DataCollatorGemmaImage,
+    DataCollatorGemmaText,
+    apply_image_token_budget_to_processor,
+)
 from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
@@ -403,6 +408,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     }
     if prompt_column is not None:
         dataset_config["prompt_column"] = prompt_column
+    if modality == "image":
+        dataset_config["image_sub_mode"] = str(profile_config.get("image_sub_mode", "caption")).strip().lower()
+        ipc = profile_config.get("image_path_column")
+        if ipc:
+            dataset_config["image_path_column"] = str(ipc).strip()
 
     train_dataset, _ = load_dataset_split(
         split="train",
@@ -422,6 +432,26 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         except Exception as e:
             logger.warning(f"Failed to load validation split; running without eval: {e}")
 
+    image_path_column_resolved = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
+    if modality == "image":
+        dataset_dir = os.path.join("data", "datasets", dataset_name)
+
+        def _resolve_image_paths(batch: dict) -> dict:
+            col = image_path_column_resolved
+            paths = batch[col]
+            out = []
+            for p in paths:
+                if p and not os.path.isabs(str(p)):
+                    out.append(os.path.join(dataset_dir, str(p)))
+                else:
+                    out.append(p)
+            batch[col] = out
+            return batch
+
+        train_dataset = train_dataset.map(_resolve_image_paths, batched=True)
+        if eval_dataset is not None:
+            eval_dataset = eval_dataset.map(_resolve_image_paths, batched=True)
+
     # Initialize processor and model
     model_id = profile_config.get("base_model", GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID)
     attn_impl = profile_config.get("attn_implementation", "eager")
@@ -438,8 +468,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         logger.info(f"Loading tokenizer (text modality): {model_id}")
         text_tokenizer = AutoTokenizer.from_pretrained(model_id)
     else:
-        logger.info(f"Loading processor (audio modality): {model_id}")
+        logger.info(f"Loading processor ({modality} modality): {model_id}")
         processor = AutoProcessor.from_pretrained(model_id)
+        if modality == "image":
+            _itb = int(profile_config.get("image_token_budget", 280))
+            apply_image_token_budget_to_processor(processor, _itb)
 
     # Determine dtype preference: prefer bfloat16 on MPS when available, else float32
     #
@@ -580,7 +613,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     train_ds = _hf_to_torch(train_dataset)
     eval_ds = _hf_to_torch(eval_dataset) if eval_dataset is not None else None
 
-    # Collator: multimodal processor (audio) or tokenizer-only (text)
+    # Collator: multimodal processor (audio / image) or tokenizer-only (text)
     if modality == "text":
         data_collator = DataCollatorGemmaText(
             tokenizer=text_tokenizer,
@@ -590,15 +623,28 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             max_length=max_seq_length,
             sub_mode=text_sub_mode,
         )
+    elif modality == "image":
+        image_sub_mode = str(profile_config.get("image_sub_mode", "caption")).strip().lower()
+        image_path_col = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
+        image_token_budget = int(profile_config.get("image_token_budget", 280))
+        data_collator = DataCollatorGemmaImage(
+            processor=processor,
+            text_column=text_column,
+            family=family,
+            image_path_column=image_path_col,
+            prompt_column=prompt_column,
+            image_token_budget=image_token_budget,
+            sub_mode=image_sub_mode,
+        )
     else:
         data_collator = DataCollatorGemmaAudio(
             processor=processor, text_column=text_column, family=family, sampling_rate_hint=None
         )
 
-    # WER metrics for speech runs only; text uses loss / optional perplexity in train_results.
+    # WER metrics for speech runs only; text/image use loss / optional perplexity in train_results.
     compute_metrics_fn = None
     preprocess_logits_for_metrics = None
-    if modality != "text":
+    if modality == "audio":
         _wer_metrics = build_wer_metrics(
             tokenizer=processor.tokenizer,
             decoder=processor.tokenizer,
