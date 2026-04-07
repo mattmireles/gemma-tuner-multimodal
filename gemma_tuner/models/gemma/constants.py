@@ -26,15 +26,16 @@ class GemmaTrainingConstants:
     LORA_R = 16
     LORA_ALPHA = 32
     LORA_DROPOUT = 0.05
-    # Attention projections + MLP gates; includes fc1/fc2 to train the audio tower MLP
-    # alongside attention. Both Gemma 4 E2B/E4B and Gemma 3n share the same USM-style
-    # audio encoder architecture, so this module set applies to both.
-    # Google recommends freezing encoders for Gemma 4 general fine-tuning, but this repo
-    # targets audio transcription quality — training fc1/fc2 adapts the audio MLP to
-    # domain-specific characteristics (accents, noise conditions, codec artifacts).
+    # Attention + text/LLM MLP projections (gate/up/down), matching
+    # README/guides/apple-silicon/gemma4-guide.md. Do not use fc1/fc2 — those names
+    # are not used in Gemma 3n / Gemma 4 transformers modules; _discover_candidate_target_modules
+    # would silently drop them.
+    # Audio encoder layers use different suffixes (e.g. Gemma 3n: ffw_layer_1, q_proj under
+    # audio blocks). To LoRA audio-tower weights, set lora_target_modules explicitly after
+    # inspecting model.named_modules() for your checkpoint.
     # Existing configs that set lora_target_modules explicitly are unaffected; only the
     # implicit fallback in finetune.py uses this constant.
-    LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "fc1", "fc2"]
+    LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
     # Special token handling
     IGNORE_TOKEN_ID = TrainingDefaults.IGNORE_TOKEN_ID
