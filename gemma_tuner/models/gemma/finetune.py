@@ -95,7 +95,7 @@ from gemma_tuner.models.gemma.family import (
     detect_family,
 )
 from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
-from gemma_tuner.utils.device import empty_cache, get_device
+from gemma_tuner.utils.device import empty_cache, get_device, to_bool
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
 # The canonical class lives in models/common/collators.py; the local duplicate was
@@ -296,6 +296,19 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     text_sub_mode = str(profile_config.get("text_sub_mode", "instruction")).strip().lower()
     prompt_column = profile_config.get("prompt_column")
     max_seq_length = int(profile_config.get("max_seq_length", 2048))
+    if device.type == "mps" and modality == "text":
+        try:
+            mps_seq_cap = int(os.environ.get("GEMMA_MPS_MAX_SEQ_LENGTH", "2048"))
+        except ValueError:
+            mps_seq_cap = 2048
+        if max_seq_length > mps_seq_cap:
+            logger.warning(
+                "MPS text: max_seq_length=%s exceeds cap %s (raise GEMMA_MPS_MAX_SEQ_LENGTH if you need more; "
+                "may OOM on unified memory). Truncating.",
+                max_seq_length,
+                mps_seq_cap,
+            )
+            max_seq_length = mps_seq_cap
 
     dataset_config = {
         "name": dataset_name,
@@ -596,10 +609,42 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     learning_rate = float(profile_config.get("learning_rate", GemmaTrainingConstants.DEFAULT_LEARNING_RATE))
     num_train_epochs = int(profile_config.get("num_train_epochs", GemmaTrainingConstants.DEFAULT_NUM_TRAIN_EPOCHS))
 
-    # MPS heuristics: keep micro-batch small; scale via grad accumulation
+    # MPS heuristics: text + Gemma 4 multimodal LoRA needs micro-batch 1 on unified memory; scale via grad accumulation.
     if device.type == "mps":
-        per_device_train_batch_size = min(per_device_train_batch_size, 2)
-        per_device_eval_batch_size = min(per_device_eval_batch_size, 2)
+        if modality == "text":
+            if per_device_train_batch_size > 1:
+                logger.info(
+                    "MPS text: clamping per_device_train_batch_size from %s to 1 (use gradient_accumulation_steps for effective batch).",
+                    per_device_train_batch_size,
+                )
+            per_device_train_batch_size = min(per_device_train_batch_size, 1)
+            if per_device_eval_batch_size > 1:
+                logger.info(
+                    "MPS text: clamping per_device_eval_batch_size from %s to 1.",
+                    per_device_eval_batch_size,
+                )
+            per_device_eval_batch_size = min(per_device_eval_batch_size, 1)
+        else:
+            per_device_train_batch_size = min(per_device_train_batch_size, 2)
+            per_device_eval_batch_size = min(per_device_eval_batch_size, 2)
+
+    if device.type == "mps" and modality == "text":
+        if os.environ.get("GEMMA_MPS_ALLOW_NO_GRADIENT_CHECKPOINTING", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            gradient_checkpointing = to_bool(profile_config.get("gradient_checkpointing"))
+        else:
+            gradient_checkpointing = True
+    else:
+        gradient_checkpointing = to_bool(profile_config.get("gradient_checkpointing"))
+
+    if gradient_checkpointing:
+        try:
+            model.enable_input_require_grads()
+        except Exception as e:
+            logger.warning("enable_input_require_grads() failed (continuing): %s", e)
 
     train_kw = dict(
         output_dir=output_dir,
@@ -609,6 +654,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         num_train_epochs=num_train_epochs,
         learning_rate=learning_rate,
         bf16=use_bf16,
+        gradient_checkpointing=gradient_checkpointing,
         logging_steps=int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS)),
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
         eval_strategy=effective_eval_strategy,
