@@ -7,6 +7,7 @@ them without creating a circular dependency (finetune -> collators -> finetune).
 Imported by:
 - models/gemma/finetune.py  (primary consumer)
 - models/common/collators.py  (DataCollatorGemmaAudio)
+- utils/gemma_dataset_prep.py  (DEFAULT_MODEL_ID)
 """
 
 from gemma_tuner.constants import TrainingDefaults
@@ -36,6 +37,9 @@ class GemmaTrainingConstants:
     # Existing configs that set lora_target_modules explicitly are unaffected; only the
     # implicit fallback in finetune.py uses this constant.
     LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+    # Default when profile omits base_model (SFT / chat: prefer -it per gemma4-guide.md).
+    DEFAULT_BASE_MODEL_ID = "google/gemma-4-E2B-it"
 
     # Special token handling
     IGNORE_TOKEN_ID = TrainingDefaults.IGNORE_TOKEN_ID

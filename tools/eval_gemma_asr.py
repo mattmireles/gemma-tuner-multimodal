@@ -42,6 +42,8 @@ try:
 except Exception:
     load_audio_local_or_gcs = None
 
+from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+
 # Canonical device selection (MPS > CUDA > CPU) from shared utils
 from gemma_tuner.utils.device import get_device, probe_bfloat16
 
@@ -61,7 +63,7 @@ def build_messages(transcript_hint: Optional[str] = None) -> List[Dict]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gemma ASR evaluation (WER/CER)")
     ap.add_argument("--csv", required=True, help="Validation CSV with audio_path and reference text")
-    ap.add_argument("--model", default="google/gemma-4-E2B", help="Base Gemma model id")
+    ap.add_argument("--model", default=GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID, help="Base Gemma model id")
     ap.add_argument("--adapters", help="Path to LoRA adapters (optional)")
     ap.add_argument("--text-column", default="text", help="Reference transcript column name")
     ap.add_argument("--limit", type=int, default=0, help="Max rows to evaluate (0 = all)")

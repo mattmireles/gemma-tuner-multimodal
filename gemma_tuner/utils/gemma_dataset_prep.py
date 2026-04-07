@@ -140,6 +140,8 @@ from typing import Dict, List
 
 from transformers import AutoProcessor
 
+from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+
 # Reuse shared audio I/O to support file system and GCS URIs.
 # Only catch ImportError (missing optional deps such as librosa/soundfile) so that
 # programmer errors — AttributeError, SyntaxError, etc. — are never swallowed.
@@ -160,8 +162,8 @@ except ImportError as e:
 class GemmaDatasetPrepConstants:
     """Named constants for Gemma dataset preparation and validation."""
 
-    # Default Configuration
-    DEFAULT_MODEL_ID = "google/gemma-4-E2B-it"  # Default Gemma multimodal model
+    # Default Configuration (aligned with finetune.py when base_model is unset)
+    DEFAULT_MODEL_ID = GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID
     DEFAULT_TEXT_COLUMN = "text"  # Default transcript column name
 
     # Required CSV Columns
