@@ -638,6 +638,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         remove_unused_columns=False,
         dataloader_pin_memory=False,
         log_level="error",
+        # Avoid Trainer.evaluate() stalling on MPS (transformers#27181); matches gemma4-guide.md.
+        skip_memory_metrics=True,
     )
     _ms = profile_config.get("max_steps")
     if _ms is not None and _ms != "":
