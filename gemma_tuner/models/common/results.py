@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from typing import Any
 
@@ -30,6 +31,7 @@ def persist_training_results(
     output_dir: str,
     trainer=None,
     train_result=None,
+    modality: str = "audio",
 ) -> None:
     """Write train_results.json for orchestrator compatibility.
 
@@ -55,6 +57,15 @@ def persist_training_results(
                     if isinstance(entry, dict) and ("loss" in entry or "train_runtime" in entry):
                         metrics = entry
                         break
+
+        metrics = dict(metrics)
+        if str(modality).lower() == "text":
+            el = metrics.get("eval_loss")
+            if el is not None:
+                try:
+                    metrics["perplexity"] = math.exp(min(float(el), 20.0))
+                except (TypeError, ValueError):
+                    pass
 
         results_path = os.path.join(output_dir, "train_results.json")
         with open(results_path, "w") as wf:

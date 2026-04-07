@@ -69,13 +69,14 @@ from torch.utils.data import Dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoProcessor,
+    AutoTokenizer,
     Trainer,
     TrainingArguments,
     set_seed,
 )
 from transformers.utils import logging as hf_logging
 
-from gemma_tuner.models.common.collators import DataCollatorGemmaAudio
+from gemma_tuner.models.common.collators import DataCollatorGemmaAudio, DataCollatorGemmaText
 from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
@@ -233,10 +234,23 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     text_column = profile_config.get("text_column", "text")
     max_samples = profile_config.get("max_samples")
     streaming_enabled = profile_config.get("streaming_enabled", False)
+    modality = str(profile_config.get("modality", "audio")).strip().lower()
+    text_sub_mode = str(profile_config.get("text_sub_mode", "instruction")).strip().lower()
+    prompt_column = profile_config.get("prompt_column")
+    max_seq_length = int(profile_config.get("max_seq_length", 2048))
+
+    dataset_config = {
+        "name": dataset_name,
+        "text_column": text_column,
+        "modality": modality,
+        "text_sub_mode": text_sub_mode,
+    }
+    if prompt_column is not None:
+        dataset_config["prompt_column"] = prompt_column
 
     train_dataset, _ = load_dataset_split(
         split="train",
-        dataset_config={"name": dataset_name, "text_column": text_column},
+        dataset_config=dataset_config,
         max_samples=max_samples,
         streaming_enabled=streaming_enabled,
     )
@@ -245,7 +259,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         try:
             eval_dataset, _ = load_dataset_split(
                 split="validation",
-                dataset_config={"name": dataset_name, "text_column": text_column},
+                dataset_config=dataset_config,
                 max_samples=None,
                 streaming_enabled=streaming_enabled,
             )
@@ -256,8 +270,14 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     model_id = profile_config.get("base_model", "google/gemma-4-E2B")
     attn_impl = profile_config.get("attn_implementation", "eager")
 
-    logger.info(f"Loading processor: {model_id}")
-    processor = AutoProcessor.from_pretrained(model_id)
+    processor = None
+    text_tokenizer = None
+    if modality == "text":
+        logger.info(f"Loading tokenizer (text modality): {model_id}")
+        text_tokenizer = AutoTokenizer.from_pretrained(model_id)
+    else:
+        logger.info(f"Loading processor (audio modality): {model_id}")
+        processor = AutoProcessor.from_pretrained(model_id)
 
     # Determine dtype preference: prefer bfloat16 on MPS when available, else float32
     #
@@ -397,41 +417,50 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     train_ds = _hf_to_torch(train_dataset)
     eval_ds = _hf_to_torch(eval_dataset) if eval_dataset is not None else None
 
-    # Collator: uses processor for multimodal packing
-    # Let the collator handle sampling rate detection internally for cleaner code
-    data_collator = DataCollatorGemmaAudio(processor=processor, text_column=text_column, sampling_rate_hint=None)
+    # Collator: multimodal processor (audio) or tokenizer-only (text)
+    if modality == "text":
+        data_collator = DataCollatorGemmaText(
+            tokenizer=text_tokenizer,
+            text_column=text_column,
+            prompt_column=prompt_column,
+            max_length=max_seq_length,
+            sub_mode=text_sub_mode,
+        )
+    else:
+        data_collator = DataCollatorGemmaAudio(processor=processor, text_column=text_column, sampling_rate_hint=None)
 
-    # WER metrics for evaluation.
-    # build_wer_metrics() returns a compute_fn closure wired to the tokenizer.
-    # local_files_only=True: avoids network downloads in offline/CI environments;
-    # build_wer_metrics falls back to a zero-stub if the metric script is unavailable,
-    # so training is never blocked by metric loading failures.
-    _wer_metrics = build_wer_metrics(
-        tokenizer=processor.tokenizer,
-        decoder=processor.tokenizer,
-        include_cer=False,
-        local_files_only=True,
-    )
-    compute_metrics_fn = _wer_metrics["compute_fn"]
+    # WER metrics for speech runs only; text uses loss / optional perplexity in train_results.
+    compute_metrics_fn = None
+    preprocess_logits_for_metrics = None
+    if modality != "text":
+        _wer_metrics = build_wer_metrics(
+            tokenizer=processor.tokenizer,
+            decoder=processor.tokenizer,
+            include_cer=False,
+            local_files_only=True,
+        )
+        compute_metrics_fn = _wer_metrics["compute_fn"]
 
-    def _preprocess_logits_for_metrics(logits, labels):
-        """Argmax logits immediately after each eval batch to avoid accumulating [B, T, V] tensors.
+        def _preprocess_logits_for_metrics(logits, labels):
+            """Argmax logits immediately after each eval batch to avoid accumulating [B, T, V] tensors.
 
-        Standard HF pattern for causal LM evaluation with plain Trainer.
-        Gemma's 256 k vocabulary makes storing full logits across the eval set
-        prohibitively expensive (2 samples × 512 tokens × 256 k vocab × 4 bytes ≈ 1 GB
-        per batch). Argmaxing here reduces each batch to [B, T] int64 token IDs.
+            Standard HF pattern for causal LM evaluation with plain Trainer.
+            Gemma's 256 k vocabulary makes storing full logits across the eval set
+            prohibitively expensive (2 samples × 512 tokens × 256 k vocab × 4 bytes ≈ 1 GB
+            per batch). Argmaxing here reduces each batch to [B, T] int64 token IDs.
 
-        Called by:
-        - Trainer.evaluation_loop() immediately after each eval batch, before
-          tensors are gathered across devices/workers.
+            Called by:
+            - Trainer.evaluation_loop() immediately after each eval batch, before
+              tensors are gathered across devices/workers.
 
-        Result shape [B, T] is what compute_metrics_fn receives as pred.predictions.
-        The 3-D branch in compute_fn (metrics.py) becomes a no-op but does not break.
-        """
-        if isinstance(logits, tuple):
-            logits = logits[0]
-        return logits.argmax(dim=-1)
+            Result shape [B, T] is what compute_metrics_fn receives as pred.predictions.
+            The 3-D branch in compute_fn (metrics.py) becomes a no-op but does not break.
+            """
+            if isinstance(logits, tuple):
+                logits = logits[0]
+            return logits.argmax(dim=-1)
+
+        preprocess_logits_for_metrics = _preprocess_logits_for_metrics
 
     # Guard: HF Trainer.__init__ raises ValueError when eval_strategy != "no" and
     # eval_dataset is None (verified against transformers trainer.py line 439).
@@ -490,7 +519,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         eval_dataset=eval_ds,
         data_collator=data_collator,
         compute_metrics=compute_metrics_fn,
-        preprocess_logits_for_metrics=_preprocess_logits_for_metrics,
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics,
     )
 
     logger.info("Starting Gemma LoRA training...")
@@ -498,7 +527,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     logger.info("Training complete. Saving adapter...")
     trainer.save_model()
 
-    persist_training_results(output_dir, trainer=trainer, train_result=train_result)
+    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
 
     empty_cache()
     return {"train_metrics": getattr(train_result, "metrics", {})}
