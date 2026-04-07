@@ -492,7 +492,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         per_device_train_batch_size = min(per_device_train_batch_size, 2)
         per_device_eval_batch_size = min(per_device_eval_batch_size, 2)
 
-    args = TrainingArguments(
+    train_kw = dict(
         output_dir=output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
         per_device_eval_batch_size=per_device_eval_batch_size,
@@ -508,6 +508,10 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         dataloader_pin_memory=False,
         log_level="error",
     )
+    _ms = profile_config.get("max_steps")
+    if _ms is not None and _ms != "":
+        train_kw["max_steps"] = int(_ms)
+    args = TrainingArguments(**train_kw)
 
     # Seed for reproducibility
     set_seed(args.seed)

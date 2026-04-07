@@ -25,13 +25,15 @@
 
 | | **This** | MLX-LM | Unsloth | axolotl |
 | --- | :-: | :-: | :-: | :-: |
-| Fine-tune Gemma (text) | ✅ | ✅ | ✅ | ✅ |
+| Fine-tune Gemma (text-only CSV) | ✅ | ✅ | ✅ | ✅ |
 | Fine-tune Gemma **audio + text** | ✅ | ❌ | ❌ | ⚠️ CUDA only |
 | Runs on Apple Silicon (MPS) | ✅ | ✅ | ❌ | ❌ |
 | **Stream training data from cloud** | ✅ | ❌ | ❌ | ⚠️ partial |
 | No NVIDIA GPU required | ✅ | ✅ | ❌ | ❌ |
 
 If you want to fine-tune Gemma on **audio** without renting an H100 or copying a terabyte of WAVs to your laptop, this is the only toolkit that does all three.
+
+**Text-only fine-tuning** (instruction or completion on CSV) is also supported: set `modality = text` in your profile and use local CSV splits under `data/datasets/<name>/`. See [Text-only fine-tuning](#text-only-fine-tuning) below.
 
 Under the hood: Hugging Face Gemma checkpoints + PEFT LoRA, supervised fine-tuning in [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py), exported as a merged HF / SafeTensors tree by [`gemma_tuner/scripts/export.py`](gemma_tuner/scripts/export.py). For Core ML conversion and GGUF inference tooling, see [`README/guides/README.md`](README/guides/README.md) — this repo's *training* path is Gemma-only by design.
 
@@ -202,9 +204,44 @@ gemma-macos-tuner wizard
 
 ---
 
+## Text-only fine-tuning
+
+Train on **CSV text** (local splits under `data/datasets/<name>/`) without audio. v1 supports **local CSV only** — not BigQuery or Granary streaming (those remain audio-oriented).
+
+Set in your `[profile:…]` (see also [`README/Datasets.md`](README/Datasets.md)):
+
+- `modality = text`
+- `text_sub_mode = instruction` — user/assistant turns: set `prompt_column` and `text_column` (response).
+- `text_sub_mode = completion` — one column; the full sequence is trained (no prompt mask).
+
+Optional: `max_seq_length` (default `2048`).
+
+**Instruction example** (profile snippet):
+
+```ini
+modality = text
+text_sub_mode = instruction
+text_column = response
+prompt_column = prompt
+max_seq_length = 2048
+```
+
+**Completion example**:
+
+```ini
+modality = text
+text_sub_mode = completion
+text_column = text
+max_seq_length = 2048
+```
+
+The checkpoint is still a multimodal Gemma `AutoModelForCausalLM`; the USM audio tower weights remain in memory in v1 even when you only train on text. See [`README/KNOWN_ISSUES.md`](README/KNOWN_ISSUES.md).
+
+---
+
 ## Gemma 3n / Gemma 4 on Apple Silicon
 
-End-to-end notes live in [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md). Short version:
+End-to-end notes live in [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md). Multimodal Gemma 4 + MPS field guide: [`README/guides/apple-silicon/gemma4-guide.md`](README/guides/apple-silicon/gemma4-guide.md). Short version:
 
 ```bash
 python -m gemma_tuner.scripts.gemma_preflight
