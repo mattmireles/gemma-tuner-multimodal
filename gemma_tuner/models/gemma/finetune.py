@@ -86,7 +86,12 @@ from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
     GemmaValidationConstants,
 )
-from gemma_tuner.models.gemma.family import assert_entrypoint_support, assert_family_supported, detect_family
+from gemma_tuner.models.gemma.family import (
+    GemmaFamily,
+    assert_entrypoint_support,
+    assert_family_supported,
+    detect_family,
+)
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 from gemma_tuner.utils.device import empty_cache, get_device
 
@@ -277,10 +282,16 @@ def _config_is_multimodal_gemma_like(config: Any) -> bool:
 def _load_base_model_for_gemma(
     model_id: str,
     *,
+    family: GemmaFamily,
     torch_dtype: torch.dtype,
     attn_implementation: str,
 ) -> Any:
     """Load base weights using the Auto class that matches ``config.architectures``."""
+    if family == GemmaFamily.GEMMA_4:
+        from gemma_tuner.models.gemma.gemma4_patches import apply_clippable_linear_patch
+
+        apply_clippable_linear_patch()
+
     try:
         config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
     except Exception as e:
@@ -456,6 +467,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     logger.info(f"Loading base model: {model_id}")
     model = _load_base_model_for_gemma(
         model_id,
+        family=family,
         torch_dtype=torch_dtype,
         attn_implementation=attn_impl,
     )
