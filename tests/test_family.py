@@ -27,7 +27,7 @@ def test_detect_family_variants():
 
 
 def test_detect_family_unknown():
-    with pytest.raises(ValueError, match="Unsupported Gemma model_id"):
+    with pytest.raises(RuntimeError, match="Unsupported Gemma model_id"):
         detect_family("google/gemma-2-2b")
 
 

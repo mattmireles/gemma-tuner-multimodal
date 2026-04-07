@@ -227,6 +227,7 @@ class DataCollatorGemmaText:
         self.max_length = max_length
         self.sub_mode = sub_mode
         self._family = family
+        # Cache capability dict once; family_capabilities() returns a fresh dict each call.
         self._caps = family_capabilities(family)
         self._warned_prompt_masking: List[bool] = [False]
 
@@ -347,6 +348,7 @@ class DataCollatorGemmaAudio:
         self.text_column = text_column
         self.sampling_rate_hint = sampling_rate_hint
         self._family = family
+        # Cache capability dict once; family_capabilities() returns a fresh dict each call.
         self._caps = family_capabilities(family)
         self._warned_prompt_masking: List[bool] = [False]
 

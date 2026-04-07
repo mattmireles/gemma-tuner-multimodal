@@ -108,6 +108,7 @@ jobs:
       - name: Run fast tests (Gemma 4 env)
         env:
           HF_HUB_DISABLE_TELEMETRY: '1'
+          GEMMA_MACOS_EXPECT_GEMMA4_STACK: '1'
         run: |
           pytest -q -m "not slow" --ignore=tests/test_visualizer.py
 

@@ -26,6 +26,11 @@ def detect_family(model_id: str) -> GemmaFamily:
 
     Order matters: explicit ``gemma-3n`` / ``gemma-4`` (and class-name ``gemma4``) win before the
     ``tiny-random`` stub heuristic so e.g. ``tiny-random-Gemma4ForCausalLM`` is Gemma 4, not 3n.
+
+    Raises:
+        RuntimeError: If ``model_id`` does not match a supported Gemma 3n/4 pattern (same family
+        as :func:`assert_family_supported` / :func:`gate_gemma_model` — prefer catching ``RuntimeError``
+        for all family gate failures).
     """
     mid = model_id.lower()
     if "gemma-3n" in mid:
@@ -38,14 +43,18 @@ def detect_family(model_id: str) -> GemmaFamily:
     # Tiny HF stubs (e.g. fxmarty/tiny-random-GemmaForCausalLM) lack version tokens in the id.
     if "tiny-random" in mid and "gemma" in mid:
         return GemmaFamily.GEMMA_3N
-    raise ValueError(
+    raise RuntimeError(
         f"Unsupported Gemma model_id for family detection: {model_id!r}. "
         "Expected a Hugging Face id or local path containing 'gemma-3n' or 'gemma-4'."
     )
 
 
 def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
-    """Behavior flags shared by collators, loader, and docs (single source of truth)."""
+    """Behavior flags shared by collators, loader, and docs (single source of truth).
+
+    Returns a fresh dict each call — **call once** in collator ``__init__`` (store on ``self._caps``),
+    not per batch.
+    """
     if family == GemmaFamily.GEMMA_3N:
         return {
             "control_token": "<start_of_turn>",
