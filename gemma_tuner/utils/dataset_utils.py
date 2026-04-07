@@ -126,7 +126,27 @@ def _ensure_image_modality_supported(context: DatasetLoadContext, adapter, strea
 
 
 # Anchored config.ini path — resolves relative to the project root regardless of cwd.
-_CONFIG_INI = Path(__file__).resolve().parent.parent.parent / "config.ini"
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_CONFIG_INI = _REPO_ROOT / "config.ini"
+
+
+def resolve_data_datasets_dir(dataset_name: str) -> str:
+    """Absolute path to ``data/datasets/<dataset_name>``.
+
+    If ``config.ini`` exists in the current working directory, the path is taken
+    relative to cwd (matches :func:`_get_config` and supports tests that
+    ``chdir`` into a temp tree).
+
+    If there is no ``config.ini`` in cwd (e.g. ``gemma-macos-tuner finetune`` was
+    started from outside the repo while passing ``--config /path/to/config.ini``),
+    the path is anchored to the repository root (parent of the ``gemma_tuner``
+    package), so CSVs and image files resolve consistently regardless of cwd.
+    """
+    name = str(dataset_name).strip()
+    if Path("config.ini").exists():
+        return str((Path("data") / "datasets" / name).resolve())
+    return str((_REPO_ROOT / "data" / "datasets" / name).resolve())
+
 
 # Lazy-loaded config singleton. Deferred so tests can os.chdir() or monkeypatch
 # _CONFIG_INI before the first call to load_dataset_split(). Thread-safe for
@@ -437,7 +457,7 @@ def _resolve_load_context(split, dataset_config, max_samples, patches_dir, strea
             f"or use source_type=granary for Granary datasets."
         )
 
-    dataset_dir = os.path.join("data", "datasets", dataset_name)
+    dataset_dir = resolve_data_datasets_dir(dataset_name)
     modality = (dataset_config.get("modality") or "audio").strip().lower()
     text_sub_mode = (dataset_config.get("text_sub_mode") or "instruction").strip().lower()
     _pc = dataset_config.get("prompt_column")

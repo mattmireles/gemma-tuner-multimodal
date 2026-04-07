@@ -158,7 +158,7 @@ pip install -r requirements-gemma4.txt
 
 Use a **separate virtual environment** if you want to keep a Gemma 3n-only env and a Gemma 4 env side by side.
 
-**Gemma 3n vs Gemma 4 elsewhere:** `pip install -e .` is enough for Gemma 3n everywhere (including `finetune`). Gemma 4 **training** needs `requirements-gemma4.txt`. Several **non-training** commands (`gemma_generate`, export, dataset-prep validation used for multimodal probing, ASR eval, etc.) still **reject Gemma 4** model ids with an explicit error until those code paths are upgraded; use a Gemma 3n id or run `finetune` for Gemma 4.
+**Gemma 3n vs Gemma 4 elsewhere:** `pip install -e .` is enough for Gemma 3n everywhere (including `finetune`). Gemma 4 **training** needs `requirements-gemma4.txt`. Several **non-training** commands (`gemma_generate`, dataset-prep validation used for multimodal probing, ASR eval, etc.) still **reject Gemma 4** model ids with an explicit error until those code paths are upgraded; **`export`** uses the same family-aware loader as `finetune`. Otherwise use a Gemma 3n id or run `finetune` for Gemma 4.
 
 ### 5. Run the wizard
 

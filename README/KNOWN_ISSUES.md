@@ -5,7 +5,7 @@
 ### Gemma 4 troubleshooting
 
 - **`KeyError: 'gemma4'` (or model load fails with missing Gemma 4 modeling)** — Install the Gemma 4 stack: `pip install -r requirements-gemma4.txt` (see root `README.md`). The base `pip install -e .` pin stays on Transformers 4.x for Gemma 3n.
-- **`Gemma 4 is not implemented in '<entrypoint>' yet`** — Non-training tools (`gemma_generate`, export, ASR eval, etc.) still reject Gemma 4 model ids until those paths are upgraded. Use `gemma-macos-tuner finetune` with a Gemma 4 profile after installing `requirements-gemma4.txt`, or switch the model id to a Gemma 3n checkpoint.
+- **`Gemma 4 is not implemented in '<entrypoint>' yet`** — Some non-training tools (`gemma_generate`, ASR eval, etc.) still reject Gemma 4 model ids until those paths are upgraded. **`gemma-macos-tuner export`** loads through the same family-aware base loader as `finetune` (multimodal towers preserved). For other entrypoints, use `gemma-macos-tuner finetune` with a Gemma 4 profile after installing `requirements-gemma4.txt`, or switch the model id to a Gemma 3n checkpoint.
 
 ## General Issues
 

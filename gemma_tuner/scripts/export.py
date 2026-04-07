@@ -11,7 +11,7 @@ Handles two cases transparently:
    - Saves the merged full model to {source_dir}-export/
 
 2. **Full model directory or HuggingFace Hub id**:
-   - Loads directly with AutoModelForCausalLM
+   - Loads via the same family-aware loader as finetune (multimodal towers preserved for Gemma 3n/4)
    - Saves to {source_dir}-export/
 
 Called by:
@@ -20,7 +20,7 @@ Called by:
 
 Calls to:
 - utils/device.py:get_device() for device selection
-- transformers.AutoModelForCausalLM for model loading
+- gemma_tuner.models.gemma.base_model_loader:load_base_model_for_gemma (same family-aware path as finetune)
 - peft.PeftModel for LoRA adapter merging
 """
 
@@ -29,9 +29,10 @@ import logging
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoProcessor
 
 from gemma_tuner.models.common.collators import apply_image_token_budget_to_processor
+from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import get_device
 
@@ -80,17 +81,18 @@ def export_model_dir(model_path_or_profile: str) -> str:
 
         base_model_id = adapter_cfg["base_model_name_or_path"]
         logger.info("Loading base model: %s", base_model_id)
-        gate_gemma_model(base_model_id, entrypoint="export")
+        family = gate_gemma_model(base_model_id, entrypoint="export")
 
-        base_model = AutoModelForCausalLM.from_pretrained(
+        base_model = load_base_model_for_gemma(
             base_model_id,
+            family=family,
             torch_dtype=torch_dtype,
-            low_cpu_mem_usage=True,
+            attn_implementation="eager",
         )
 
         # PeftModel loads the adapter weights on top of the base model, then
         # merge_and_unload() folds them into the base weights and returns a
-        # plain AutoModelForCausalLM with no PEFT overhead.
+        # plain model with no PEFT overhead (same multimodal class as training).
         from peft import PeftModel
 
         logger.info("Loading LoRA adapter weights from: %s", source_path)
@@ -105,11 +107,12 @@ def export_model_dir(model_path_or_profile: str) -> str:
     else:
         # --- Full model path or HuggingFace Hub id ---
         logger.info("Loading full model: %s", model_path_or_profile)
-        gate_gemma_model(str(model_path_or_profile), entrypoint="export")
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path_or_profile,
+        family = gate_gemma_model(str(model_path_or_profile), entrypoint="export")
+        model = load_base_model_for_gemma(
+            str(model_path_or_profile),
+            family=family,
             torch_dtype=torch_dtype,
-            low_cpu_mem_usage=True,
+            attn_implementation="eager",
         )
         processor_source = model_path_or_profile
 

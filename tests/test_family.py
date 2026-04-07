@@ -52,9 +52,8 @@ def test_assert_family_supported_gemma4_ok():
         assert_family_supported(GemmaFamily.GEMMA_4)
 
 
-def test_assert_entrypoint_support_blocks_gemma4_on_export():
-    with pytest.raises(RuntimeError, match="not implemented"):
-        assert_entrypoint_support("export", GemmaFamily.GEMMA_4)
+def test_assert_entrypoint_support_allows_export_gemma4():
+    assert_entrypoint_support("export", GemmaFamily.GEMMA_4) is None
 
 
 def test_assert_entrypoint_support_allows_finetune():
@@ -63,8 +62,7 @@ def test_assert_entrypoint_support_allows_finetune():
 
 def test_gate_gemma_model_export_gemma4():
     with patch("gemma_tuner.models.gemma.family._installed_transformers_version", return_value="5.5.0"):
-        with pytest.raises(RuntimeError, match="not implemented"):
-            gate_gemma_model("google/gemma-4-E2B-it", entrypoint="export")
+        assert gate_gemma_model("google/gemma-4-E2B-it", entrypoint="export") == GemmaFamily.GEMMA_4
 
 
 def test_gate_gemma_model_finetune_gemma4():
@@ -74,5 +72,5 @@ def test_gate_gemma_model_finetune_gemma4():
 
 def test_unsupported_entrypoints_cover_plan():
     assert "gemma_generate" in GEMMA4_UNSUPPORTED_ENTRYPOINTS
-    assert "export" in GEMMA4_UNSUPPORTED_ENTRYPOINTS
+    assert "export" not in GEMMA4_UNSUPPORTED_ENTRYPOINTS
     assert "finetune" not in GEMMA4_UNSUPPORTED_ENTRYPOINTS

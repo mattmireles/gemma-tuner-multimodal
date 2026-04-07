@@ -4,13 +4,37 @@ from pathlib import Path
 import pandas as pd
 
 import gemma_tuner.utils.dataset_utils as _du_mod
-from gemma_tuner.utils.dataset_utils import load_dataset_split
+from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
 
 
 def _write_csv(path, rows):
     df = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     df.to_csv(path, index=False)
+
+
+def test_resolve_data_datasets_dir_prefers_cwd_when_config_ini_present(tmp_path):
+    (tmp_path / "config.ini").write_text("[x]\na=1\n", encoding="utf-8")
+    target = tmp_path / "data" / "datasets" / "myds"
+    target.mkdir(parents=True)
+    cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        out = resolve_data_datasets_dir("myds")
+        assert os.path.samefile(out, str(target))
+    finally:
+        os.chdir(cwd)
+
+
+def test_resolve_data_datasets_dir_anchors_to_repo_without_cwd_config(tmp_path):
+    cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        out = resolve_data_datasets_dir("zzz_nonexistent_dataset_marker")
+        repo_root = Path(_du_mod.__file__).resolve().parent.parent.parent
+        assert out == str((repo_root / "data" / "datasets" / "zzz_nonexistent_dataset_marker").resolve())
+    finally:
+        os.chdir(cwd)
 
 
 def test_patch_precedence_override_then_protect_then_blacklist(tmp_path):
