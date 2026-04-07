@@ -167,6 +167,12 @@ class DatasetPrepConstants:
     LIBROSA_RESAMPLE_TYPE = "kaiser_best"  # High-quality resampling algorithm
 
 
+def _clip_audio_float32(waveform: np.ndarray) -> np.ndarray:
+    """Clamp float samples to [-1.0, 1.0] before the audio feature extractor (see gemma4-guide.md)."""
+    a = np.asarray(waveform, dtype=np.float32)
+    return np.clip(a, -1.0, 1.0)
+
+
 def load_audio_local_or_gcs(
     path_or_audio: Any,
     sampling_rate: int | None,
@@ -292,7 +298,7 @@ def load_audio_local_or_gcs(
             audio = librosa.resample(
                 audio, orig_sr=src_sr, target_sr=sampling_rate, res_type=DatasetPrepConstants.LIBROSA_RESAMPLE_TYPE
             )
-        return audio.astype(DatasetPrepConstants.NUMPY_FLOAT32_DTYPE)
+        return _clip_audio_float32(audio)
 
     # Raw array-like — assumes audio is already at the target sampling_rate.
     # Callers passing raw arrays must ensure the rate matches; no resampling
@@ -312,7 +318,7 @@ def load_audio_local_or_gcs(
             "conversion is not applied. Ensure the array is already at %d Hz.",
             sampling_rate,
         )
-        return audio
+        return _clip_audio_float32(audio)
 
     # String path or GCS URI
     if path_or_audio.startswith(DatasetPrepConstants.GCS_URI_PREFIX):
@@ -344,7 +350,7 @@ def load_audio_local_or_gcs(
                 blob.download_to_file(buffer)
                 buffer.seek(0)
                 audio = librosa.load(buffer, sr=sampling_rate)[0]
-                return audio.astype(np.float32)
+                return _clip_audio_float32(audio)
             except Exception as e:  # noqa: BLE001 - best-effort fallback
                 last_err = e
                 continue
@@ -355,7 +361,7 @@ def load_audio_local_or_gcs(
     # Local file path
     try:
         audio = librosa.load(path_or_audio, sr=sampling_rate)[0]
-        return audio.astype(DatasetPrepConstants.NUMPY_FLOAT32_DTYPE)
+        return _clip_audio_float32(audio)
     except Exception as e:
         raise AudioLoadError(f"Failed to load audio from local path '{path_or_audio}': {e}") from e
 
