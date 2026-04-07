@@ -199,6 +199,9 @@ def inject_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
 # Backwards compatibility for older imports.
 ensure_gemma_mm_token_type_ids = inject_mm_token_type_ids
 
+# Dedupe log spam when the same incompatible processor type is constructed many times (e.g. tests).
+_MISSING_IMAGE_SEQ_LENGTH_TYPES: set[str] = set()
+
 
 def apply_image_token_budget_to_processor(processor: Any, budget: int) -> None:
     """Set ``image_seq_length`` / expanded image placeholder sequence on Gemma multimodal processors.
@@ -208,13 +211,16 @@ def apply_image_token_budget_to_processor(processor: Any, budget: int) -> None:
     """
     b = int(budget)
     if not hasattr(processor, "image_seq_length"):
-        logger.warning(
-            "apply_image_token_budget_to_processor: processor %r has no image_seq_length; "
-            "cannot apply image_token_budget=%s (train/serve mismatch risk). "
-            "Use a Gemma multimodal processor or a compatible transformers revision.",
-            type(processor).__name__,
-            b,
-        )
+        tname = type(processor).__name__
+        if tname not in _MISSING_IMAGE_SEQ_LENGTH_TYPES:
+            _MISSING_IMAGE_SEQ_LENGTH_TYPES.add(tname)
+            logger.warning(
+                "apply_image_token_budget_to_processor: processor %r has no image_seq_length; "
+                "cannot apply image_token_budget=%s (train/serve mismatch risk). "
+                "Use a Gemma multimodal processor or a compatible transformers revision.",
+                tname,
+                b,
+            )
         return
     if int(getattr(processor, "image_seq_length", 0)) == b:
         return

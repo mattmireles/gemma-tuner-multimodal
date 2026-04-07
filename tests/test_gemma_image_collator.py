@@ -10,6 +10,7 @@ import pytest
 import torch
 from PIL import Image as PILImage
 
+from gemma_tuner.models.common import collators as collators_mod
 from gemma_tuner.models.common.collators import (
     DataCollatorGemmaImage,
     _load_image_as_rgb,
@@ -211,6 +212,8 @@ def test_apply_image_token_budget_rebuilds_sequence():
 
 
 def test_apply_image_token_budget_warns_without_image_seq_length(caplog):
+    collators_mod._MISSING_IMAGE_SEQ_LENGTH_TYPES.clear()
+
     class _NoImageSeq:
         pass
 
@@ -218,6 +221,19 @@ def test_apply_image_token_budget_warns_without_image_seq_length(caplog):
     apply_image_token_budget_to_processor(_NoImageSeq(), 280)
     assert "image_seq_length" in caplog.text
     assert "image_token_budget" in caplog.text
+
+
+def test_apply_image_token_budget_warns_once_per_processor_type(caplog):
+    collators_mod._MISSING_IMAGE_SEQ_LENGTH_TYPES.clear()
+
+    class _NoImageSeq:
+        pass
+
+    caplog.set_level(logging.WARNING)
+    apply_image_token_budget_to_processor(_NoImageSeq(), 280)
+    apply_image_token_budget_to_processor(_NoImageSeq(), 128)
+    records = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(records) == 1
 
 
 def test_image_collator_masks_padding_via_attention_mask_only(tmp_path: Path):
