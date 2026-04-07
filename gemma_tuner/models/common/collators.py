@@ -89,6 +89,103 @@ def mask_gemma_prompt_tokens(
             )
 
 
+class DataCollatorGemmaText:
+    """Batch text-only examples for Gemma CausalLM (no audio forward).
+
+    Instruction mode: user (prompt) + assistant (response) via ``apply_chat_template``,
+    then prompt masking via :func:`mask_gemma_prompt_tokens`. Padding positions are
+    masked in ``labels`` using ``attention_mask == 0`` (not ``pad_token_id``), so EOS
+    is not dropped when ``pad_token == eos_token``.
+
+    Completion mode: single text column, full sequence trained (no prompt mask).
+    """
+
+    def __init__(
+        self,
+        tokenizer,
+        text_column: str,
+        prompt_column: Optional[str] = None,
+        max_length: int = 2048,
+        sub_mode: str = "instruction",
+    ):
+        if sub_mode not in ("instruction", "completion"):
+            raise ValueError(f"DataCollatorGemmaText: sub_mode must be 'instruction' or 'completion', got {sub_mode!r}")
+        if sub_mode == "instruction" and not prompt_column:
+            raise ValueError("DataCollatorGemmaText: prompt_column is required when sub_mode is 'instruction'")
+        self.tokenizer = tokenizer
+        self.text_column = text_column
+        self.prompt_column = prompt_column
+        self.max_length = max_length
+        self.sub_mode = sub_mode
+        self._warned_prompt_masking: List[bool] = [False]
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        if self.sub_mode == "instruction":
+            return self._collate_instruction(features)
+        return self._collate_completion(features)
+
+    def _collate_instruction(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        assert self.prompt_column is not None
+        messages_batch = []
+        for ex in features:
+            prompt = ex.get(self.prompt_column)
+            response = ex.get(self.text_column)
+            if prompt is None:
+                raise KeyError(
+                    f"DataCollatorGemmaText: prompt column {self.prompt_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            if response is None:
+                raise KeyError(
+                    f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            messages_batch.append(
+                [
+                    {"role": "user", "content": str(prompt)},
+                    {"role": "assistant", "content": str(response)},
+                ]
+            )
+
+        encoded = self.tokenizer.apply_chat_template(
+            messages_batch,
+            tokenize=True,
+            return_tensors="pt",
+            padding=True,
+            return_dict=True,
+            add_generation_prompt=False,
+            truncation=True,
+            max_length=self.max_length,
+        )
+        input_ids = encoded["input_ids"]
+        attention_mask = encoded["attention_mask"]
+        labels = input_ids.clone()
+        mask_gemma_prompt_tokens(labels, input_ids, self.tokenizer, self._warned_prompt_masking)
+        labels[attention_mask == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+        encoded["labels"] = labels
+        return encoded
+
+    def _collate_completion(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        texts: List[str] = []
+        for ex in features:
+            t = ex.get(self.text_column)
+            if t is None:
+                raise KeyError(
+                    f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            texts.append(str(t))
+
+        encoded = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt",
+        )
+        labels = encoded["input_ids"].clone()
+        labels[encoded["attention_mask"] == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+        encoded["labels"] = labels
+        return encoded
+
+
 class DataCollatorGemmaAudio:
     """Data collator that packs audio+text into Gemma inputs via AutoProcessor.
 
