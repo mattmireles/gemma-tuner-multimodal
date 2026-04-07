@@ -12,9 +12,49 @@ from gemma_tuner.models.common.collators import (
     DataCollatorGemmaImage,
     _load_image_as_rgb,
     apply_image_token_budget_to_processor,
+    mask_gemma_prompt_tokens,
 )
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 from gemma_tuner.models.gemma.family import GemmaFamily
+
+
+class _TokenizerMaskingGemma3n:
+    """Minimal tokenizer for :func:`mask_gemma_prompt_tokens` unit tests (Gemma 3n control token)."""
+
+    bos_token_id = 1
+    start_of_turn_token_id = 7
+    unk_token_id = 3
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        if text == "<start_of_turn>":
+            return [7]
+        if text == "model\n":
+            return [20, 21]
+        if text == "model":
+            return [20]
+        return [99]
+
+    def convert_tokens_to_ids(self, token: str) -> int:
+        if token == "<start_of_turn>":
+            return 7
+        return self.unk_token_id
+
+
+class _TokenizerMaskingGemma4:
+    """Minimal tokenizer for mask tests with ``<|turn|>`` (Gemma 4)."""
+
+    bos_token_id = 1
+    unk_token_id = 3
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        if text == "<|turn|>":
+            return [50]
+        if text == "model\n":
+            return [20, 21]
+        return [99]
+
+    def convert_tokens_to_ids(self, token: str) -> int:
+        return self.unk_token_id
 
 
 def _make_png_bytes(mode: str, size: tuple[int, int] = (32, 32)) -> bytes:
@@ -116,7 +156,62 @@ def test_rgba_cmyk_collator_same_output_shape(tmp_path: Path):
     assert shapes[0] == shapes[1] == shapes[2]
 
 
+def test_mask_gemma_prompt_tokens_masks_prompt_and_keeps_assistant_answer_gemma3n():
+    """Boundary comes from ``mask_gemma_prompt_tokens`` (last SOT + ``model\\n`` subsequence), not the fake processor."""
+    tok = _TokenizerMaskingGemma3n()
+    # Simulated layout: BOS, several <start_of_turn> spans (user + noise), then model header, then answer ids.
+    # Last SOT at index 7; after it [20,21]=model\\n, then supervised tokens 200,201.
+    input_ids = torch.tensor([[1, 7, 10, 11, 7, 12, 7, 7, 20, 21, 200, 201]])
+    labels = input_ids.clone()
+    warned = [False]
+    mask_gemma_prompt_tokens(
+        labels,
+        input_ids,
+        tok,
+        warned,
+        control_token="<start_of_turn>",
+    )
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    assert (labels[0, :10] == ignore).all()
+    assert (labels[0, 10:] == input_ids[0, 10:]).all()
+
+
+def test_mask_gemma_prompt_tokens_uses_last_control_span_not_first_gemma3n():
+    """Extra ``<start_of_turn>`` inside the simulated user region: masking still keys off the last SOT before ``model\\n``."""
+    tok = _TokenizerMaskingGemma3n()
+    input_ids = torch.tensor([[1, 7, 9, 9, 7, 8, 7, 20, 21, 30, 31]])
+    labels = input_ids.clone()
+    warned = [False]
+    mask_gemma_prompt_tokens(labels, input_ids, tok, warned, control_token="<start_of_turn>")
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    # Last SOT at index 6; response after model\\n starts at 6+1+0+2 = 9
+    assert (labels[0, :9] == ignore).all()
+    assert (labels[0, 9:] == input_ids[0, 9:]).all()
+
+
+def test_mask_gemma_prompt_tokens_gemma4_turn_marker():
+    tok = _TokenizerMaskingGemma4()
+    input_ids = torch.tensor([[1, 50, 10, 50, 20, 21, 200, 201]])
+    labels = input_ids.clone()
+    warned = [False]
+    mask_gemma_prompt_tokens(labels, input_ids, tok, warned, control_token="<|turn|>")
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    # Last <|turn|> at index 3; response_start = 3+1+0+2 = 6
+    assert (labels[0, :6] == ignore).all()
+    assert (labels[0, 6:] == input_ids[0, 6:]).all()
+
+
+def test_mask_gemma_prompt_tokens_leaves_row_unchanged_when_model_header_missing():
+    tok = _TokenizerMaskingGemma3n()
+    input_ids = torch.tensor([[1, 7, 10, 11, 200, 201]])
+    labels = input_ids.clone()
+    warned = [False]
+    mask_gemma_prompt_tokens(labels, input_ids, tok, warned, control_token="<start_of_turn>")
+    assert (labels == input_ids).all()
+
+
 def test_vqa_first_supervised_token_matches_answer(tmp_path: Path):
+    """Smoke: collator + fake processor; does not assert real chat-template tokenization (see mask_gemma_prompt_tokens tests)."""
     proc = _FakeImageProcessor()
     collator = DataCollatorGemmaImage(
         processor=proc,
