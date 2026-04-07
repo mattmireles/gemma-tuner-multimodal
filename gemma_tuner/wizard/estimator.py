@@ -131,7 +131,10 @@ def estimate_training_time(
         estimated_memory *= 0.88
     elif str(ft.get("modality", "audio")).lower() == "image":
         itb = int(ft.get("image_token_budget", 280))
-        # Vision path: scale vs a 280-token baseline (encoder + activations dominate vs speech ASR path).
+        # HEURISTIC — not validated against real runs, ablations, or published memory models.
+        # vision_factor clamps itb/280 to [0.35, 4.0] to scale time/memory vs a nominal 280-token budget.
+        # Large image_token_budget (e.g. 1024 on Gemma 4) can push estimates high and trigger the
+        # RAM warning below even when training would still fit; treat warnings as directional only.
         vision_factor = max(0.35, min(itb / 280.0, 4.0))
         estimated_memory *= 1.0 + 0.45 * vision_factor
         estimated_hours *= 1.15 * vision_factor
