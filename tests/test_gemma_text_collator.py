@@ -9,6 +9,7 @@ from gemma_tuner.models.common.collators import (
     DataCollatorGemmaText,
     _find_subsequence_ids,
     inject_mm_token_type_ids,
+    mask_gemma_prompt_tokens,
 )
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 from gemma_tuner.models.gemma.family import GemmaFamily
@@ -133,6 +134,40 @@ def test_instruction_gemma4_injects_mm_token_type_ids():
     assert "token_type_ids" in out and "mm_token_type_ids" in out
     assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
     assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+
+
+def test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header():
+    """Gemma 4: boundary is <|turn|>; assistant content follows tokenized model role header."""
+
+    class _Tok:
+        bos_token_id = 1
+
+        def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+            if text == "<|turn|>":
+                return [50]
+            if text == "model\n":
+                return [20, 21]
+            if text == "model":
+                return [20]
+            return [99]
+
+    tok = _Tok()
+    # Two <|turn|> markers; last begins assistant turn; model\n then response tokens.
+    input_ids = torch.tensor([[1, 50, 7, 8, 50, 20, 21, 100, 101]], dtype=torch.long)
+    labels = input_ids.clone()
+    warned: list[bool] = [False]
+    mask_gemma_prompt_tokens(
+        labels,
+        input_ids,
+        tok,
+        warned,
+        control_token="<|turn|>",
+    )
+    assert warned[0] is False
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    assert (labels[0, :7] == ignore).all()
+    assert labels[0, 7].item() == 100
+    assert labels[0, 8].item() == 101
 
 
 def test_find_subsequence_ids():

@@ -47,7 +47,10 @@ def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
             "min_transformers_version": MIN_TRANSFORMERS_GEMMA3N,
         }
     return {
-        "control_token": "<|turn|>model",
+        # Role boundary token only. Collators find the tokenized model-role header after the *last*
+        # <|turn|> (same idea as Gemma 3n: <start_of_turn> + header). Do not use "<|turn|>model" — that
+        # string is not one contiguous id span in real chat tokenization.
+        "control_token": "<|turn|>",
         "needs_clippable_patch": True,
         "needs_mm_token_type_ids_injection": True,
         "min_transformers_version": MIN_TRANSFORMERS_GEMMA4,
