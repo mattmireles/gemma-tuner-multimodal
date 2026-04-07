@@ -153,6 +153,41 @@ def test_validate_profile_defaults_and_types():
     assert isinstance(conf["gradient_checkpointing"], bool)
 
 
+def test_validate_image_modality_profile():
+    """Image modality accepts allowed token budgets and requires prompt for VQA."""
+    base = {
+        "model": "gemma-4-e2b-it",
+        "dataset": "dummy",
+        "base_model": "google/gemma-4-E2B-it",
+        "train_split": "train",
+        "validation_split": "validation",
+        "text_column": "caption",
+        "max_label_length": 128,
+        "max_duration": 30.0,
+        "per_device_train_batch_size": 1,
+        "num_train_epochs": 1,
+        "logging_steps": 1,
+        "save_steps": 50,
+        "save_total_limit": 1,
+        "gradient_accumulation_steps": 1,
+        "modality": "image",
+        "image_sub_mode": "caption",
+        "image_token_budget": 280,
+    }
+    _validate_profile_config(dict(base), ConfigConstants.REQUIRED_PROFILE_KEYS)
+
+    vqa = {**base, "image_sub_mode": "vqa", "prompt_column": "question"}
+    _validate_profile_config(dict(vqa), ConfigConstants.REQUIRED_PROFILE_KEYS)
+
+    with pytest.raises(ValueError, match=r"image_token_budget"):
+        bad_budget = {**base, "image_token_budget": 999}
+        _validate_profile_config(bad_budget, ConfigConstants.REQUIRED_PROFILE_KEYS)
+
+    with pytest.raises(ValueError, match=r"prompt_column"):
+        vqa_no_prompt = {**base, "image_sub_mode": "vqa"}
+        _validate_profile_config(vqa_no_prompt, ConfigConstants.REQUIRED_PROFILE_KEYS)
+
+
 def test_load_profile_config_missing_profile_raises():
     """
     Tests that loading non-existent profiles raises appropriate ValueError exceptions.
