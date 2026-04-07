@@ -11,32 +11,43 @@
               🍎 Fine-Tuner for Apple Silicon
 ```
 
-Train **Google Gemma** multimodal (audio + text) models on your own data—with **LoRA**, **PyTorch**, and first-class **Apple Silicon (MPS)** support. The CLI is boring on purpose; your models do not have to be.
+**Fine-tune Gemma with audio, on your Mac, on data that doesn't fit on your Mac.**
+
+- 🎙️ **Audio + text LoRA** — not just text. MLX can't do this yet.
+- ☁️ **Stream from GCS / BigQuery** — train on terabytes without filling your SSD.
+- 🍎 **Runs on Apple Silicon** — MPS-native, no NVIDIA box required.
 
 **Source:** [github.com/mattmireles/gemma-tuner-multimodal](https://github.com/mattmireles/gemma-tuner-multimodal) (public).
 
 ---
 
-## The honest pitch
+## Why not just use…?
 
-This repository is a **Gemma-first** toolkit: the training path loads Hugging Face Gemma checkpoints, injects PEFT LoRA adapters, and runs the supervised fine-tuning loop in `gemma_tuner/models/gemma/finetune.py`. If your profile’s model name does not contain `gemma`, `gemma_tuner/scripts/finetune.py` will refuse—by design.
+| | **This** | MLX-LM | Unsloth | axolotl |
+| --- | :-: | :-: | :-: | :-: |
+| Fine-tune Gemma (text) | ✅ | ✅ | ✅ | ✅ |
+| Fine-tune Gemma **audio + text** | ✅ | ❌ | ❌ | ⚠️ CUDA only |
+| Runs on Apple Silicon (MPS) | ✅ | ✅ | ❌ | ❌ |
+| **Stream training data from cloud** | ✅ | ❌ | ❌ | ⚠️ partial |
+| No NVIDIA GPU required | ✅ | ✅ | ❌ | ❌ |
 
-Export produces a **merged or plain Hugging Face / SafeTensors directory** for downstream use (`gemma_tuner/scripts/export.py`). For Core ML conversion and GGUF-style local inference tooling, start with [`README/guides/README.md`](README/guides/README.md); this repo’s **training** path is Gemma-only.
+If you want to fine-tune Gemma on **audio** without renting an H100 or copying a terabyte of WAVs to your laptop, this is the only toolkit that does all three.
+
+Under the hood: Hugging Face Gemma checkpoints + PEFT LoRA, supervised fine-tuning in [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py), exported as a merged HF / SafeTensors tree by [`gemma_tuner/scripts/export.py`](gemma_tuner/scripts/export.py). For Core ML conversion and GGUF inference tooling, see [`README/guides/README.md`](README/guides/README.md) — this repo's *training* path is Gemma-only by design.
+
+**Deeper reading:** [`README/guides/README.md`](README/guides/README.md) · [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md)
 
 ---
 
-## Features
+## What you can build with this
 
-- **Apple Silicon first**: MPS-friendly defaults, memory pressure knobs, and docs that admit when Metal is quirky.
-- **Gemma multimodal LoRA**: Audio + text via Transformers + PEFT; bf16 on MPS when the hardware agrees.
-- **Cross-platform**: CUDA and CPU fall back cleanly when you are not on a Mac.
-- **Typer CLI**: `gemma-macos-tuner` is the interface you want; `main.py` remains for automation and habits.
-- **Data hygiene**: Patch directories, blacklists, and protection lists so one bad clip does not wreck a run.
-- **Streaming data**: Stream data from GCS to your local machine, pull slices from BigQuery (optional extras), prepare Granary-scale corpora.
-- **Optional eye candy**: Live training visualizer behind the `viz` extra (Flask + Socket.IO).
-- **Interactive wizard**: `gemma-macos-tuner wizard`—questions, sane defaults, fewer foot-guns.
+- **Domain-specific ASR** — fine-tune on medical dictation, legal depositions, call-center recordings, or any field where off-the-shelf Whisper / Gemma mishears the jargon.
+- **Accent and dialect adaptation** — adapt a base Gemma model to underrepresented accents using your own labeled audio.
+- **Low-resource languages** — train on a few hours of paired audio + transcript and ship a model that actually understands your language.
+- **Audio-grounded assistants** — extend Gemma's text reasoning with audio understanding for transcription + Q&A pipelines.
+- **Private, on-device pipelines** — train and run entirely on your Mac. Audio never leaves the machine; weights never touch a third-party API.
 
-**Deeper reading:** curated field guides in [`README/guides/README.md`](README/guides/README.md); Gemma product notes in [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md).
+If your data lives in GCS or BigQuery, you can do all of this on a laptop without copying terabytes of audio locally — the dataloader streams shards on demand.
 
 ---
 
@@ -98,7 +109,26 @@ output/
 
 ## Installation
 
-### 1. Prove you are on arm64 (Mac)
+### 1. Create a virtual environment (do this first)
+
+macOS’s built-in Python is 3.9 — too old. This project requires **Python 3.10+**.
+Homebrew has a newer one; install it if you haven’t:
+
+```bash
+brew install python@3.12
+```
+
+Then create a virtual environment (this also gives you `pip` — macOS doesn’t ship it standalone):
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+Your prompt changes to `(.venv) …`. Every command below assumes the venv is active.
+To reactivate in a new terminal: `source .venv/bin/activate`.
+
+### 2. Prove you are on arm64 (Mac)
 
 ```bash
 python -c "import platform; print(platform.machine())"
@@ -106,43 +136,40 @@ python -c "import platform; print(platform.machine())"
 # x86_64 ← wrong Python; fix before blaming MPS
 ```
 
-### 2. Install PyTorch (you choose the flavor)
+If you see `x86_64`, your Python is running under Rosetta. Install a native arm64 Python
+from [python.org](https://www.python.org/downloads/macos/) or via Homebrew (`brew install python@3.12`),
+then recreate the venv.
+
+### 3. Install PyTorch
 
 ```bash
-# Apple Silicon / CPU wheels
 pip install torch torchaudio
-
-# NVIDIA (example CUDA 12.x index—adjust to PyTorch’s current docs)
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-### 3. Install this package
+### 4. Install this package
 
 ```bash
-pip install .
-# or
 pip install -e .
 ```
 
-Optional extras (see `pyproject.toml`):
-
-- `gemma-macos-tuner[torch]` — declares Torch if your tooling insists
-- `eval` — WER/CER via `jiwer`
-- `gcp` — BigQuery + GCS client libraries
-- `viz` — training visualizer
-- `dev` — ruff, pytest
-
-### 4. Smoke-test the stack
+### 5. Run the wizard
 
 ```bash
-gemma-macos-tuner system-check
+gemma-macos-tuner wizard
 ```
 
-### 5. Before you run training (first time)
+![Gemma macOS Tuner wizard: system check, then LoRA / model / dataset steps](README/assets/wizard-cli.png)
 
-- **Hugging Face:** Gemma checkpoints are **gated** on the Hub. Open each model card (see [Supported models](#supported-models)), accept Google’s terms, then authenticate so downloads work: install [`huggingface_hub`](https://huggingface.co/docs/huggingface_hub/quick-start) and run `huggingface-cli login`, or set **`HF_TOKEN`** in the environment for CI/servers.
-- **Config file:** The CLI loads **`config.ini`** from the current working directory unless you set **`GEMMA_TUNER_CONFIG`** to an absolute path—handy when you are not in the repo root.
-- **Data:** Training reads **prepared CSVs** and **`[dataset:…]`** sections in that INI (local paths, GCS, Granary, BigQuery flows)—not raw Hugging Face Hub dataset names. See [Data: CSVs, GCS, BigQuery](#data-csvs-gcs-bigquery) and [`README/Datasets.md`](README/Datasets.md).
+The wizard walks you through model selection, dataset config, and training — answering questions and writing `config.ini` for you.
+
+> **Before the wizard downloads model weights**, you need a Hugging Face account with access to Gemma.
+> Accept the license on the [model card](https://huggingface.co/google/gemma-3n-E2B-it), then authenticate:
+> ```bash
+> huggingface-cli login
+> ```
+> Or set `HF_TOKEN` in your environment.
+
+If something seems broken, run `gemma-macos-tuner system-check` first.
 
 ---
 
@@ -169,9 +196,6 @@ gemma-macos-tuner runs list
 
 # Guided setup
 gemma-macos-tuner wizard
-
-# Legacy entrypoints (narrow)
-gemma-macos-tuner legacy main   # forwards to gemma_tuner.main if you really need it
 ```
 
 **Migration from `main.py` / old habits:** [`MIGRATION.md`](MIGRATION.md). Runs management moved to the `runs` subcommand—not a separate `manage.py` in this tree.
