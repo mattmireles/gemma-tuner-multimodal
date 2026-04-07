@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
-from gemma_tuner.models.common.collators import DataCollatorGemmaText
+from gemma_tuner.models.common.collators import DataCollatorGemmaText, ensure_gemma_mm_token_type_ids
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 
 
@@ -128,6 +129,22 @@ def test_instruction_requires_prompt_column():
         assert "prompt_column" in str(e).lower()
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_ensure_gemma_mm_token_type_ids_fills_missing_and_none():
+    batch = {"input_ids": torch.tensor([[1, 2], [3, 4]], dtype=torch.long)}
+    ensure_gemma_mm_token_type_ids(batch)
+    assert torch.equal(batch["token_type_ids"], torch.zeros_like(batch["input_ids"]))
+    assert torch.equal(batch["mm_token_type_ids"], torch.zeros_like(batch["input_ids"]))
+
+    batch2 = {
+        "input_ids": np.array([[1, 2]], dtype=np.int64),
+        "token_type_ids": None,
+    }
+    ensure_gemma_mm_token_type_ids(batch2)
+    assert "mm_token_type_ids" in batch2
+    assert torch.equal(batch2["token_type_ids"], torch.zeros(1, 2, dtype=torch.long))
+    assert torch.equal(batch2["mm_token_type_ids"], torch.zeros(1, 2, dtype=torch.long))
 
 
 def test_invalid_sub_mode():

@@ -205,6 +205,41 @@ def _discover_candidate_target_modules(model) -> List[str]:
     return sorted(present)
 
 
+def _raise_if_lora_targets_use_peft_incompatible_linears(model: torch.nn.Module, target_suffixes: List[str]) -> None:
+    """Fail fast before ``get_peft_model`` when LoRA names match non-``nn.Linear`` wrappers.
+
+    Name-based discovery (see :func:`_discover_candidate_target_modules`) can list
+    suffixes such as ``q_proj`` even when the implementation is
+    ``Gemma4ClippableLinear`` or similar. PEFT then fails ``isinstance(..., nn.Linear)``
+    with an opaque error. See ``README/guides/apple-silicon/gemma4-guide.md`` and
+    https://github.com/huggingface/peft/issues/3129 (monkey-patch or narrow targets).
+    """
+    if not target_suffixes:
+        return
+    bad: List[str] = []
+    for name, module in model.named_modules():
+        if not any(name.endswith(s) for s in target_suffixes):
+            continue
+        if isinstance(module, torch.nn.Linear):
+            continue
+        cls_name = module.__class__.__name__
+        if cls_name == "Gemma4ClippableLinear" or cls_name.endswith("ClippableLinear"):
+            bad.append(f"{name} ({cls_name})")
+    if not bad:
+        return
+    shown = bad[:6]
+    suffix = f" … (+{len(bad) - 6} more)" if len(bad) > 6 else ""
+    raise RuntimeError(
+        "LoRA target_modules match layer(s) that are not plain torch.nn.Linear — PEFT cannot "
+        f"attach adapters here: {', '.join(shown)}{suffix}. "
+        "Mitigation: monkey-patch Gemma4ClippableLinear (or the relevant *ClippableLinear class) "
+        "to inherit nn.Linear before model load, or set lora_target_modules to suffixes that "
+        "still resolve to nn.Linear (inspect model.named_modules()). "
+        "Docs: README/guides/apple-silicon/gemma4-guide.md (PEFT / Gemma4ClippableLinear). "
+        "Reference: https://github.com/huggingface/peft/issues/3129"
+    )
+
+
 def main(profile_config: "ProfileConfig", output_dir: str):
     """Main Gemma 3n LoRA training entry.
 
@@ -376,6 +411,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         bias="none",
         task_type="CAUSAL_LM",
     )
+    _raise_if_lora_targets_use_peft_incompatible_linears(model, validated_target_modules)
     model = get_peft_model(model, lora_cfg)
     model = model.to(device)
 

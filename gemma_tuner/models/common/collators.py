@@ -97,13 +97,13 @@ def ensure_gemma_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
     and https://github.com/huggingface/transformers/issues/45200).
     """
     input_ids = encoded.get("input_ids")
-    if input_ids is None or not isinstance(input_ids, torch.Tensor):
+    if input_ids is None:
         return
-    zeros = torch.zeros_like(input_ids)
-    if "token_type_ids" not in encoded:
-        encoded["token_type_ids"] = zeros
-    if "mm_token_type_ids" not in encoded:
-        encoded["mm_token_type_ids"] = zeros
+    ref = input_ids if isinstance(input_ids, torch.Tensor) else torch.as_tensor(input_ids)
+    if "token_type_ids" not in encoded or encoded.get("token_type_ids") is None:
+        encoded["token_type_ids"] = torch.zeros_like(ref)
+    if "mm_token_type_ids" not in encoded or encoded.get("mm_token_type_ids") is None:
+        encoded["mm_token_type_ids"] = torch.zeros_like(ref)
 
 
 class DataCollatorGemmaText:
