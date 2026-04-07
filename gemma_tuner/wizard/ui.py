@@ -135,9 +135,30 @@ We'll guide you through fine-tuning your Gemma model in just a few questions.
     input()  # Wait for user to press Enter
 
 
+def select_finetuning_kind() -> Optional[Dict[str, Any]]:
+    """Step 1: Audio vs text task — gates later prompts (CSV columns, adapters)."""
+    console.print("\n[bold]Step 1: What kind of fine-tuning?[/bold]")
+    choices = [
+        {
+            "name": "Speech-to-text (audio + transcript)",
+            "value": {"modality": "audio", "text_sub_mode": "instruction"},
+        },
+        {
+            "name": "Instruction tuning (text — prompt + response columns)",
+            "value": {"modality": "text", "text_sub_mode": "instruction"},
+        },
+        {
+            "name": "Continued pretraining / style (text — single text column)",
+            "value": {"modality": "text", "text_sub_mode": "completion"},
+        },
+    ]
+    selected = questionary.select("Choose your task:", choices=choices, style=apple_style).ask()
+    return selected
+
+
 def select_training_method(family: str | None = None) -> Optional[Dict[str, Any]]:
-    """Step 1: Select training method with progressive disclosure"""
-    console.print("\n[bold]Step 1: Choose your training method[/bold]")
+    """Step 2: Select training method with progressive disclosure"""
+    console.print("\n[bold]Step 2: Choose your training method[/bold]")
 
     # Gemma uses LoRA fine-tuning
     methods = [TrainingMethod.LORA]
@@ -159,10 +180,10 @@ def select_training_method(family: str | None = None) -> Optional[Dict[str, Any]
 
 
 def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Optional[str], Dict[str, Any]]:
-    """Step 2: Select Gemma model for LoRA fine-tuning, driven by config.ini."""
+    """Step 3: Select Gemma model for LoRA fine-tuning, driven by config.ini."""
     from gemma_tuner.wizard.config_store import _read_config
 
-    console.print("\n[bold]Step 2: Choose your model[/bold]")
+    console.print("\n[bold]Step 3: Choose your model[/bold]")
 
     device_info = get_wizard_device_info()
     available_memory = device_info["available_memory_gb"]
@@ -240,23 +261,35 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
     return selected_model, {}
 
 
-def select_dataset(method: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Step 3: Select dataset"""
+def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Step 4: Select dataset (text mode v1: local CSV only — no BigQuery/Granary)."""
     from gemma_tuner.wizard.config import select_bigquery_table_and_export
     from gemma_tuner.wizard.granary import setup_granary_dataset
 
-    console.print("\n[bold]Step 3: Choose your dataset[/bold]")
+    console.print("\n[bold]Step 4: Choose your dataset[/bold]")
+
+    finetuning = finetuning or {}
+    modality = str(finetuning.get("modality", "audio")).lower()
 
     datasets = detect_datasets()
 
     choices = []
     for dataset in datasets:
+        if modality == "text" and dataset.get("type") in ("bigquery_import", "granary_setup"):
+            continue
         if dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
             choice_text = f"📁 {dataset['name']} - {dataset['description']}"
         else:
             choice_text = f"⚙️ {dataset['description']}"
 
         choices.append({"name": choice_text, "value": dataset})
+
+    if not choices:
+        console.print(
+            "[red]No local datasets available for this task. "
+            "For text fine-tuning, add CSV splits under data/datasets/<name>/.[/red]"
+        )
+        return None
 
     selected_dataset = questionary.select(
         "Which dataset do you want to use for training?", choices=choices, style=apple_style
@@ -269,11 +302,17 @@ def select_dataset(method: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     # Handle BigQuery import flow
     if selected_dataset.get("type") == "bigquery_import":
+        if modality == "text":
+            console.print("[red]Text-only fine-tuning (v1) needs a local CSV dataset, not BigQuery import.[/red]")
+            return None
         bq_dataset = select_bigquery_table_and_export()
         return bq_dataset
 
     # Handle Granary dataset setup flow
     if selected_dataset.get("type") == "granary_setup":
+        if modality == "text":
+            console.print("[red]Text-only fine-tuning (v1) needs a local CSV dataset, not Granary.[/red]")
+            return None
         granary_dataset = setup_granary_dataset()
         return granary_dataset
 
@@ -287,13 +326,34 @@ def select_dataset(method: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return selected_dataset
 
 
+def configure_text_columns(finetuning: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Prompt for CSV column names when training on text-only data."""
+    if not finetuning or finetuning.get("modality") != "text":
+        return {}
+    console.print("\n[bold]Text dataset columns[/bold]")
+    console.print(
+        "[dim]These must match column headers in your train/validation CSV files under data/datasets/<name>/.[/dim]"
+    )
+    sub = str(finetuning.get("text_sub_mode", "instruction")).lower()
+    out: Dict[str, Any] = {}
+    if sub == "instruction":
+        tc = questionary.text("Response / target text column name:", default="response", style=apple_style).ask()
+        out["text_column"] = (tc or "response").strip()
+        pc = questionary.text("Prompt / instruction column name:", default="prompt", style=apple_style).ask()
+        out["prompt_column"] = (pc or "prompt").strip()
+    else:
+        tc = questionary.text("Text column name (full sequence to train on):", default="text", style=apple_style).ask()
+        out["text_column"] = (tc or "text").strip()
+    return out
+
+
 def configure_training_parameters() -> Dict[str, Any]:
-    """Step 4: Training Parameters (mandatory)
+    """Step 5: Training Parameters (mandatory)
 
     Prompts for critical hyperparameters with simple guidance, returning a dict:
     {"learning_rate": float, "num_train_epochs": int, "warmup_steps": int}
     """
-    console.print("\n[bold]Step 4: Training Parameters[/bold]")
+    console.print("\n[bold]Step 5: Training Parameters[/bold]")
     # Learning rate
     console.print(
         "[dim]This is the most important hyperparameter. It controls how much the model learns from the data. A smaller number is safer. The default (1e-5) is a good starting point for fine-tuning.[/dim]"
@@ -333,8 +393,9 @@ def show_confirmation_screen(
     dataset: Dict[str, Any],
     method_config: Dict[str, Any],
     estimates: Dict[str, Any],
+    finetuning: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Step 6: Confirmation screen — shows full training configuration for final approval."""
+    """Step 7: Confirmation screen — shows full training configuration for final approval."""
     from gemma_tuner.wizard.config_store import _read_config
 
     console.print("\n[bold cyan]Step 7: Ready to Train![/bold cyan]")
@@ -347,6 +408,15 @@ def show_confirmation_screen(
     config_table.add_row(
         "Training Method", method["name"].replace("🚀", "").replace("🎨", "").replace("🧠", "").strip()
     )
+    ft = finetuning or {}
+    if ft.get("modality") == "text":
+        config_table.add_row("Task", f"text / {ft.get('text_sub_mode', 'instruction')}")
+        if method_config.get("text_column"):
+            config_table.add_row("Text column", str(method_config["text_column"]))
+        if ft.get("text_sub_mode") == "instruction" and method_config.get("prompt_column"):
+            config_table.add_row("Prompt column", str(method_config["prompt_column"]))
+    else:
+        config_table.add_row("Task", "audio (speech-to-text)")
     config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")
     config_table.add_row("Dataset", f"{dataset['name']} ({estimates['samples']:,} samples)")
     # Training parameters (added in Step 4)

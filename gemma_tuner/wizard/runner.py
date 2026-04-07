@@ -30,8 +30,10 @@ from gemma_tuner.wizard.config import generate_profile_config
 from gemma_tuner.wizard.config_store import _read_config
 from gemma_tuner.wizard.estimator import configure_method_specifics, estimate_training_time
 from gemma_tuner.wizard.ui import (
+    configure_text_columns,
     configure_training_parameters,
     select_dataset,
+    select_finetuning_kind,
     select_model,
     select_training_method,
     show_confirmation_screen,
@@ -377,43 +379,51 @@ def wizard_main():
         # Creates confidence through hardware verification and beautiful design
         show_welcome_screen()
 
-        # Step 1: Training method selection (LoRA for Gemma)
+        # Step 1: Task kind (audio STT vs text) — gates dataset sources and column prompts
+        finetuning = select_finetuning_kind()
+        if finetuning is None:
+            raise KeyboardInterrupt
+
+        # Step 2: Training method selection (LoRA for Gemma)
         family = "gemma"
         method = select_training_method(family)
         # select_training_method returns None when questionary can't prompt (non-TTY stdin).
         if method is None:
             raise KeyboardInterrupt
 
-        # Step 2: Model selection with intelligent constraints
+        # Step 3: Model selection with intelligent constraints
         # Returns (model_key, seed_dict) tuple for configuration flexibility
         model, seed = select_model(method, family)
         # select_model returns (None, {}) when questionary can't prompt (non-TTY stdin).
         if model is None:
             raise KeyboardInterrupt
 
-        # Step 3: Dataset selection with automatic discovery
+        # Step 4: Dataset selection with automatic discovery
         # Supports local files, BigQuery imports, and HuggingFace datasets
-        dataset = select_dataset(method)
+        dataset = select_dataset(method, finetuning)
         # select_dataset returns None when questionary can't prompt (non-TTY stdin).
         if dataset is None:
             raise KeyboardInterrupt
 
-        # Step 4: Training parameters (mandatory hyperparameters)
+        # Step 5: Training parameters (mandatory hyperparameters)
         training_params = configure_training_parameters()
 
-        # Step 5: Method-specific configuration with smart defaults
+        # Step 6: Method-specific configuration with smart defaults
         # Reveals advanced options only when needed, passes seed for custom hybrids
         method_config = configure_method_specifics(method, model, seed)
         # Merge training parameters into method_config for downstream display and merging
         method_config.update(training_params)
+        method_config.update(configure_text_columns(finetuning))
+        method_config["modality"] = finetuning["modality"]
+        method_config["text_sub_mode"] = finetuning.get("text_sub_mode", "instruction")
 
-        # Step 6: Resource estimation with realistic expectations
+        # Step 7: Resource estimation with realistic expectations
         # Calculates training time and memory requirements based on hardware
-        estimates = estimate_training_time(method, model, dataset)
+        estimates = estimate_training_time(method, model, dataset, finetuning=finetuning)
 
-        # Step 7: Beautiful confirmation screen with final approval
+        # Step 8: Beautiful confirmation screen with final approval
         # Comprehensive configuration review before committing to training
-        if show_confirmation_screen(method, model, dataset, method_config, estimates):
+        if show_confirmation_screen(method, model, dataset, method_config, estimates, finetuning=finetuning):
             # Configuration generation for production training infrastructure
             profile_config = generate_profile_config(method, model, dataset, method_config)
 
