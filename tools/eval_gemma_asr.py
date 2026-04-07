@@ -122,7 +122,18 @@ def main() -> int:
             audio = load_audio_local_or_gcs(audio_path, sampling_rate=sr)
 
             messages = build_messages()
-            enc = processor(messages=[messages], audios=[audio], return_tensors="pt", padding=True)
+            prompts = processor.apply_chat_template(
+                [messages],
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            enc = processor(
+                text=prompts,
+                audio=[audio],
+                return_tensors="pt",
+                padding=True,
+                sampling_rate=sr,
+            )
             enc = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in enc.items()}
 
             # Generate

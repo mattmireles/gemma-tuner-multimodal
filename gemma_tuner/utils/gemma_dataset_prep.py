@@ -557,34 +557,34 @@ def validate_single_sample(audio_path: str, text: str, model_id: str) -> None:
     messages = _build_messages(text)
 
     # Optional audio loading with processor-specific sampling rate detection
+    sampling_rate = None
+    try:
+        sampling_rate = getattr(processor, "sampling_rate", None)
+        if sampling_rate is None and hasattr(processor, "feature_extractor"):
+            sampling_rate = getattr(processor.feature_extractor, "sampling_rate", None)
+    except Exception:
+        sampling_rate = None
+
     audios = []
     if load_audio_local_or_gcs is not None:
-        # Attempt to detect processor's preferred sampling rate
-        # This ensures audio is preprocessed correctly for the specific model
-        sampling_rate = None
-        try:
-            # Primary sampling rate source: processor attribute
-            sampling_rate = getattr(processor, "sampling_rate", None)
-
-            # Fallback: feature extractor sampling rate
-            if sampling_rate is None and hasattr(processor, "feature_extractor"):
-                sampling_rate = getattr(processor.feature_extractor, "sampling_rate", None)
-        except Exception:
-            # Safe fallback: let audio loader use default detection
-            sampling_rate = None
-
-        # Load audio with detected or default sampling rate
         audio_array = load_audio_local_or_gcs(audio_path, sampling_rate=sampling_rate)
         audios.append(audio_array)
 
-    # Process through full multimodal preprocessing pipeline
-    # This validates the complete preprocessing workflow used during training
-    processed_inputs = processor(
-        messages=[messages],
-        audios=audios or None,
-        return_tensors=constants.PROCESSOR_RETURN_TENSORS,
-        padding=constants.PROCESSOR_PADDING,
+    prompts = processor.apply_chat_template(
+        [messages],
+        tokenize=False,
+        add_generation_prompt=False,
     )
+    proc_kwargs: Dict[str, object] = {
+        "text": prompts,
+        "return_tensors": constants.PROCESSOR_RETURN_TENSORS,
+        "padding": constants.PROCESSOR_PADDING,
+    }
+    if audios:
+        proc_kwargs["audio"] = audios
+        if sampling_rate is not None:
+            proc_kwargs["sampling_rate"] = sampling_rate
+    processed_inputs = processor(**proc_kwargs)
 
     # Generate compact summary of processor outputs for validation
     # This helps verify tensor shapes and types match training expectations
