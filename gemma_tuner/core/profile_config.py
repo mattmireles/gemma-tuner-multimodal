@@ -50,7 +50,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Iterator, List, Optional, Union
 
-
 # Sentinel for "field not set" — distinct from None (which is a valid value
 # for some optional fields like max_samples).  All known ProfileConfig fields
 # default to this value; __contains__ returns False for any field still holding
@@ -351,9 +350,7 @@ class ProfileConfig:
 
     def __len__(self) -> int:
         set_count = sum(
-            1
-            for f in fields(self)
-            if f.name not in _INTERNAL_FIELDS and getattr(self, f.name, _UNSET) is not _UNSET
+            1 for f in fields(self) if f.name not in _INTERNAL_FIELDS and getattr(self, f.name, _UNSET) is not _UNSET
         )
         return set_count + len(self._extras)
 

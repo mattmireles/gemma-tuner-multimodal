@@ -244,7 +244,9 @@ def create_blacklist(profile_config, output_dir):
                 # Store as strings, stripping the ".0" suffix that pandas adds to
                 # integer-valued float columns (e.g. "123.0" → "123"), so they
                 # match the str(item["id"]) keys used in id_to_wer.
-                do_not_blacklist_ids.update({str(id_).split(".")[0] for id_ in do_not_blacklist_df["id"] if not pd.isna(id_)})
+                do_not_blacklist_ids.update(
+                    {str(id_).split(".")[0] for id_ in do_not_blacklist_df["id"] if not pd.isna(id_)}
+                )
             except Exception as e:
                 raise ValueError(f"Error loading do-not-blacklist IDs from {do_not_blacklist_file}: {e}")
 

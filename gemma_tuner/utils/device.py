@@ -17,9 +17,12 @@ import functools
 import logging
 import os
 import platform
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
+
+if TYPE_CHECKING:
+    from gemma_tuner.core.profile_config import ProfileConfig
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +75,7 @@ def to_bool(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def apply_device_defaults(profile_config: "ProfileConfig | dict[str, Any]") -> None:
+def apply_device_defaults(profile_config: ProfileConfig | dict[str, Any]) -> None:
     """
     Apply device-specific configuration defaults in-place.
 

@@ -28,6 +28,7 @@ def _read_config() -> configparser.ConfigParser:
 
 def _write_config(cfg: configparser.ConfigParser) -> None:
     import os as _os
+
     # Write with owner-only permissions (0o600) so GCP project IDs stored by
     # the wizard are not world-readable on shared systems.
     fd = _os.open(str(_CONFIG_INI), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)

@@ -577,10 +577,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
 
     # Guard before writing: raise early so no empty header-only CSV is left on disk.
     if len(df_duration_filtered) == 0:
-        raise ValueError(
-            "No samples remain after filtering. Check language, duration, "
-            "and download settings."
-        )
+        raise ValueError("No samples remain after filtering. Check language, duration, and download settings.")
 
     df_duration_filtered.to_csv(prepared_csv_path, index=False)
 

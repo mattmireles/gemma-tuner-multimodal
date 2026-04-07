@@ -37,7 +37,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 # Logging configuration — inline constants to avoid an unnecessary namespace class.
 _DEFAULT_LEVEL = "INFO"
 _URLLIB3_LEVEL = logging.WARNING  # Suppress connection pool messages
