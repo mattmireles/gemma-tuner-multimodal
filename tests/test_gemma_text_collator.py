@@ -105,6 +105,42 @@ class _SlowTokenizerRejected(_FakeInstructionTokenizer):
         return super().apply_chat_template(messages_batch, **kwargs)
 
 
+class _FakeGemma4AllZeroAssistantMask:
+    """HF can return assistant_masks with correct shape but all zeros (no {% generation %} in template)."""
+
+    bos_token_id = 1
+
+    def apply_chat_template(self, messages_batch, **kwargs):
+        kwargs.pop("return_assistant_tokens_mask", None)
+        for k in (
+            "tokenize",
+            "return_tensors",
+            "padding",
+            "return_dict",
+            "add_generation_prompt",
+            "truncation",
+            "max_length",
+        ):
+            kwargs.pop(k, None)
+        # Same layout as test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header
+        input_ids = torch.tensor([[1, 50, 7, 8, 50, 20, 21, 100, 101]], dtype=torch.long)
+        attention_mask = torch.ones_like(input_ids)
+        out = {"input_ids": input_ids, "attention_mask": attention_mask}
+        out["assistant_masks"] = torch.zeros_like(input_ids)
+        return out
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        if text == "<|turn|>":
+            return [50]
+        if text == "model\n":
+            return [20, 21]
+        if text == "model":
+            return [20]
+        if text.strip() == "Hello":
+            return [100]
+        return [99]
+
+
 class _FakeCompletionTokenizer:
     pad_token_id = 0
     eos_token_id = 0
@@ -134,6 +170,26 @@ def test_instruction_gemma4_injects_mm_token_type_ids():
     assert "token_type_ids" in out and "mm_token_type_ids" in out
     assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
     assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+
+
+def test_instruction_gemma4_degenerate_all_zero_assistant_masks_uses_fallback():
+    """When assistant_masks is present but all zeros, do not mask every token (-100 everywhere)."""
+    tok = _FakeGemma4AllZeroAssistantMask()
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        family=GemmaFamily.GEMMA_4,
+        prompt_column="prompt",
+        max_length=128,
+        sub_mode="instruction",
+    )
+    out = collator([{"prompt": "p", "response": "Hello"}])
+    labels = out["labels"]
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    assert (labels != ignore).any(), "expected some supervised tokens, not all -100"
+    assert labels[0, 7].item() == 100
+    assert labels[0, 8].item() == 101
+    assert (labels[0, :7] == ignore).all()
 
 
 def test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header():
