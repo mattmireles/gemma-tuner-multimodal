@@ -105,6 +105,48 @@ class _SlowTokenizerRejected(_FakeInstructionTokenizer):
         return super().apply_chat_template(messages_batch, **kwargs)
 
 
+class _FakeLongPromptTokenizer:
+    """Token count grows with user length; truncation=True keeps first max_length tokens (drops tail / assistant)."""
+
+    bos_token_id = 1
+    pad_token_id = 0
+
+    def apply_chat_template(self, messages_batch, **kwargs):
+        return_assistant_tokens_mask = kwargs.pop("return_assistant_tokens_mask", False)
+        truncation = kwargs.pop("truncation", True)
+        max_length = kwargs.pop("max_length", 2048)
+        for k in (
+            "tokenize",
+            "return_tensors",
+            "padding",
+            "return_dict",
+            "add_generation_prompt",
+        ):
+            kwargs.pop(k, None)
+        kwargs.clear()
+
+        user = str(messages_batch[0][0]["content"])
+        assistant = str(messages_batch[0][1]["content"])
+        n_tokens = 4 + (len(user) // 3) + (len(assistant) // 2)
+        lost_assistant = bool(truncation and n_tokens > max_length)
+        if lost_assistant:
+            n_tokens = max_length
+        input_ids = torch.zeros(1, n_tokens, dtype=torch.long)
+        input_ids[0, 0] = self.bos_token_id
+        if not lost_assistant:
+            input_ids[0, -2:] = torch.tensor([200, 201])
+        else:
+            input_ids[0, -2:] = torch.tensor([3, 3])
+        attention_mask = torch.ones_like(input_ids)
+        out = {"input_ids": input_ids, "attention_mask": attention_mask}
+        if return_assistant_tokens_mask:
+            am = torch.zeros_like(input_ids)
+            if not lost_assistant:
+                am[0, -2:] = 1
+            out["assistant_masks"] = am
+        return out
+
+
 class _FakeGemma4AllZeroAssistantMask:
     """HF can return assistant_masks with correct shape but all zeros (no {% generation %} in template)."""
 
@@ -356,5 +398,57 @@ def test_invalid_sub_mode():
         DataCollatorGemmaText(tok, text_column="t", family=GemmaFamily.GEMMA_3N, prompt_column="p", sub_mode="other")
     except ValueError as e:
         assert "sub_mode" in str(e).lower()
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_instruction_left_user_truncates_prompt_keeps_assistant_tail():
+    """Long user text is left-trimmed so HF truncation does not drop the assistant span."""
+    tok = _FakeLongPromptTokenizer()
+    long_prompt = "x" * 3000
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        family=GemmaFamily.GEMMA_3N,
+        prompt_column="prompt",
+        max_length=20,
+        sub_mode="instruction",
+        instruction_truncation="left_user",
+    )
+    out = collator([{"prompt": long_prompt, "response": "yy"}])
+    assert out["input_ids"][0, -2].item() == 200
+    assert out["input_ids"][0, -1].item() == 201
+
+
+def test_instruction_truncation_none_drops_assistant_tail():
+    """Without pre-truncation, tokenizer-only truncation can remove the assistant from the window."""
+    tok = _FakeLongPromptTokenizer()
+    long_prompt = "x" * 3000
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        family=GemmaFamily.GEMMA_3N,
+        prompt_column="prompt",
+        max_length=20,
+        sub_mode="instruction",
+        instruction_truncation="none",
+    )
+    out = collator([{"prompt": long_prompt, "response": "yy"}])
+    assert out["input_ids"][0, -2].item() == 3
+
+
+def test_invalid_instruction_truncation():
+    tok = _FakeInstructionTokenizer()
+    try:
+        DataCollatorGemmaText(
+            tok,
+            text_column="t",
+            family=GemmaFamily.GEMMA_3N,
+            prompt_column="p",
+            sub_mode="instruction",
+            instruction_truncation="bad",
+        )
+    except ValueError as e:
+        assert "instruction_truncation" in str(e).lower()
     else:
         raise AssertionError("expected ValueError")

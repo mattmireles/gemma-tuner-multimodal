@@ -34,6 +34,100 @@ def _find_subsequence_ids(haystack: torch.Tensor, needle: List[int]) -> int:
     return -1
 
 
+def _instruction_seq_len(tokenizer, user: str, assistant: str) -> int:
+    """Token length for one user + assistant chat (no truncation). Used to left-trim long prompts."""
+    conv = [[{"role": "user", "content": user}, {"role": "assistant", "content": assistant}]]
+    enc = tokenizer.apply_chat_template(
+        conv,
+        tokenize=True,
+        return_tensors="pt",
+        padding=False,
+        return_dict=True,
+        add_generation_prompt=False,
+        truncation=False,
+    )
+    input_ids = enc["input_ids"]
+    if isinstance(input_ids, torch.Tensor):
+        return int(input_ids.shape[1])
+    if isinstance(input_ids, (list, tuple)) and input_ids:
+        row = input_ids[0]
+        if isinstance(row, torch.Tensor):
+            return int(row.numel())
+        return len(row)
+    raise TypeError(f"_instruction_seq_len: unexpected input_ids type {type(input_ids)!r}")
+
+
+def _left_trim_user_for_instruction_budget(tokenizer, user: str, assistant: str, max_length: int) -> str:
+    """Drop characters from the **start** of ``user`` until the chat fits ``max_length`` tokens."""
+    if _instruction_seq_len(tokenizer, user, assistant) <= max_length:
+        return user
+    lo, hi = 0, len(user)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _instruction_seq_len(tokenizer, user[mid:], assistant) <= max_length:
+            hi = mid
+        else:
+            lo = mid + 1
+    return user[lo:]
+
+
+def _shrink_assistant_prefix_for_instruction_budget(
+    tokenizer, user: str, assistant: str, max_length: int
+) -> str:
+    """Keep the longest prefix of ``assistant`` that still fits with ``user`` (after user trim)."""
+    if _instruction_seq_len(tokenizer, user, assistant) <= max_length:
+        return assistant
+    if not assistant:
+        return assistant
+    lo, hi = 0, len(assistant)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _instruction_seq_len(tokenizer, user, assistant[:mid]) <= max_length:
+            lo = mid
+        else:
+            hi = mid - 1
+    return assistant[:lo]
+
+
+def _fit_instruction_pair_to_max_length(
+    tokenizer,
+    user: str,
+    assistant: str,
+    max_length: int,
+    *,
+    warned_user_trim: List[bool],
+    warned_assistant_trim: List[bool],
+    warned_still_overflow: List[bool],
+) -> tuple[str, str]:
+    """Prefer left-trimming the user prompt so the assistant turn is not dropped by end truncation."""
+    orig_u, orig_a = user, assistant
+    user = _left_trim_user_for_instruction_budget(tokenizer, user, assistant, max_length)
+    if user != orig_u and not warned_user_trim[0]:
+        logger.warning(
+            "DataCollatorGemmaText: user prompt left-truncated to fit max_length=%d "
+            "(tokens removed from the start of the prompt so the assistant reply stays in-window).",
+            max_length,
+        )
+        warned_user_trim[0] = True
+    if _instruction_seq_len(tokenizer, user, assistant) <= max_length:
+        return user, assistant
+    assistant = _shrink_assistant_prefix_for_instruction_budget(tokenizer, user, assistant, max_length)
+    if assistant != orig_a and not warned_assistant_trim[0]:
+        logger.warning(
+            "DataCollatorGemmaText: assistant response truncated (prefix kept) to fit max_length=%d.",
+            max_length,
+        )
+        warned_assistant_trim[0] = True
+    if _instruction_seq_len(tokenizer, user, assistant) > max_length and not warned_still_overflow[0]:
+        logger.warning(
+            "DataCollatorGemmaText: sequence still exceeds max_length=%d after prompt/response fitting; "
+            "HF truncation may remove the assistant tail — consider raising max_seq_length.",
+            max_length,
+        )
+        warned_still_overflow[0] = True
+    return user, assistant
+
+
 def validate_bos_tokens_present(encoded: Dict[str, torch.Tensor], tokenizer) -> None:
     """Confirm each sequence contains ``bos_token_id`` somewhere (multimodal-safe).
 
@@ -440,6 +534,12 @@ class DataCollatorGemmaText:
     masked in ``labels`` using ``attention_mask == 0`` (not ``pad_token_id``), so EOS
     is not dropped when ``pad_token == eos_token``.
 
+    Long prompts: with ``instruction_truncation="left_user"`` (default), the collator
+    measures token length and **left-truncates the user string** so the rendered chat
+    fits ``max_length`` before Hugging Face end-truncation, preserving the assistant
+    span. Use ``instruction_truncation="none"`` for the old behavior (truncate the
+    full sequence from the right only).
+
     Completion mode: single text column, full sequence trained (no prompt mask).
     """
 
@@ -452,21 +552,31 @@ class DataCollatorGemmaText:
         prompt_column: Optional[str] = None,
         max_length: int = 2048,
         sub_mode: str = "instruction",
+        instruction_truncation: str = "left_user",
     ):
         if sub_mode not in ("instruction", "completion"):
             raise ValueError(f"DataCollatorGemmaText: sub_mode must be 'instruction' or 'completion', got {sub_mode!r}")
         if sub_mode == "instruction" and not prompt_column:
             raise ValueError("DataCollatorGemmaText: prompt_column is required when sub_mode is 'instruction'")
+        if instruction_truncation not in ("left_user", "none"):
+            raise ValueError(
+                f"DataCollatorGemmaText: instruction_truncation must be 'left_user' or 'none', "
+                f"got {instruction_truncation!r}"
+            )
         self.tokenizer = tokenizer
         self.text_column = text_column
         self.prompt_column = prompt_column
         self.max_length = max_length
         self.sub_mode = sub_mode
+        self.instruction_truncation = instruction_truncation
         self._family = family
         # Cache capability dict once; family_capabilities() returns a fresh dict each call.
         self._caps = family_capabilities(family)
         self._warned_prompt_masking: List[bool] = [False]
         self._warned_degenerate_assistant_mask: bool = False
+        self._warned_instruction_user_trim: List[bool] = [False]
+        self._warned_instruction_assistant_trim: List[bool] = [False]
+        self._warned_instruction_still_overflow: List[bool] = [False]
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         if self.sub_mode == "instruction":
@@ -487,10 +597,21 @@ class DataCollatorGemmaText:
                 raise KeyError(
                     f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
                 )
+            sp, sr = str(prompt), str(response)
+            if self.instruction_truncation == "left_user":
+                sp, sr = _fit_instruction_pair_to_max_length(
+                    self.tokenizer,
+                    sp,
+                    sr,
+                    self.max_length,
+                    warned_user_trim=self._warned_instruction_user_trim,
+                    warned_assistant_trim=self._warned_instruction_assistant_trim,
+                    warned_still_overflow=self._warned_instruction_still_overflow,
+                )
             messages_batch.append(
                 [
-                    {"role": "user", "content": str(prompt)},
-                    {"role": "assistant", "content": str(response)},
+                    {"role": "user", "content": sp},
+                    {"role": "assistant", "content": sr},
                 ]
             )
 
