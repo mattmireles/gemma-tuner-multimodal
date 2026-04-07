@@ -182,6 +182,19 @@ def _test_mps_bfloat16_support(device: torch.device) -> bool:
         del input_tensor, weight_tensor, output_tensor, loss_value
 
 
+def resolve_training_torch_compile(device: torch.device, profile_config: dict[str, Any]) -> bool:
+    """``TrainingArguments.torch_compile``: honor profile on CUDA/CPU; force False on MPS (gemma4-guide.md)."""
+    requested = bool(profile_config.get("torch_compile", False))
+    if device.type == "mps":
+        if requested:
+            logger.warning(
+                "torch_compile=True is not supported for Gemma training on MPS; forcing torch_compile=False "
+                "(see README/guides/apple-silicon/gemma4-guide.md)."
+            )
+        return False
+    return requested
+
+
 def _discover_candidate_target_modules(model) -> List[str]:
     """Scan model modules to find which default LoRA target heads exist in the model.
 
@@ -640,6 +653,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         log_level="error",
         # Avoid Trainer.evaluate() stalling on MPS (transformers#27181); matches gemma4-guide.md.
         skip_memory_metrics=True,
+        torch_compile=resolve_training_torch_compile(device, profile_config),
     )
     _ms = profile_config.get("max_steps")
     if _ms is not None and _ms != "":

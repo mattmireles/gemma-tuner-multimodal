@@ -140,7 +140,7 @@ from typing import Dict, List
 
 from transformers import AutoProcessor
 
-from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+from gemma_tuner.models.gemma.constants import GemmaTrainingConstants, resolve_processor_sampling_rate
 
 # Reuse shared audio I/O to support file system and GCS URIs.
 # Only catch ImportError (missing optional deps such as librosa/soundfile) so that
@@ -497,10 +497,8 @@ def validate_single_sample(audio_path: str, text: str, model_id: str) -> None:
     - Handles various audio file formats through soundfile integration
 
     Sampling Rate Detection:
-    - Checks processor.sampling_rate attribute first
-    - Falls back to processor.feature_extractor.sampling_rate
-    - Uses None (auto-detection) if no rate specified
-    - Ensures compatibility with processor audio requirements
+    - Uses :func:`gemma_tuner.models.gemma.constants.resolve_processor_sampling_rate`
+      (hint > processor > feature_extractor > 16 kHz default), same as the training collator
 
     Error Handling:
     - Graceful fallback when audio loading unavailable
@@ -558,14 +556,7 @@ def validate_single_sample(audio_path: str, text: str, model_id: str) -> None:
     # Construct messages using standard format for consistency
     messages = _build_messages(text)
 
-    # Optional audio loading with processor-specific sampling rate detection
-    sampling_rate = None
-    try:
-        sampling_rate = getattr(processor, "sampling_rate", None)
-        if sampling_rate is None and hasattr(processor, "feature_extractor"):
-            sampling_rate = getattr(processor.feature_extractor, "sampling_rate", None)
-    except Exception:
-        sampling_rate = None
+    sampling_rate = resolve_processor_sampling_rate(processor)
 
     audios = []
     if load_audio_local_or_gcs is not None:
@@ -584,8 +575,7 @@ def validate_single_sample(audio_path: str, text: str, model_id: str) -> None:
     }
     if audios:
         proc_kwargs["audio"] = audios
-        if sampling_rate is not None:
-            proc_kwargs["sampling_rate"] = sampling_rate
+        proc_kwargs["sampling_rate"] = sampling_rate
     processed_inputs = processor(**proc_kwargs)
 
     # Generate compact summary of processor outputs for validation

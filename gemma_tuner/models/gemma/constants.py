@@ -10,6 +10,10 @@ Imported by:
 - utils/gemma_dataset_prep.py  (DEFAULT_MODEL_ID)
 """
 
+from __future__ import annotations
+
+from typing import Any, Optional
+
 from gemma_tuner.constants import TrainingDefaults
 
 
@@ -63,3 +67,30 @@ class AudioProcessingConstants:
 
     # Returns 1.0 second of silence when audio loading fails
     FALLBACK_SILENCE_DURATION_SECONDS = 1.0
+
+
+def resolve_processor_sampling_rate(
+    processor: Any,
+    *,
+    hint: Optional[int] = None,
+    default: int = AudioProcessingConstants.DEFAULT_SAMPLING_RATE,
+) -> int:
+    """Sampling rate for Gemma multimodal audio: ``hint`` > processor > feature_extractor > ``default``.
+
+    Matches ``load_audio_local_or_gcs(..., sampling_rate=None)`` resampling default
+    (``DatasetPrepConstants.DEFAULT_SAMPLING_RATE`` aliases ``DEFAULT_SAMPLING_RATE`` here).
+    """
+    if hint is not None:
+        return int(hint)
+    try:
+        sr = getattr(processor, "sampling_rate", None)
+        if sr is not None:
+            return int(sr)
+        fe = getattr(processor, "feature_extractor", None)
+        if fe is not None:
+            sr = getattr(fe, "sampling_rate", None)
+            if sr is not None:
+                return int(sr)
+    except Exception:
+        pass
+    return int(default)

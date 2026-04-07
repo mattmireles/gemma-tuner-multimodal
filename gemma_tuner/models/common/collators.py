@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 import torch
 
 from gemma_tuner.models.gemma.constants import (
-    AudioProcessingConstants,
     GemmaTrainingConstants,
     GemmaValidationConstants,
+    resolve_processor_sampling_rate,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,7 +291,7 @@ class DataCollatorGemmaAudio:
         audios: List[List[float]] = []
         texts: List[str] = []
 
-        sampling_rate = self._get_sampling_rate()
+        sampling_rate = resolve_processor_sampling_rate(self.processor, hint=self.sampling_rate_hint)
 
         for ex in features:
             audio_path = ex.get("audio_path", ex.get("audio"))
@@ -344,6 +344,7 @@ class DataCollatorGemmaAudio:
         ensure_gemma_mm_token_type_ids(encoded)
 
         if hasattr(self.processor, "tokenizer"):
+            # After apply_chat_template + processor(); template adds BOS — safe to validate here.
             validate_bos_tokens_present(encoded, self.processor.tokenizer)
 
         if "labels" not in encoded:
@@ -358,17 +359,3 @@ class DataCollatorGemmaAudio:
             encoded["labels"] = labels
 
         return encoded
-
-    def _get_sampling_rate(self) -> int:
-        """Return sampling rate using hint > processor.sampling_rate > feature_extractor > 16kHz default."""
-        if self.sampling_rate_hint is not None:
-            return self.sampling_rate_hint
-        if hasattr(self.processor, "sampling_rate") and self.processor.sampling_rate is not None:
-            return self.processor.sampling_rate
-        if (
-            hasattr(self.processor, "feature_extractor")
-            and hasattr(self.processor.feature_extractor, "sampling_rate")
-            and self.processor.feature_extractor.sampling_rate is not None
-        ):
-            return self.processor.feature_extractor.sampling_rate
-        return AudioProcessingConstants.DEFAULT_SAMPLING_RATE

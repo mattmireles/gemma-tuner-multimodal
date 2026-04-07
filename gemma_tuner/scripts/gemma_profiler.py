@@ -130,7 +130,7 @@ import psutil
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
-from gemma_tuner.models.gemma.constants import AudioProcessingConstants
+from gemma_tuner.models.gemma.constants import AudioProcessingConstants, resolve_processor_sampling_rate
 from gemma_tuner.utils.device import probe_bfloat16
 
 
@@ -265,12 +265,9 @@ def main(model_id: str = GemmaProfilerConstants.DEFAULT_MODEL_ID) -> None:
 
     # Generate synthetic audio workload for consistent performance testing
     # Uses realistic duration and sampling rate for representative measurements
-    processor_sampling_rate = getattr(processor, "sampling_rate", None)
-    if processor_sampling_rate is None and hasattr(processor, "feature_extractor"):
-        processor_sampling_rate = getattr(processor.feature_extractor, "sampling_rate", constants.DEFAULT_SAMPLING_RATE)
-
-    # Create synthetic audio with realistic characteristics
-    effective_sampling_rate = processor_sampling_rate or constants.DEFAULT_SAMPLING_RATE
+    effective_sampling_rate = resolve_processor_sampling_rate(
+        processor, default=constants.DEFAULT_SAMPLING_RATE
+    )
     audio_sample_count = int(constants.SYNTHETIC_AUDIO_DURATION_SECONDS * effective_sampling_rate)
     synthetic_audio = torch.randn(audio_sample_count).tolist()
 
