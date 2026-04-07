@@ -159,6 +159,14 @@ def select_finetuning_kind() -> Optional[Dict[str, Any]]:
             "name": "Continued pretraining / style (text — single text column)",
             "value": {"modality": "text", "text_sub_mode": "completion"},
         },
+        {
+            "name": "Image captioning / OCR (image + caption)",
+            "value": {"modality": "image", "image_sub_mode": "caption", "text_sub_mode": "instruction"},
+        },
+        {
+            "name": "Visual question answering (image + question + answer)",
+            "value": {"modality": "image", "image_sub_mode": "vqa", "text_sub_mode": "instruction"},
+        },
     ]
     selected = questionary.select("Choose your task:", choices=choices, style=apple_style).ask()
     return selected
@@ -303,7 +311,7 @@ def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] 
 
     choices = []
     for dataset in datasets:
-        if modality == "text" and dataset.get("type") in ("bigquery_import", "granary_setup"):
+        if modality in ("text", "image") and dataset.get("type") in ("bigquery_import", "granary_setup"):
             continue
         if dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
             choice_text = f"📁 {dataset['name']} - {dataset['description']}"
@@ -315,7 +323,7 @@ def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] 
     if not choices:
         console.print(
             "[red]No local datasets available for this task. "
-            "For text fine-tuning, add CSV splits under data/datasets/<name>/.[/red]"
+            "For text or image fine-tuning, add CSV splits under data/datasets/<name>/.[/red]"
         )
         return None
 
@@ -330,16 +338,16 @@ def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] 
 
     # Handle BigQuery import flow
     if selected_dataset.get("type") == "bigquery_import":
-        if modality == "text":
-            console.print("[red]Text-only fine-tuning (v1) needs a local CSV dataset, not BigQuery import.[/red]")
+        if modality in ("text", "image"):
+            console.print("[red]Text/image fine-tuning (v1) needs a local CSV dataset, not BigQuery import.[/red]")
             return None
         bq_dataset = select_bigquery_table_and_export()
         return bq_dataset
 
     # Handle Granary dataset setup flow
     if selected_dataset.get("type") == "granary_setup":
-        if modality == "text":
-            console.print("[red]Text-only fine-tuning (v1) needs a local CSV dataset, not Granary.[/red]")
+        if modality in ("text", "image"):
+            console.print("[red]Text/image fine-tuning (v1) needs a local CSV dataset, not Granary.[/red]")
             return None
         granary_dataset = setup_granary_dataset()
         return granary_dataset
@@ -372,6 +380,44 @@ def configure_text_columns(finetuning: Optional[Dict[str, Any]]) -> Dict[str, An
     else:
         tc = questionary.text("Text column name (full sequence to train on):", default="text", style=apple_style).ask()
         out["text_column"] = (tc or "text").strip()
+    return out
+
+
+def configure_image_columns(finetuning: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Prompt for CSV column names and vision budget when training on image+text data."""
+    if not finetuning or finetuning.get("modality") != "image":
+        return {}
+    console.print("\n[bold]Image dataset columns[/bold]")
+    console.print(
+        "[dim]Paths may be relative to data/datasets/<dataset>/; images are converted to RGB in the collator.[/dim]"
+    )
+    out: Dict[str, Any] = {}
+    ipc = questionary.text("Image file path column name:", default="image_path", style=apple_style).ask()
+    out["image_path_column"] = (ipc or "image_path").strip()
+    sub = str(finetuning.get("image_sub_mode", "caption")).lower()
+    if sub == "caption":
+        tc = questionary.text("Caption / response text column:", default="caption", style=apple_style).ask()
+        out["text_column"] = (tc or "caption").strip()
+    else:
+        qc = questionary.text("Question column name:", default="question", style=apple_style).ask()
+        out["prompt_column"] = (qc or "question").strip()
+        ac = questionary.text("Answer column name:", default="answer", style=apple_style).ask()
+        out["text_column"] = (ac or "answer").strip()
+    budget_choices = [
+        {"name": "70 — smallest budget (fastest; good for smoke tests)", "value": 70},
+        {"name": "140", "value": 140},
+        {"name": "280 — default for captioning", "value": 280},
+        {"name": "560 — VQA / more visual detail", "value": 560},
+        {"name": "1120 — OCR / document parsing (heavy memory)", "value": 1120},
+    ]
+    itb = questionary.select(
+        "Vision token budget (image_token_budget):",
+        choices=budget_choices,
+        style=apple_style,
+    ).ask()
+    if itb is None:
+        itb = 280
+    out["image_token_budget"] = int(itb)
     return out
 
 
@@ -443,6 +489,16 @@ def show_confirmation_screen(
             config_table.add_row("Text column", str(method_config["text_column"]))
         if ft.get("text_sub_mode") == "instruction" and method_config.get("prompt_column"):
             config_table.add_row("Prompt column", str(method_config["prompt_column"]))
+    elif ft.get("modality") == "image":
+        config_table.add_row("Task", f"image / {ft.get('image_sub_mode', 'caption')}")
+        if method_config.get("image_path_column"):
+            config_table.add_row("Image path column", str(method_config["image_path_column"]))
+        if method_config.get("text_column"):
+            config_table.add_row("Text column", str(method_config["text_column"]))
+        if ft.get("image_sub_mode") == "vqa" and method_config.get("prompt_column"):
+            config_table.add_row("Question column", str(method_config["prompt_column"]))
+        if method_config.get("image_token_budget") is not None:
+            config_table.add_row("image_token_budget", str(method_config["image_token_budget"]))
     else:
         config_table.add_row("Task", "audio (speech-to-text)")
     config_table.add_row("Model", f"{model} ({ModelSpecs.MODELS.get(model, {}).get('params', 'Unknown')})")

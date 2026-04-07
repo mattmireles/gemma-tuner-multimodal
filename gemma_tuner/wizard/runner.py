@@ -30,6 +30,7 @@ from gemma_tuner.wizard.config import generate_profile_config
 from gemma_tuner.wizard.config_store import _read_config
 from gemma_tuner.wizard.estimator import configure_method_specifics, estimate_training_time
 from gemma_tuner.wizard.ui import (
+    configure_image_columns,
     configure_text_columns,
     configure_training_parameters,
     select_dataset,
@@ -414,8 +415,10 @@ def wizard_main():
         # Merge training parameters into method_config for downstream display and merging
         method_config.update(training_params)
         method_config.update(configure_text_columns(finetuning))
+        method_config.update(configure_image_columns(finetuning))
         method_config["modality"] = finetuning["modality"]
         method_config["text_sub_mode"] = finetuning.get("text_sub_mode", "instruction")
+        method_config["image_sub_mode"] = finetuning.get("image_sub_mode", "caption")
 
         # Step 7: Resource estimation with realistic expectations
         # Calculates training time and memory requirements based on hardware

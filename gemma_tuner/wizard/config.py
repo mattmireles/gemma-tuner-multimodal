@@ -337,6 +337,17 @@ def generate_profile_config(
         pc = method_config.get("prompt_column")
         if pc:
             profile_config["prompt_column"] = pc
+    if modality == "image":
+        profile_config["image_sub_mode"] = str(method_config.get("image_sub_mode", "caption")).strip().lower()
+        if method_config.get("text_column"):
+            profile_config["text_column"] = method_config["text_column"]
+        if method_config.get("image_path_column"):
+            profile_config["image_path_column"] = method_config["image_path_column"]
+        if method_config.get("image_token_budget") is not None:
+            profile_config["image_token_budget"] = int(method_config["image_token_budget"])
+        ipc = method_config.get("prompt_column")
+        if ipc:
+            profile_config["prompt_column"] = ipc
 
     # Add visualization flag if enabled
     if method_config.get("visualize", False):

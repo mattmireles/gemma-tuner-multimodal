@@ -129,6 +129,19 @@ def estimate_training_time(
         # Text-only batches skip audio feature extraction; rough heuristics vs speech path.
         estimated_hours *= 0.5
         estimated_memory *= 0.88
+    elif str(ft.get("modality", "audio")).lower() == "image":
+        itb = int(ft.get("image_token_budget", 280))
+        # Vision path: scale vs a 280-token baseline (encoder + activations dominate vs speech ASR path).
+        vision_factor = max(0.35, min(itb / 280.0, 4.0))
+        estimated_memory *= 1.0 + 0.45 * vision_factor
+        estimated_hours *= 1.15 * vision_factor
+        total_gb = float(device_info.get("total_memory_gb") or device_info.get("available_memory_gb") or 16.0)
+        if estimated_memory > total_gb * 0.8:
+            console.print(
+                f"[yellow]Warning: estimated memory (~{estimated_memory:.1f} GB) exceeds 80% of "
+                f"system RAM (~{total_gb:.1f} GB). Consider a lower image_token_budget, batch size 1, "
+                f"or higher gradient_accumulation_steps.[/yellow]"
+            )
 
     return {
         "hours": estimated_hours,
