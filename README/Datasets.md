@@ -121,6 +121,19 @@ To add a new dataset (e.g., `data123`):
 4. **Run `prepare_data.py`:** Execute `gemma-macos-tuner prepare data123 --config config.ini` to prepare the new dataset.
 5. **Update `gemma_tuner/models/gemma/finetune.py` (if needed):** If your new dataset requires special handling during finetuning (e.g., different preprocessing steps), extend the Gemma training path there or in `gemma_tuner/utils/gemma_dataset_prep.py`.
 
+## Profile keys: modality and text fine-tuning
+
+These keys can appear in `[DEFAULT]`, `[dataset:…]`, `[model:…]`, or `[profile:…]` (profile wins last). They default so that **existing audio profiles behave unchanged** without edits.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `modality` | `audio` | `audio` — speech + transcript (current behavior). `text` — text-only CSV fine-tuning (instruction or completion). |
+| `text_sub_mode` | `instruction` | When `modality = text`: `instruction` — prompt + response columns with prompt masked from loss; `completion` — single text column, full sequence trained. |
+| `prompt_column` | *(empty / none)* | When `text_sub_mode = instruction`, the column name for the user/prompt text. Ignored for `completion`. |
+| `max_seq_length` | `2048` | Maximum token length for text-mode batches (padding/truncation). |
+
+See `config.ini.example` for commented examples.
+
 ## Dataset Loading
 
 The `utils/dataset_utils.py` script contains the `load_dataset_split` function, which is responsible for loading a dataset into a Hugging Face `datasets.Dataset` object. It takes the following arguments:
