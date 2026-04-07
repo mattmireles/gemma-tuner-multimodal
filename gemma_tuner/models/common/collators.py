@@ -246,19 +246,21 @@ class DataCollatorGemmaAudio:
                 ]
             )
 
-        try:
-            encoded = self.processor(
-                messages=messages_batch,
-                audios=audios,
-                return_tensors="pt",
-                padding=True,
-            )
-        except TypeError as e:
-            raise RuntimeError(
-                f"Gemma 3n processor does not support messages interface: {e}. "
-                f"This is required for proper chat templating with <bos>, <start_of_turn>, <end_of_turn> tokens. "
-                f"Ensure you're using a compatible transformers version (>=4.38.2) and processor."
-            ) from e
+        # Real Gemma multimodal processors do not accept processor(messages=...).
+        # apply_chat_template(tokenize=True) would try load_audio() on placeholder paths;
+        # we render prompts first, then attach pre-loaded waveforms via processor(text=..., audio=...).
+        prompts = self.processor.apply_chat_template(
+            messages_batch,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        encoded = self.processor(
+            text=prompts,
+            audio=audios,
+            return_tensors="pt",
+            padding=True,
+            sampling_rate=sampling_rate,
+        )
 
         if hasattr(self.processor, "tokenizer"):
             validate_bos_tokens_present(encoded, self.processor.tokenizer)
@@ -269,7 +271,9 @@ class DataCollatorGemmaAudio:
                 pad_id = self.processor.tokenizer.pad_token_id
                 labels[labels == pad_id] = GemmaTrainingConstants.IGNORE_TOKEN_ID
 
-            mask_gemma_prompt_tokens(labels, encoded["input_ids"], self.processor.tokenizer, self._warned_prompt_masking)
+            mask_gemma_prompt_tokens(
+                labels, encoded["input_ids"], self.processor.tokenizer, self._warned_prompt_masking
+            )
             encoded["labels"] = labels
 
         return encoded

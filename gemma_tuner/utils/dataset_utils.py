@@ -110,6 +110,7 @@ def _ensure_text_modality_supported(context: DatasetLoadContext, adapter, stream
             "Use a local [dataset:…] section with a CSV source, not Granary/BigQuery/GCS streaming."
         )
 
+
 # Anchored config.ini path — resolves relative to the project root regardless of cwd.
 _CONFIG_INI = Path(__file__).resolve().parent.parent.parent / "config.ini"
 
