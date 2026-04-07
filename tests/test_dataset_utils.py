@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pandas as pd
 
@@ -276,6 +277,93 @@ max_duration = 30
             )
         except ValueError as e:
             assert "non-streaming" in str(e).lower()
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        os.chdir(cwd)
+        _du_mod._config = None
+
+
+def test_image_modality_loads_local_csv(tmp_path):
+    repo = Path(__file__).resolve().parent
+    fixture_src = repo / "data" / "image_caption_tiny"
+    data_dir = tmp_path / "data" / "datasets" / "image-caption-tiny"
+    os.makedirs(data_dir, exist_ok=True)
+    import shutil
+
+    shutil.copytree(fixture_src, data_dir, dirs_exist_ok=True)
+
+    cfg_path = tmp_path / "config.ini"
+    cfg_path.write_text("""
+[dataset:image-caption-tiny]
+source = ict-src
+text_column = caption
+train_split = train
+validation_split = validation
+max_label_length = 64
+max_duration = 30
+""")
+
+    cwd = os.getcwd()
+    _du_mod._config = None
+    try:
+        os.chdir(str(tmp_path))
+        ds, source = load_dataset_split(
+            split="train",
+            dataset_config={
+                "name": "image-caption-tiny",
+                "text_column": "caption",
+                "modality": "image",
+                "image_sub_mode": "caption",
+                "image_path_column": "image_path",
+            },
+            streaming_enabled=False,
+        )
+    finally:
+        os.chdir(cwd)
+        _du_mod._config = None
+
+    assert source == "ict-src"
+    assert len(ds) == 8
+    assert ds[0]["caption"].startswith("caption")
+
+
+def test_image_modality_rejects_granary_adapter(tmp_path):
+    data_dir = tmp_path / "data" / "datasets" / "img-gran"
+    os.makedirs(data_dir, exist_ok=True)
+    _write_csv(
+        str(data_dir / "train.csv"),
+        [{"id": 1, "image_path": "x.png", "caption": "a"}],
+    )
+    cfg_path = tmp_path / "config.ini"
+    cfg_path.write_text("""
+[dataset:img-gran]
+source_type = granary
+text_column = caption
+train_split = train
+validation_split = validation
+max_label_length = 64
+max_duration = 30
+""")
+
+    cwd = os.getcwd()
+    _du_mod._config = None
+    try:
+        os.chdir(str(tmp_path))
+        try:
+            load_dataset_split(
+                split="train",
+                dataset_config={
+                    "name": "img-gran",
+                    "text_column": "caption",
+                    "modality": "image",
+                    "image_sub_mode": "caption",
+                    "image_path_column": "image_path",
+                },
+                streaming_enabled=False,
+            )
+        except ValueError as e:
+            assert "local csv" in str(e).lower() or "granary" in str(e).lower()
         else:
             raise AssertionError("expected ValueError")
     finally:
