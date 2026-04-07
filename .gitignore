@@ -162,7 +162,6 @@ distributed_hosts.json
 .agents/skills/
 .claude/
 .cursor/
-.github/
 Claude.md
 
 # User-specific runtime config — may contain GCP project IDs written by the wizard.
