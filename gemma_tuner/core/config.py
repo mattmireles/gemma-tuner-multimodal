@@ -116,6 +116,7 @@ class ConfigConstants:
         "warmup_steps",
         "max_samples",
         "max_seq_length",
+        "image_token_budget",
     }
 
     FLOAT_COERCION_KEYS = {
@@ -173,6 +174,10 @@ class ConfigConstants:
         "text_sub_mode": "instruction",
         "prompt_column": None,
         "max_seq_length": 2048,
+        # Image fine-tuning (used when modality = image; defaults are inert for audio/text)
+        "image_sub_mode": "caption",
+        "image_path_column": "image_path",
+        "image_token_budget": 280,
     }
 
     # Granary Dataset Integration Constants
@@ -200,6 +205,9 @@ class ConfigConstants:
     # Granary audio source validation patterns
     # Minimum required external corpora (YODAS is included in HF download)
     GRANARY_MINIMUM_EXTERNAL_CORPORA = {"voxpopuli", "ytc", "librilight"}
+
+    # Image vision token budget (Gemma 3n/4); must match train/serve contract
+    IMAGE_TOKEN_BUDGET_ALLOWED = frozenset({70, 140, 280, 560, 1120})
 
 
 def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> "ProfileConfig":
@@ -620,8 +628,8 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
     if "modality" in conf and conf["modality"] is not None:
         modality = str(conf["modality"]).strip().lower()
         conf["modality"] = modality
-        if modality not in ("audio", "text"):
-            raise ValueError(f"modality must be 'audio' or 'text', got {modality!r}")
+        if modality not in ("audio", "text", "image"):
+            raise ValueError(f"modality must be 'audio', 'text', or 'image', got {modality!r}")
     if "text_sub_mode" in conf and conf["text_sub_mode"] is not None:
         sub = str(conf["text_sub_mode"]).strip().lower()
         conf["text_sub_mode"] = sub
@@ -638,6 +646,33 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         msl = int(conf["max_seq_length"]) if not isinstance(conf["max_seq_length"], int) else conf["max_seq_length"]
         if msl < 1:
             raise ValueError(f"max_seq_length must be >= 1, got {msl}")
+
+    # Image modality (defaults applied via FALLBACK_DEFAULTS; validation only when modality=image)
+    modality_val = str(conf.get("modality", "audio")).strip().lower()
+    if "image_sub_mode" in conf and conf["image_sub_mode"] is not None:
+        ism = str(conf["image_sub_mode"]).strip().lower()
+        conf["image_sub_mode"] = ism
+        if modality_val == "image" and ism not in ("caption", "vqa"):
+            raise ValueError(f"image_sub_mode must be 'caption' or 'vqa', got {ism!r}")
+    if "image_path_column" in conf:
+        ipc = conf["image_path_column"]
+        if ipc is None or (isinstance(ipc, str) and not str(ipc).strip()):
+            conf["image_path_column"] = "image_path"
+        elif isinstance(ipc, str):
+            conf["image_path_column"] = ipc.strip()
+    if modality_val == "image":
+        itb = conf.get("image_token_budget", 280)
+        itb_int = int(itb) if not isinstance(itb, int) else itb
+        conf["image_token_budget"] = itb_int
+        if itb_int not in ConfigConstants.IMAGE_TOKEN_BUDGET_ALLOWED:
+            raise ValueError(
+                f"image_token_budget must be one of {sorted(ConfigConstants.IMAGE_TOKEN_BUDGET_ALLOWED)}, got {itb_int}"
+            )
+        ims = str(conf.get("image_sub_mode", "caption")).strip().lower()
+        if ims == "vqa":
+            pc = conf.get("prompt_column")
+            if pc is None or (isinstance(pc, str) and not str(pc).strip()):
+                raise ValueError("modality=image with image_sub_mode=vqa requires prompt_column (question column)")
 
     # Validate data splits are specified
     for split_key in ("train_split", "validation_split"):

@@ -121,16 +121,19 @@ To add a new dataset (e.g., `data123`):
 4. **Run `prepare_data.py`:** Execute `gemma-macos-tuner prepare data123 --config config.ini` to prepare the new dataset.
 5. **Update `gemma_tuner/models/gemma/finetune.py` (if needed):** If your new dataset requires special handling during finetuning (e.g., different preprocessing steps), extend the Gemma training path there or in `gemma_tuner/utils/gemma_dataset_prep.py`.
 
-## Profile keys: modality and text fine-tuning
+## Profile keys: modality, text, and image fine-tuning
 
 These keys can appear in `[DEFAULT]`, `[dataset:…]`, `[model:…]`, or `[profile:…]` (profile wins last). They default so that **existing audio profiles behave unchanged** without edits.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `modality` | `audio` | `audio` — speech + transcript (current behavior). `text` — text-only CSV fine-tuning (instruction or completion). |
+| `modality` | `audio` | `audio` — speech + transcript (current behavior). `text` — text-only CSV fine-tuning (instruction or completion). `image` — image + text CSV (captioning or VQA); see image columns below. |
 | `text_sub_mode` | `instruction` | When `modality = text`: `instruction` — prompt + response columns with prompt masked from loss; `completion` — single text column, full sequence trained. |
-| `prompt_column` | *(empty / none)* | When `text_sub_mode = instruction`, the column name for the user/prompt text. Ignored for `completion`. |
+| `prompt_column` | *(empty / none)* | When `text_sub_mode = instruction`, the column name for the user/prompt text. Ignored for `completion`. When `modality = image` and `image_sub_mode = vqa`, the column name for the **question** text. |
 | `max_seq_length` | `2048` | Maximum token length for text-mode batches (padding/truncation). |
+| `image_sub_mode` | `caption` | When `modality = image`: `caption` — fixed instruction + caption/response in `text_column`; `vqa` — question in `prompt_column`, answer in `text_column`. |
+| `image_path_column` | `image_path` | CSV column for the image file path (local or supported URI). |
+| `image_token_budget` | `280` | Vision token budget for the processor. Must be one of `70`, `140`, `280`, `560`, `1120` (train/serve must match). |
 
 See `config.ini.example` for commented examples.
 

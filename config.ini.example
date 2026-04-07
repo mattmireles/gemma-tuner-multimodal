@@ -23,6 +23,13 @@ output_dir = output
 # prompt_column = prompt
 # max_seq_length = 2048
 
+# Image + text fine-tuning (optional). CSV with image paths; see README/Datasets.md.
+# modality = image
+# image_sub_mode = caption
+# image_path_column = image_path
+# image_token_budget = 280
+# For VQA: image_sub_mode = vqa and set prompt_column to the question column.
+
 [dataset_defaults]
 text_column = text_perfect
 max_label_length = 256
