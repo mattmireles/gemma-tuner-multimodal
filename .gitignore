@@ -161,6 +161,7 @@ distributed_hosts.json
 # Agent / editor bundles (omit from the published tree)
 .agents/skills/
 .claude/
+.cursor/
 .github/
 Claude.md
 
