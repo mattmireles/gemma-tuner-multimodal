@@ -196,6 +196,133 @@ max_duration = 30
     assert ds[0]["text"] == "hello bigquery"
 
 
+def test_text_modality_instruction_loads_local_csv(tmp_path):
+    data_dir = tmp_path / "data" / "datasets" / "text-mini"
+    os.makedirs(data_dir, exist_ok=True)
+    _write_csv(
+        str(data_dir / "train.csv"),
+        [
+            {"id": 1, "prompt": "Hi", "response": "Hello"},
+            {"id": 2, "prompt": "Bye", "response": "Goodbye"},
+        ],
+    )
+
+    cfg_path = tmp_path / "config.ini"
+    cfg_path.write_text("""
+[dataset:text-mini]
+source = text-mini-src
+text_column = response
+train_split = train
+validation_split = validation
+max_label_length = 64
+max_duration = 30
+""")
+
+    cwd = os.getcwd()
+    _du_mod._config = None
+    try:
+        os.chdir(str(tmp_path))
+        ds, source = load_dataset_split(
+            split="train",
+            dataset_config={
+                "name": "text-mini",
+                "text_column": "response",
+                "modality": "text",
+                "text_sub_mode": "instruction",
+                "prompt_column": "prompt",
+            },
+            streaming_enabled=False,
+        )
+    finally:
+        os.chdir(cwd)
+        _du_mod._config = None
+
+    assert source == "text-mini-src"
+    assert len(ds) == 2
+    assert ds[0]["prompt"] == "Hi"
+    assert ds[0]["response"] == "Hello"
+
+
+def test_text_modality_rejects_streaming(tmp_path):
+    data_dir = tmp_path / "data" / "datasets" / "toy"
+    os.makedirs(data_dir, exist_ok=True)
+    _write_csv(str(data_dir / "train.csv"), [{"id": 1, "prompt": "a", "response": "b"}])
+    cfg_path = tmp_path / "config.ini"
+    cfg_path.write_text("""
+[dataset:toy]
+source = toy_src
+text_column = response
+train_split = train
+validation_split = validation
+max_label_length = 64
+max_duration = 30
+""")
+
+    cwd = os.getcwd()
+    _du_mod._config = None
+    try:
+        os.chdir(str(tmp_path))
+        try:
+            load_dataset_split(
+                split="train",
+                dataset_config={
+                    "name": "toy",
+                    "text_column": "response",
+                    "modality": "text",
+                    "text_sub_mode": "instruction",
+                    "prompt_column": "prompt",
+                },
+                streaming_enabled=True,
+            )
+        except ValueError as e:
+            assert "non-streaming" in str(e).lower()
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        os.chdir(cwd)
+        _du_mod._config = None
+
+
+def test_text_modality_rejects_granary_adapter(tmp_path):
+    data_dir = tmp_path / "data" / "datasets" / "granary-en"
+    os.makedirs(data_dir, exist_ok=True)
+    _write_csv(str(data_dir / "train.csv"), [{"id": 1, "prompt": "a", "response": "b"}])
+    cfg_path = tmp_path / "config.ini"
+    cfg_path.write_text("""
+[dataset:granary-en]
+source_type = granary
+text_column = response
+train_split = train
+validation_split = validation
+max_label_length = 64
+max_duration = 30
+""")
+
+    cwd = os.getcwd()
+    _du_mod._config = None
+    try:
+        os.chdir(str(tmp_path))
+        try:
+            load_dataset_split(
+                split="train",
+                dataset_config={
+                    "name": "granary-en",
+                    "text_column": "response",
+                    "modality": "text",
+                    "text_sub_mode": "instruction",
+                    "prompt_column": "prompt",
+                },
+                streaming_enabled=False,
+            )
+        except ValueError as e:
+            assert "local csv" in str(e).lower() or "granary" in str(e).lower()
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        os.chdir(cwd)
+        _du_mod._config = None
+
+
 def test_patch_ids_are_normalized_consistently(tmp_path):
     data_dir = tmp_path / "data" / "datasets" / "toy"
     os.makedirs(data_dir, exist_ok=True)

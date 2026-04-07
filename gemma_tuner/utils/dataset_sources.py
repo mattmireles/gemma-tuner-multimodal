@@ -22,6 +22,9 @@ class DatasetLoadContext:
     split_path: str
     prepared_fallback_path: str
     cache_dir: str
+    modality: str
+    text_sub_mode: str
+    prompt_column: str | None
 
 
 class DatasetSourceAdapter(Protocol):

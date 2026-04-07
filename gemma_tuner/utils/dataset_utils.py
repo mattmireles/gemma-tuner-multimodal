@@ -96,6 +96,20 @@ from gemma_tuner.utils.dataset_sources import DatasetLoadContext, resolve_datase
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_text_modality_supported(context: DatasetLoadContext, adapter, streaming_enabled: bool) -> None:
+    """Text-only fine-tuning (v1) is limited to non-streaming local CSV loads."""
+    if context.modality != "text":
+        return
+    if streaming_enabled:
+        raise ValueError("modality=text requires non-streaming dataset loading in v1.")
+    if adapter.name != "local-csv":
+        raise ValueError(
+            "modality=text is only supported for local CSV datasets in v1; "
+            f"got adapter {adapter.name!r} (source_type={context.source_type!r}). "
+            "Use a local [dataset:…] section with a CSV source, not Granary/BigQuery/GCS streaming."
+        )
+
 # Anchored config.ini path — resolves relative to the project root regardless of cwd.
 _CONFIG_INI = Path(__file__).resolve().parent.parent.parent / "config.ini"
 
@@ -241,6 +255,7 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
         streaming_enabled=streaming_enabled,
         config=_get_config(),
     )
+    _ensure_text_modality_supported(context, adapter, streaming_enabled)
     source = adapter.patch_source(context)
 
     # Debug information for troubleshooting data loading issues
@@ -272,6 +287,12 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
     configured_text_col = dataset_config.get("text_column")
     if configured_text_col:
         required_columns.add(configured_text_col)
+    if context.modality == "text" and context.text_sub_mode == "instruction":
+        if not context.prompt_column:
+            raise ValueError(
+                "modality=text with text_sub_mode=instruction requires prompt_column in dataset_config (profile)."
+            )
+        required_columns.add(context.prompt_column)
 
     def _validate_columns(columns: Iterable[str]):
         missing = [c for c in required_columns if c not in columns]
@@ -392,6 +413,14 @@ def _resolve_load_context(split, dataset_config, max_samples, patches_dir, strea
         )
 
     dataset_dir = os.path.join("data", "datasets", dataset_name)
+    modality = (dataset_config.get("modality") or "audio").strip().lower()
+    text_sub_mode = (dataset_config.get("text_sub_mode") or "instruction").strip().lower()
+    _pc = dataset_config.get("prompt_column")
+    if _pc is None or (isinstance(_pc, str) and not str(_pc).strip()):
+        prompt_column = None
+    else:
+        prompt_column = str(_pc).strip()
+
     context = DatasetLoadContext(
         dataset_name=dataset_name,
         dataset_config=dataset_config,
@@ -406,6 +435,9 @@ def _resolve_load_context(split, dataset_config, max_samples, patches_dir, strea
         split_path=os.path.join(dataset_dir, f"{split}.csv").replace("\\", "/"),
         prepared_fallback_path=os.path.join(dataset_dir, f"{dataset_name}_prepared.csv").replace("\\", "/"),
         cache_dir=os.path.join(dataset_dir, ".cache"),
+        modality=modality,
+        text_sub_mode=text_sub_mode,
+        prompt_column=prompt_column,
     )
     return context, resolve_dataset_source_adapter(context)
 
