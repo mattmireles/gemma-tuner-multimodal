@@ -22,13 +22,20 @@ class GemmaFamily(str, Enum):
 
 
 def detect_family(model_id: str) -> GemmaFamily:
-    """Return ``GEMMA_3N`` or ``GEMMA_4`` based on ``model_id`` (case-insensitive)."""
+    """Return ``GEMMA_3N`` or ``GEMMA_4`` based on ``model_id`` (case-insensitive).
+
+    Order matters: explicit ``gemma-3n`` / ``gemma-4`` (and class-name ``gemma4``) win before the
+    ``tiny-random`` stub heuristic so e.g. ``tiny-random-Gemma4ForCausalLM`` is Gemma 4, not 3n.
+    """
     mid = model_id.lower()
     if "gemma-3n" in mid:
         return GemmaFamily.GEMMA_3N
     if "gemma-4" in mid:
         return GemmaFamily.GEMMA_4
-    # Tiny HF stubs used in tests (e.g. fxmarty/tiny-random-GemmaForCausalLM) lack version tokens.
+    # Class-style ids (e.g. ...Gemma4ForCausalLM) use "gemma4" without a hyphen; not matched by "gemma-4".
+    if "gemma4" in mid and "gemma-3n" not in mid and "gemma3n" not in mid:
+        return GemmaFamily.GEMMA_4
+    # Tiny HF stubs (e.g. fxmarty/tiny-random-GemmaForCausalLM) lack version tokens in the id.
     if "tiny-random" in mid and "gemma" in mid:
         return GemmaFamily.GEMMA_3N
     raise ValueError(

@@ -32,8 +32,11 @@ def apply_clippable_linear_patch() -> None:
         return
 
     class PatchedGemma4ClippableLinear(nn.Linear):
-        def __init__(self, config, in_features: int, out_features: int) -> None:
-            super().__init__(in_features, out_features, bias=False)
+        # Signature matches transformers 5.5+ modeling_gemma4.Gemma4ClippableLinear
+        # (config, in_features, out_features); inner linear is always bias=False.
+        def __init__(self, config, in_features: int, out_features: int, **kwargs) -> None:
+            kwargs.pop("bias", None)
+            super().__init__(in_features, out_features, bias=False, **kwargs)
             self.use_clipped_linears = config.use_clipped_linears
             if self.use_clipped_linears:
                 self.register_buffer("input_min", torch.tensor(-float("inf")))
