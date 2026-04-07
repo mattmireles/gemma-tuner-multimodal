@@ -57,7 +57,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Any, List, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 if TYPE_CHECKING:
     from gemma_tuner.core.profile_config import ProfileConfig
@@ -67,7 +67,9 @@ from datasets import Dataset as HFDataset
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import Dataset
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
+    AutoModelForImageTextToText,
     AutoProcessor,
     AutoTokenizer,
     Trainer,
@@ -240,6 +242,100 @@ def _raise_if_lora_targets_use_peft_incompatible_linears(model: torch.nn.Module,
     )
 
 
+def _config_is_multimodal_gemma_like(config: Any) -> bool:
+    """True when the checkpoint is a multimodal Gemma (*ForConditionalGeneration*), not text-only CausalLM.
+
+    Used to pick ``AutoModelForImageTextToText`` / ``AutoModelForMultimodalLM`` over
+    ``AutoModelForCausalLM`` so audio/vision towers stay attached (see gemma4-guide.md).
+    """
+    arch = getattr(config, "architectures", None) or []
+    if isinstance(arch, str):
+        arch = [arch]
+    for name in arch:
+        if isinstance(name, str) and "ForConditionalGeneration" in name:
+            return True
+    mt = getattr(config, "model_type", None)
+    if mt in ("gemma3n", "gemma4"):
+        return True
+    return False
+
+
+def _load_base_model_for_gemma(
+    model_id: str,
+    *,
+    torch_dtype: torch.dtype,
+    attn_implementation: str,
+) -> Any:
+    """Load base weights using the Auto class that matches ``config.architectures``."""
+    try:
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    except Exception as e:
+        logger.warning(
+            "Could not load AutoConfig for %s (%s); using AutoModelForCausalLM.",
+            model_id,
+            e,
+        )
+        return AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch_dtype,
+            attn_implementation=attn_implementation,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+
+    if not _config_is_multimodal_gemma_like(config):
+        return AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch_dtype,
+            attn_implementation=attn_implementation,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+
+    multimodal_lm: Any = None
+    try:
+        from transformers import AutoModelForMultimodalLM
+
+        multimodal_lm = AutoModelForMultimodalLM
+    except ImportError:
+        pass
+
+    loaders: List[Any] = []
+    if multimodal_lm is not None:
+        loaders.append(multimodal_lm)
+    loaders.append(AutoModelForImageTextToText)
+
+    last_err: Optional[Exception] = None
+    for loader_cls in loaders:
+        try:
+            model = loader_cls.from_pretrained(
+                model_id,
+                torch_dtype=torch_dtype,
+                attn_implementation=attn_implementation,
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+            )
+            logger.info("Loaded multimodal base model %s via %s", model_id, loader_cls.__name__)
+            return model
+        except Exception as e:
+            last_err = e
+            logger.debug("Loader %s failed for %s: %s", loader_cls.__name__, model_id, e)
+
+    logger.warning(
+        "Multimodal AutoModel loaders failed for %s (%s); falling back to AutoModelForCausalLM — "
+        "encoder towers may be missing. Upgrade transformers or use a compatible revision.",
+        model_id,
+        last_err,
+    )
+    return AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch_dtype,
+        attn_implementation=attn_implementation,
+        low_cpu_mem_usage=True,
+        trust_remote_code=True,
+    )
+
+
 def main(profile_config: "ProfileConfig", output_dir: str):
     """Main Gemma 3n LoRA training entry.
 
@@ -339,11 +435,10 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     profile_config["dtype"] = "bfloat16" if torch_dtype == torch.bfloat16 else "float32"
 
     logger.info(f"Loading base model: {model_id}")
-    model = AutoModelForCausalLM.from_pretrained(
+    model = _load_base_model_for_gemma(
         model_id,
         torch_dtype=torch_dtype,
         attn_implementation=attn_impl,
-        low_cpu_mem_usage=True,
     )
 
     # LoRA configuration
