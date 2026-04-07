@@ -27,8 +27,14 @@ if TYPE_CHECKING:
 class OperationConstants:
     """Named constants for operation dispatch and configuration defaults."""
 
-    DEFAULT_CONFIG_PATH = "config.ini"  # Primary configuration file location
     TEMP_CONFIG_PREFIX = "wizard_config_"  # Prefix for wizard-generated temp configs
+
+
+# Relative paths tried in order (cwd, then repo root next to gemma_tuner/ for editable installs).
+DEFAULT_CONFIG_CANDIDATES = (
+    "config/config.ini",
+    "config.ini",
+)
 
 
 def _resolve_config_path(explicit_path: str | None = None) -> Path:
@@ -46,8 +52,8 @@ def _resolve_config_path(explicit_path: str | None = None) -> Path:
     Priority order (first match wins):
     1. explicit_path argument — from CLI --config flag
     2. GEMMA_TUNER_CONFIG environment variable — for installed/containerized use
-    3. config.ini relative to CWD — legacy behavior, works when run from project root
-    4. config.ini relative to the installed package root (3 levels up from this file)
+    3. config/config.ini or config.ini relative to CWD (legacy layout)
+    4. Same filenames relative to the repo / editable-install root (3 levels up from this file)
 
     Environment variable:
         GEMMA_TUNER_CONFIG: Absolute or relative path to config.ini.
@@ -83,24 +89,26 @@ def _resolve_config_path(explicit_path: str | None = None) -> Path:
         )
 
     # Priority 3: CWD fallback — legacy behavior for running from project root
-    cwd_path = Path(OperationConstants.DEFAULT_CONFIG_PATH)
-    if cwd_path.exists():
-        return cwd_path
+    for name in DEFAULT_CONFIG_CANDIDATES:
+        cwd_path = Path(name)
+        if cwd_path.exists():
+            return cwd_path
 
     # Priority 4: Source-tree / editable-install fallback.
     # This file lives at gemma_tuner/core/ops.py so parent.parent.parent == project root.
     # NOTE: This only works for editable installs (`pip install -e .`) or running directly
     # from the source tree. For non-editable pip installs, this resolves to site-packages/
-    # and will not find config.ini — the GEMMA_TUNER_CONFIG env var (Priority 2) is the
+    # and will not find config — the GEMMA_TUNER_CONFIG env var (Priority 2) is the
     # correct solution for installed packages.
     pkg_root = Path(__file__).resolve().parent.parent.parent
-    pkg_path = pkg_root / OperationConstants.DEFAULT_CONFIG_PATH
-    if pkg_path.exists():
-        return pkg_path
+    for name in DEFAULT_CONFIG_CANDIDATES:
+        pkg_path = pkg_root / name
+        if pkg_path.exists():
+            return pkg_path
 
     raise FileNotFoundError(
         "config.ini not found. Options to fix this:\n"
-        "  1. Run from the project root directory (where config.ini lives)\n"
+        "  1. Run from the project root (copy config/config.ini.example to config/config.ini)\n"
         "  2. Set the GEMMA_TUNER_CONFIG environment variable:\n"
         "       export GEMMA_TUNER_CONFIG=/path/to/your/config.ini\n"
         "  3. Pass --config /path/to/config.ini explicitly"

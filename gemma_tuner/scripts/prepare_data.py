@@ -343,7 +343,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
 
     Example:
         # Prepare a dataset named 'librispeech_clean' using default config
-        prepare_data('librispeech_clean', 'config.ini')
+        prepare_data('librispeech_clean', 'config/config.ini')
 
         # Output files created:
         # - data/datasets/librispeech_clean/librispeech_clean_prepared.csv
@@ -643,7 +643,9 @@ Examples:
         "dataset", help="Virtual dataset name defined in config.ini (e.g., librispeech_clean, custom_dataset)."
     )
     parser.add_argument(
-        "--config", default="config.ini", help="Configuration file path containing dataset settings and parameters."
+        "--config",
+        default="config/config.ini",
+        help="Configuration file path containing dataset settings and parameters.",
     )
     parser.add_argument(
         "--no-download",

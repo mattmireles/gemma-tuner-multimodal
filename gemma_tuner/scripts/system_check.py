@@ -390,13 +390,13 @@ def get_backend_version():
 
 
 def check_dependency_versions():
-    """Checks if installed packages match requirements.txt versions."""
+    """Checks if installed packages match requirements/requirements.txt versions."""
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as installed_version
     from pathlib import Path
 
     mismatches = []
-    requirements_path = Path(__file__).parent.parent.parent / "requirements.txt"
+    requirements_path = Path(__file__).parent.parent.parent / "requirements" / "requirements.txt"
 
     if not requirements_path.exists():
         return mismatches
@@ -524,12 +524,12 @@ def main():
     print("\n" + "=" * 40, "Dependency Version Check", "=" * 40)
     mismatches = check_dependency_versions()
     if mismatches:
-        print("  ⚠️  WARNING: The following packages don't match requirements.txt:")
+        print("  ⚠️  WARNING: The following packages don't match requirements/requirements.txt:")
         for package, required, installed in mismatches:
             print(f"    • {package}: required {required}, installed {installed}")
-        print("\n  To fix: pip install -r requirements.txt")
+        print("\n  To fix: pip install -r requirements/requirements.txt")
     else:
-        print("  ✅ All dependencies match requirements.txt")
+        print("  ✅ All dependencies match requirements/requirements.txt")
 
     print("\n" + "=" * 40, "Recommendations", "=" * 40)
     if device_type == "mps":

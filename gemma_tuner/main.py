@@ -21,7 +21,7 @@ def main():
         "Use the modern Typer CLI instead:\n"
         "  - gemma-macos-tuner <command>\n"
         "  - or python -m gemma_tuner.cli_typer <command>\n"
-        "See TROUBLESHOOTING.md if you need help migrating.",
+        "See docs/TROUBLESHOOTING.md if you need help migrating.",
         file=sys.stderr,
     )
 

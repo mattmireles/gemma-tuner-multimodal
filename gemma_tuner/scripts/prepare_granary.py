@@ -242,7 +242,7 @@ def resolve_granary_audio_path(relative_path: str, source: str, audio_sources: D
     return None
 
 
-def prepare_granary(profile_name: str) -> str:
+def prepare_granary(profile_name: str, config_path: str | None = None) -> str:
     """
     Downloads Granary metadata, validates against local audio files, and creates unified manifest.
 
@@ -276,6 +276,7 @@ def prepare_granary(profile_name: str) -> str:
 
     Args:
         profile_name (str): Dataset profile name from config.ini (e.g., "granary-en")
+        config_path (str | None): Path to INI file, or None for the same resolution as the CLI
 
     Returns:
         str: Absolute path to generated manifest CSV file
@@ -297,8 +298,9 @@ def prepare_granary(profile_name: str) -> str:
     # Step 1: Load and validate configuration
     logger.info("📋 Loading configuration...")
     config = configparser.ConfigParser()
-    _config_ini = Path(__file__).resolve().parent.parent.parent / "config.ini"
-    config.read(_config_ini)
+    from gemma_tuner.core.ops import _resolve_config_path
+
+    config.read(_resolve_config_path(config_path))
 
     try:
         profile_config = load_profile_config(config, profile_name)

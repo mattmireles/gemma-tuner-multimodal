@@ -9,7 +9,7 @@ Functions:
 
 Called by:
 - wizard/__init__.py re-exports wizard_main for backward-compatible imports.
-- wizard.py (project-root shim) for ``python wizard.py`` invocations.
+- ``entrypoints/wizard.py`` shim for ``python entrypoints/wizard.py`` invocations.
 """
 
 import configparser
@@ -210,7 +210,7 @@ def execute_training(profile_config: Dict[str, Any]):
             [
                 sys.executable,
                 "-m",
-                "main",  # Module invocation for package compatibility
+                "gemma_tuner.main",  # Legacy Typer entry (repo root main.py was removed)
                 "finetune",  # Training operation
                 profile_name,  # Generated wizard profile
                 "--config",  # Custom configuration file
@@ -241,7 +241,7 @@ def execute_training(profile_config: Dict[str, Any]):
         console.print("\n[yellow]⚠️ Training interrupted by user[/yellow]")
         console.print("[yellow]Progress saved at latest checkpoint[/yellow]")
         resume = (
-            f"python -m main finetune {profile_name} --config {temp_config_path}  "
+            f"python -m gemma_tuner.main finetune {profile_name} --config {temp_config_path}  "
             f"(or: gemma-macos-tuner finetune {profile_name} --config {temp_config_path})"
         )
         console.print(f"[dim]Resume with: {resume}[/dim]")
@@ -282,7 +282,7 @@ def wizard_main():
     users from zero configuration to production-ready training.
 
     Called by:
-    - Direct script execution: python wizard.py (project-root shim)
+    - Direct script execution: python entrypoints/wizard.py (project-root shim)
     - wizard/__init__.py re-export for ``from gemma_tuner.wizard import wizard_main``
     - Package entry points and command-line tools
     - Interactive training workflows and development environments
@@ -364,7 +364,7 @@ def wizard_main():
     - Generates comprehensive training logs and metrics
 
     Example workflow:
-        $ python wizard.py
+        $ python entrypoints/wizard.py
 
         Welcome Screen: "Ready for training ✅"
         Method Selection: "🎨 LoRA Fine-Tune"
@@ -437,7 +437,7 @@ def wizard_main():
         else:
             # Graceful cancellation with guidance for future use
             console.print("\n[yellow]Training cancelled by user.[/yellow]")
-            console.print("[dim]Run the wizard again: python wizard.py  or  gemma-macos-tuner wizard[/dim]")
+            console.print("[dim]Run the wizard again: python entrypoints/wizard.py  or  gemma-macos-tuner wizard[/dim]")
 
     except KeyboardInterrupt:
         # Clean interruption handling with system state preservation

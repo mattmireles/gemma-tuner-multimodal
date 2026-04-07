@@ -56,7 +56,7 @@ dependencies = [
 [project.optional-dependencies]
 # PyTorch is intentionally excluded from core deps because the install URL varies
 # by platform (MPS vs CUDA vs CPU-only). Users must install torch manually first
-# (see requirements.txt for platform-specific instructions), then this extra can
+# (see requirements/requirements.txt for platform-specific instructions), then this extra can
 # be used to satisfy the dependency marker for tools that check extras.
 torch = ["torch"]
 # jiwer provides WER/CER metrics used by evaluate.py. Kept optional because it
@@ -121,3 +121,9 @@ ignore = ["F841", "E741", "E501", "E402"]
 # I001: import sort order is intentionally violated — bootstrap must run
 # before any torch imports (sets MPS env vars before PyTorch allocator init).
 "gemma_tuner/cli_typer.py" = ["E501", "I001", "E402"]
+
+[tool.pytest.ini_options]
+markers = [
+  "slow: marks tests as slow (downloads models or heavy operations)",
+  "integration: marks tests that download or run short training loops",
+]

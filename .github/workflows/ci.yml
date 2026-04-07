@@ -104,7 +104,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements-gemma4.txt
+          pip install -r requirements/requirements-gemma4.txt
       - name: Run fast tests (Gemma 4 env)
         env:
           HF_HUB_DISABLE_TELEMETRY: '1'
