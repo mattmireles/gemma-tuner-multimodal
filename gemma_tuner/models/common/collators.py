@@ -14,6 +14,20 @@ from gemma_tuner.models.gemma.constants import (
 logger = logging.getLogger(__name__)
 
 
+def _find_subsequence_ids(haystack: torch.Tensor, needle: List[int]) -> int:
+    """Index of first position in ``haystack`` where ``needle`` matches; ``-1`` if absent."""
+    if not needle:
+        return 0
+    h = haystack.tolist()
+    n, m = len(h), len(needle)
+    if m > n:
+        return -1
+    for start in range(0, n - m + 1):
+        if h[start : start + m] == needle:
+            return start
+    return -1
+
+
 def validate_bos_tokens_present(encoded: Dict[str, torch.Tensor], tokenizer) -> None:
     """Confirm each sequence contains ``bos_token_id`` somewhere (multimodal-safe).
 
@@ -53,7 +67,14 @@ def mask_gemma_prompt_tokens(
     tokenizer,
     warned_prompt_masking: List[bool],
 ) -> None:
-    """Mask prompt tokens in labels so loss is computed only on the assistant response."""
+    """Mask prompt tokens in labels so loss is computed only on the assistant response.
+
+    Prefer ``return_assistant_tokens_mask=True`` on ``apply_chat_template`` when the
+    tokenizer supports it (see :class:`DataCollatorGemmaText`). This fallback locates the
+    assistant span after the **last** ``<start_of_turn>`` by searching for the tokenized
+    ``model`` role header as a **subsequence** (not a fixed offset), so extra turn markers
+    inside the user turn do not break masking.
+    """
     start_of_turn_id = getattr(tokenizer, "start_of_turn_token_id", None)
     if start_of_turn_id is None:
         start_of_turn_id = tokenizer.convert_tokens_to_ids("<start_of_turn>")
@@ -69,24 +90,48 @@ def mask_gemma_prompt_tokens(
             warned_prompt_masking[0] = True
         return
 
-    model_header_ids = tokenizer.encode("model\n", add_special_tokens=False)
-    header_len = len(model_header_ids)
-
     ignore_id = GemmaTrainingConstants.IGNORE_TOKEN_ID
     for i in range(labels.size(0)):
         sot_positions = (input_ids[i] == start_of_turn_id).nonzero(as_tuple=True)[0]
-        if len(sot_positions) >= 2:
-            response_start = sot_positions[-1].item() + 1 + header_len
-            labels[i, :response_start] = ignore_id
-        elif len(sot_positions) == 1:
-            logger.warning(
-                "mask_gemma_prompt_tokens: sample %d has only one "
-                "<start_of_turn> token (position %d). Cannot reliably determine prompt/"
-                "response boundary — skipping prompt masking for this sample. "
-                "Check that your dataset produces proper two-turn chat templates.",
-                i,
-                sot_positions[0].item(),
-            )
+        if len(sot_positions) == 0:
+            if not warned_prompt_masking[0]:
+                logger.warning(
+                    "mask_gemma_prompt_tokens: at least one sample has no <start_of_turn> tokens; "
+                    "skipping prompt masking for those rows."
+                )
+                warned_prompt_masking[0] = True
+            continue
+
+        last_sot = int(sot_positions[-1].item())
+        after = input_ids[i, last_sot + 1 :]
+        response_start: Optional[int] = None
+        for header_text in ("model\n", "model"):
+            try:
+                needle = tokenizer.encode(header_text, add_special_tokens=False)
+            except Exception:
+                continue
+            if not needle:
+                continue
+            rel = _find_subsequence_ids(after, needle)
+            if rel >= 0:
+                response_start = last_sot + 1 + rel + len(needle)
+                break
+
+        if response_start is None:
+            if not warned_prompt_masking[0]:
+                logger.warning(
+                    "mask_gemma_prompt_tokens: could not find tokenized 'model' role header "
+                    "after last <start_of_turn> for at least one sample (e.g. index %d, last_sot=%d); "
+                    "skipping prompt masking for those rows.",
+                    i,
+                    last_sot,
+                )
+                warned_prompt_masking[0] = True
+            continue
+
+        if response_start > labels.size(1):
+            continue
+        labels[i, :response_start] = ignore_id
 
 
 def ensure_gemma_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
@@ -109,8 +154,9 @@ def ensure_gemma_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
 class DataCollatorGemmaText:
     """Batch text-only examples for Gemma CausalLM (no audio forward).
 
-    Instruction mode: user (prompt) + assistant (response) via ``apply_chat_template``,
-    then prompt masking via :func:`mask_gemma_prompt_tokens`. Padding positions are
+    Instruction mode: user (prompt) + assistant (response) via ``apply_chat_template``.
+    When supported, uses ``return_assistant_tokens_mask=True`` for label boundaries;
+    otherwise falls back to :func:`mask_gemma_prompt_tokens`. Padding positions are
     masked in ``labels`` using ``attention_mask == 0`` (not ``pad_token_id``), so EOS
     is not dropped when ``pad_token == eos_token``.
 
@@ -162,8 +208,7 @@ class DataCollatorGemmaText:
                 ]
             )
 
-        encoded = self.tokenizer.apply_chat_template(
-            messages_batch,
+        tmpl_kwargs = dict(
             tokenize=True,
             return_tensors="pt",
             padding=True,
@@ -172,11 +217,26 @@ class DataCollatorGemmaText:
             truncation=True,
             max_length=self.max_length,
         )
+        try:
+            encoded = self.tokenizer.apply_chat_template(
+                messages_batch,
+                return_assistant_tokens_mask=True,
+                **tmpl_kwargs,
+            )
+        except ValueError as e:
+            if "assistant" not in str(e).lower() and "return_assistant_tokens_mask" not in str(e):
+                raise
+            encoded = self.tokenizer.apply_chat_template(messages_batch, **tmpl_kwargs)
+
         ensure_gemma_mm_token_type_ids(encoded)
         input_ids = encoded["input_ids"]
         attention_mask = encoded["attention_mask"]
         labels = input_ids.clone()
-        mask_gemma_prompt_tokens(labels, input_ids, self.tokenizer, self._warned_prompt_masking)
+        am = encoded.get("assistant_masks")
+        if isinstance(am, torch.Tensor) and am.shape == input_ids.shape:
+            labels[am == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+        else:
+            mask_gemma_prompt_tokens(labels, input_ids, self.tokenizer, self._warned_prompt_masking)
         labels[attention_mask == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
         encoded["labels"] = labels
         return encoded
