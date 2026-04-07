@@ -63,7 +63,16 @@ def validate_bos_tokens_present(encoded: Dict[str, torch.Tensor], tokenizer) -> 
 
 
 def _control_token_subsequence_ids(tokenizer, control_token: str) -> List[int]:
-    """Token ids for ``control_token`` (e.g. ``<start_of_turn>`` or ``<|turn|>model``)."""
+    """Token ids for the turn-boundary marker (e.g. ``<start_of_turn>`` or ``<|turn|>``).
+
+    Gemma 4 uses ``<|turn|>`` per turn; the assistant span is found separately by searching for
+    the tokenized ``model`` role header after the **last** boundary (see :func:`mask_gemma_prompt_tokens`).
+    """
+    if control_token == "<start_of_turn>" and getattr(tokenizer, "start_of_turn_token_id", None) is not None:
+        return [int(tokenizer.start_of_turn_token_id)]
+    # Optional fast path if a future tokenizer exposes a dedicated id (encode still works otherwise).
+    if control_token == "<|turn|>" and getattr(tokenizer, "turn_token_id", None) is not None:
+        return [int(tokenizer.turn_token_id)]
     try:
         ids = tokenizer.encode(control_token, add_special_tokens=False)
         if ids:
@@ -75,8 +84,6 @@ def _control_token_subsequence_ids(tokenizer, control_token: str) -> List[int]:
         unk = getattr(tokenizer, "unk_token_id", None)
         if tid is not None and tid != unk:
             return [tid]
-    if control_token == "<start_of_turn>" and getattr(tokenizer, "start_of_turn_token_id", None) is not None:
-        return [int(tokenizer.start_of_turn_token_id)]
     return []
 
 
