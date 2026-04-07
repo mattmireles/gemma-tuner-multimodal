@@ -297,7 +297,9 @@ def decode_and_score(
     label_str = [str(l) for l in references]
 
     if normalizer is None:
-        # Late import to avoid heavy deps at import time
+        # Late import to avoid heavy deps at import time. Hugging Face exposes
+        # EnglishTextNormalizer under `transformers.models.whisper.*` for historical
+        # packaging reasons; it is a generic English text normalizer for WER-style metrics.
         from transformers.models.whisper.english_normalizer import EnglishTextNormalizer  # type: ignore
 
         normalizer = EnglishTextNormalizer()

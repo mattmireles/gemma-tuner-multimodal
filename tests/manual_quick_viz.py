@@ -7,7 +7,7 @@ import torch
 
 from gemma_tuner.visualizer import TrainingVisualizer, start_visualization_server
 
-print("🎆 Testing Whisper Training Visualizer")
+print("🎆 Testing Gemma Training Visualizer")
 print("=" * 50)
 
 # Start server without opening browser

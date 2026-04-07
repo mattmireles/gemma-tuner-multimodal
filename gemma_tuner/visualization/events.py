@@ -83,7 +83,7 @@ def _extract_token_probs(outputs: Optional[Any]) -> Optional[dict[str, list[floa
 def _extract_audio_features(batch: Optional[dict[str, Any]]) -> Optional[list[list[float]]]:
     if not batch:
         return None
-    # Gemma 3n batches use "audio_values"; older Whisper-style batches use "input_features".
+    # Gemma 3n batches use "audio_values"; some HF ASR pipelines use "input_features".
     # Try both keys so this function works for all model families.
     raw = batch.get("input_features")
     if raw is None:

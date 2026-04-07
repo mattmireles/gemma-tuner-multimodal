@@ -3,12 +3,12 @@
 MPS Migration Validation and Testing Suite
 
 This script provides comprehensive testing and validation of Metal Performance Shaders (MPS)
-migration for Whisper fine-tuning on Apple Silicon. It verifies device detection, model loading,
+migration for PyTorch training on Apple Silicon. It verifies device detection, model loading,
 basic operations, and system compatibility to ensure proper MPS setup before training.
 
 Key responsibilities:
 - MPS device detection and capability verification
-- Whisper model loading and device placement testing
+- Small Transformers model loading and device placement testing
 - GPU operation validation (convolution, attention, memory management)
 - System compatibility checking and diagnostic reporting
 - Performance baseline establishment for Apple Silicon
@@ -22,7 +22,7 @@ Called by:
 Calls to:
 - utils/device.py for device detection and management utilities
 - scripts/system_check.py for comprehensive system validation
-- transformers library for Whisper model loading and testing
+- transformers library for a tiny reference model load
 
 Test categories:
 
@@ -33,7 +33,7 @@ Device detection:
 - Fallback device behavior testing
 
 Model loading:
-- Small Whisper model loading (whisper-tiny)
+- Tiny Hugging Face test model (`hf-internal-testing/tiny-random-BertModel`)
 - Device placement verification
 - Memory usage monitoring and reporting
 - Mixed precision configuration testing
@@ -96,7 +96,7 @@ Output interpretation:
 
 This testing suite is essential for reliable Apple Silicon deployment,
 preventing common MPS issues and ensuring optimal performance for
-Whisper fine-tuning workflows.
+Gemma (and general PyTorch) training workflows.
 """
 
 import os
@@ -108,7 +108,7 @@ import torch
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from transformers import AutoModel
 
 from gemma_tuner.utils.device import get_device, get_device_info, get_memory_stats, verify_mps_setup
 
@@ -187,73 +187,27 @@ def test_device_detection():
 @pytest.mark.slow
 def test_model_loading():
     """
-    Validates Whisper model loading and device placement on MPS.
+    Validates Transformers model loading and device placement on the active device.
 
-    This function tests the critical model loading pipeline that will be used
-    in actual training and evaluation workflows. It uses a small model (whisper-tiny)
-    to minimize memory usage while validating the complete loading process.
-
-    Called by:
-    - main() after successful device detection
-    - Model loading troubleshooting workflows
-
-    Test procedure:
-    1. Load WhisperProcessor for audio preprocessing
-    2. Load WhisperForConditionalGeneration model
-    3. Configure mixed precision (float16) for MPS optimization
-    4. Transfer model to MPS device
-    5. Verify successful device placement
-    6. Monitor memory usage during loading
+    Uses Hugging Face's tiny random BERT fixture to minimize download size and memory
+    while exercising the same load → `.to(device)` path real training uses.
 
     Model configuration:
-    - Model: openai/whisper-tiny (smallest available model)
+    - Model: hf-internal-testing/tiny-random-BertModel
     - Precision: float16 for MPS/CUDA, float32 for CPU
-    - Attention: SDPA (Scaled Dot Product Attention) implementation
     - Memory optimization: low_cpu_mem_usage=True
-
-    MPS-specific considerations:
-    - Float16 precision validation on Apple Silicon
-    - Unified memory architecture compatibility
-    - Model size impact on system memory pressure
-    - Device placement verification
-
-    Memory monitoring:
-    - Tracks memory allocation during model loading
-    - Reports peak memory usage
-    - Validates memory statistics accessibility
-    - Identifies potential memory pressure issues
-
-    Success criteria:
-    - Model loads without errors or warnings
-    - Device placement confirmed as MPS
-    - Memory statistics reported successfully
-    - No system memory pressure indicators
-
-    Failure scenarios:
-    - Model loading fails with MPS-specific errors
-    - Device placement unsuccessful (remains on CPU)
-    - Memory allocation exceeds available unified memory
-    - Float16 precision not supported on target hardware
-
-    Error handling:
-    - Exceptions propagate to pytest so failures are visible
-    - Assertions verify device placement and memory stats
     """
     device = get_device()
 
-    model_name = "openai/whisper-tiny"
+    model_name = "hf-internal-testing/tiny-random-BertModel"
 
-    processor = WhisperProcessor.from_pretrained(model_name)
-    assert processor is not None, "WhisperProcessor.from_pretrained returned None"
-
-    model = WhisperForConditionalGeneration.from_pretrained(
+    model = AutoModel.from_pretrained(
         model_name,
-        torch_dtype=torch.float16 if device.type in ["cuda", "mps"] else torch.float32,
-        attn_implementation="sdpa",
+        torch_dtype=torch.float16 if device.type in ("cuda", "mps") else torch.float32,
         low_cpu_mem_usage=True,
     ).to(device)
 
-    assert model is not None, "WhisperForConditionalGeneration.from_pretrained returned None"
+    assert model is not None, "AutoModel.from_pretrained returned None"
 
     # Verify model is on the expected device
     first_param = next(model.parameters())
@@ -268,11 +222,10 @@ def test_model_loading():
 @pytest.mark.slow
 def test_inference():
     """
-    Validates core GPU operations essential for Whisper model inference.
+    Validates core GPU tensor operations used in audio and transformer workloads.
 
-    This function tests fundamental tensor operations that are used throughout
-    Whisper model inference, ensuring that MPS can handle the computational
-    patterns required for speech recognition without numerical or operational issues.
+    Exercises convolution- and attention-shaped ops on MPS without pulling in a
+    full multimodal Gemma checkpoint (those are covered elsewhere).
 
     Called by:
     - main() after successful model loading
@@ -281,7 +234,7 @@ def test_inference():
     Test operations:
 
     1. Convolution operation simulation:
-       - Simulates mel-spectrogram feature extraction
+       - Simulates mel-style feature extraction (1D conv over time)
        - Tests 1D convolution with realistic tensor dimensions
        - Validates MPS convolution kernel compatibility
 
@@ -293,7 +246,7 @@ def test_inference():
 
     Tensor dimensions:
     - Batch size: 2 (multi-sample processing)
-    - Feature size: 80 (Whisper mel-spectrogram features)
+    - Feature size: 80 (typical log-mel width)
     - Sequence length: 3000 (30 seconds at 100Hz)
     - Hidden size: 64 (attention dimension)
 
@@ -327,7 +280,7 @@ def test_inference():
     - Tensor shape incompatibilities with MPS kernels
 
     This test validates that the core computational patterns used in
-    Whisper inference will work reliably on the target MPS device.
+    transformer-style inference will work reliably on the target MPS device.
     """
     device = get_device()
 
@@ -396,7 +349,7 @@ def test_system_check():
     - Provides context for system check failures
 
     This test ensures that the entire system is properly configured
-    for Whisper fine-tuning, not just the MPS components.
+    for Gemma training workflows, not just the MPS components.
     """
     from gemma_tuner.scripts.system_check import main as system_check_main
 
@@ -411,7 +364,7 @@ def main():
 
     This function coordinates all validation tests in logical order,
     providing comprehensive verification of MPS setup and compatibility
-    for Whisper fine-tuning workflows.
+    for Gemma / PyTorch training workflows.
 
     Called by:
     - Direct script execution for MPS validation
@@ -450,7 +403,7 @@ def main():
     - Performance optimization suggestions
 
     This function serves as the complete validation entry point,
-    ensuring system readiness for production Whisper fine-tuning.
+    ensuring system readiness for production training on the active device.
     """
     print("\nMPS Migration Test Suite")
     print("=" * 60)

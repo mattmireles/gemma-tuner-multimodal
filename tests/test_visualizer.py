@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for the Whisper Training Visualizer
+Test script for the Gemma Training Visualizer
 
 This script simulates training data to test the visualization system
 without actually running a full training session.
@@ -18,7 +18,7 @@ from gemma_tuner.visualizer import TrainingVisualizer, start_visualization_serve
 def simulate_training():
     """Simulate a training run with fake data for testing the visualizer."""
 
-    print("🎆 Starting Whisper Training Visualizer Test")
+    print("🎆 Starting Gemma Training Visualizer Test")
     print("=" * 50)
 
     # Create a fake model structure for testing

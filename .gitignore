@@ -158,8 +158,11 @@ credentials.ini
 distributed_hosts.json
 /temp_configs/
 
-# Claude Code local settings — machine-specific paths, never commit
-.claude/settings.local.json
+# Agent / editor bundles (omit from the published tree)
+.agents/skills/
+.claude/
+.github/
+Claude.md
 
 # User-specific runtime config — may contain GCP project IDs written by the wizard.
 # Commit config.ini.example instead; copy it to config.ini to get started.

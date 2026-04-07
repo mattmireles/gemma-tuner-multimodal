@@ -618,7 +618,7 @@ Configuration Requirements:
   audio_source_ytc = /path/to/downloaded/ytc
   audio_source_librilight = /path/to/downloaded/librilight
 
-For more information, see: README/specifications/Datasets.md
+For more information, see: README/Datasets.md
 """,
     )
     parser.add_argument("--profile", required=True, help="Dataset profile name from config.ini (e.g., granary-en)")

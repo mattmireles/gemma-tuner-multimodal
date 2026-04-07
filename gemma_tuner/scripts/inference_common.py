@@ -128,7 +128,7 @@ class DataTrainingArguments:
     return_timestamps: bool = field(
         default=False,
         metadata={
-            "help": "Whether to return the timestamps with the text. This enables the `FlaxWhisperTimestampsLogitsProcessor`."
+            "help": "Whether to return word-level timestamps with the text (Transformers logits processor path)."
         },
     )
     log_predictions: bool = field(

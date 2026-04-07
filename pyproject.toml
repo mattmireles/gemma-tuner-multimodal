@@ -8,6 +8,7 @@ version = "0.3.0"
 description = "Gemma fine-tuning tools with Apple Silicon (MPS) support"
 readme = "README.md"
 authors = [{ name = "Gemma macOS Tuner Maintainers" }]
+license = { text = "MIT" }
 requires-python = ">=3.10"
 keywords = ["gemma", "multimodal", "fine-tuning", "pytorch", "apple silicon", "mps"]
 classifiers = [

@@ -1,5 +1,5 @@
 /**
- * Whisper Training Visualizer - The Magic Happens Here
+ * Gemma Training Visualizer - The Magic Happens Here
  * 
  * This is where we turn boring training data into a mesmerizing light show!
  * Real-time 3D neural networks, flowing gradients, and particle explosions.
@@ -53,7 +53,7 @@ let oscillator = null;
  * Initialize everything when page loads
  */
 window.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Initializing Whisper Training Visualizer...');
+    console.log('🚀 Initializing Gemma Training Visualizer...');
     
     initSocket();
     initBackgroundParticles();
@@ -893,4 +893,4 @@ function animate() {
     }
 }
 
-console.log('✨ Whisper Training Visualizer loaded and ready!');
+console.log('✨ Gemma Training Visualizer loaded and ready!');

@@ -1,6 +1,6 @@
-"""Whisper Fine-Tuner (macOS) - Package initializer.
+"""Gemma macOS Tuner — top-level package marker.
 
-This top-level package exposes no runtime side effects and exists to:
+This package exposes no runtime side effects and exists to:
 - Provide a clear namespace for tools and scripts
 - Signal to IDEs and type checkers this is a Python package
 
