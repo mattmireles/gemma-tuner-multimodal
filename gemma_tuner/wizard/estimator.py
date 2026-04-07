@@ -91,7 +91,12 @@ def configure_method_specifics(
     return config
 
 
-def estimate_training_time(method: Dict[str, Any], model: str, dataset: Dict[str, Any]) -> Dict[str, Any]:
+def estimate_training_time(
+    method: Dict[str, Any],
+    model: str,
+    dataset: Dict[str, Any],
+    finetuning: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """Estimate training time and resource usage"""
 
     device_info = get_wizard_device_info()
@@ -118,6 +123,12 @@ def estimate_training_time(method: Dict[str, Any], model: str, dataset: Dict[str
     base_memory = model_specs["memory_gb"]
     method_memory_multiplier = method["memory_multiplier"]
     estimated_memory = base_memory * method_memory_multiplier
+
+    ft = finetuning or {}
+    if str(ft.get("modality", "audio")).lower() == "text":
+        # Text-only batches skip audio feature extraction; rough heuristics vs speech path.
+        estimated_hours *= 0.5
+        estimated_memory *= 0.88
 
     return {
         "hours": estimated_hours,

@@ -327,6 +327,17 @@ def generate_profile_config(
         if k in method_config:
             profile_config[k] = method_config[k]
 
+    # Modality (audio default) and text-only column overrides from wizard
+    modality = str(method_config.get("modality", "audio")).strip().lower()
+    profile_config["modality"] = modality
+    if modality == "text":
+        profile_config["text_sub_mode"] = str(method_config.get("text_sub_mode", "instruction")).strip().lower()
+        if method_config.get("text_column"):
+            profile_config["text_column"] = method_config["text_column"]
+        pc = method_config.get("prompt_column")
+        if pc:
+            profile_config["prompt_column"] = pc
+
     # Add visualization flag if enabled
     if method_config.get("visualize", False):
         profile_config["visualize"] = True
