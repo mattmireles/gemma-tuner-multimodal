@@ -35,7 +35,7 @@ def test_family_capabilities_keys():
     c3 = family_capabilities(GemmaFamily.GEMMA_3N)
     assert c3["control_token"] == "<start_of_turn>"
     assert c3["needs_clippable_patch"] is False
-    assert c3["needs_mm_token_type_ids_injection"] is False
+    assert c3["needs_mm_token_type_ids_injection"] is True
     c4 = family_capabilities(GemmaFamily.GEMMA_4)
     assert c4["control_token"] == "<|turn|>"
     assert c4["needs_clippable_patch"] is True

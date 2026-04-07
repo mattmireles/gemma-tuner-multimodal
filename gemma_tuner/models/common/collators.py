@@ -175,8 +175,9 @@ def mask_gemma_prompt_tokens(
 def inject_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
     """Inject ``token_type_ids`` and ``mm_token_type_ids`` when the processor omitted them.
 
-    Gemma 4 multimodal forwards may error or misroute modality tokens without these keys.
-    When missing, add tensors of zeros shaped like ``input_ids``. See
+    Applies to both Gemma 3n and Gemma 4 when :func:`~gemma_tuner.models.gemma.family.family_capabilities`
+    sets ``needs_mm_token_type_ids_injection`` (multimodal forwards may omit these keys on some
+    transformers versions). When missing, add tensors of zeros shaped like ``input_ids``. See
     https://github.com/huggingface/transformers/issues/45200 and
     ``README/guides/apple-silicon/gemma4-guide.md``.
     """

@@ -50,7 +50,9 @@ def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
         return {
             "control_token": "<start_of_turn>",
             "needs_clippable_patch": False,
-            "needs_mm_token_type_ids_injection": False,
+            # Multimodal Gemma paths can omit these keys on some transformers versions; zeros match
+            # input_ids shape (see transformers#45200). Same injection as Gemma 4 — harmless when unused.
+            "needs_mm_token_type_ids_injection": True,
             "min_transformers_version": MIN_TRANSFORMERS_GEMMA3N,
         }
     return {

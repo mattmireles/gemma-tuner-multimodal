@@ -67,7 +67,9 @@ def test_collator_produces_labels_and_ids():
     out = collator(batch)
     assert "input_ids" in out and "attention_mask" in out and "labels" in out
     assert out["labels"].shape == out["input_ids"].shape
-    assert "token_type_ids" not in out and "mm_token_type_ids" not in out
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
     # Ensure PAD becomes IGNORE id where applicable
     mask_zeros = out["attention_mask"] == 0
     assert mask_zeros.any(), "Test expects some zero entries in attention_mask"

@@ -426,6 +426,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     model_id = profile_config.get("base_model", GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID)
     attn_impl = profile_config.get("attn_implementation", "eager")
 
+    # Wizard may have called gate_gemma_model already; repeating here is cheap and keeps CLI-only runs safe.
     family = detect_family(model_id)
     assert_family_supported(family)
     assert_entrypoint_support("finetune", family)

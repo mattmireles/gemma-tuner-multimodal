@@ -32,7 +32,12 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from gemma_tuner.models.gemma.family import gate_gemma_model
+from gemma_tuner.models.gemma.family import (
+    MIN_TRANSFORMERS_GEMMA4,
+    GemmaFamily,
+    detect_family,
+    gate_gemma_model,
+)
 from gemma_tuner.wizard.base import (
     ModelSpecs,
     TrainingMethod,
@@ -239,8 +244,15 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
             tf_ver = Version(metadata.version("transformers"))
         except Exception:
             tf_ver = Version("0")
-        if display_name.startswith("gemma-4") and tf_ver < Version("5.5.0"):
-            choice_text += " (requires Gemma 4 install: pip install -r requirements-gemma4.txt)"
+        hf_id = str(specs.get("hf_id") or "")
+        try:
+            if (
+                detect_family(hf_id) == GemmaFamily.GEMMA_4
+                and tf_ver < Version(MIN_TRANSFORMERS_GEMMA4)
+            ):
+                choice_text += " (requires Gemma 4 install: pip install -r requirements-gemma4.txt)"
+        except ValueError:
+            pass
 
         # Default stack in this repo: Gemma 3n E2B instruct (see README)
         if display_name == "gemma-3n-e2b-it":
@@ -274,6 +286,7 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
         raise RuntimeError(
             f"Missing base_model in [{section}] in config.ini. Set base_model to the Hugging Face model id."
         )
+    # Fast-fail before training; finetune.main() runs the same gate again (no duplicate user prompts).
     gate_gemma_model(base_model_id, entrypoint="finetune")
 
     return selected_model, {}
