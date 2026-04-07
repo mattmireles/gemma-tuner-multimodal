@@ -433,8 +433,10 @@ class DataCollatorGemmaText:
     """Batch text-only examples for Gemma CausalLM (no audio forward).
 
     Instruction mode: user (prompt) + assistant (response) via ``apply_chat_template``.
-    When supported, uses ``return_assistant_tokens_mask=True`` for label boundaries;
-    otherwise falls back to :func:`mask_gemma_prompt_tokens`. Padding positions are
+    When supported, uses ``return_assistant_tokens_mask=True`` for label boundaries.
+    If ``assistant_masks`` is present but **all zeros** (common when the chat template
+    lacks the Jinja ``generation`` keyword), the collator ignores that mask and falls
+    back to :func:`mask_gemma_prompt_tokens`. Padding positions are
     masked in ``labels`` using ``attention_mask == 0`` (not ``pad_token_id``), so EOS
     is not dropped when ``pad_token == eos_token``.
 
@@ -464,6 +466,7 @@ class DataCollatorGemmaText:
         # Cache capability dict once; family_capabilities() returns a fresh dict each call.
         self._caps = family_capabilities(family)
         self._warned_prompt_masking: List[bool] = [False]
+        self._warned_degenerate_assistant_mask: bool = False
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         if self.sub_mode == "instruction":
@@ -516,9 +519,37 @@ class DataCollatorGemmaText:
         input_ids = encoded["input_ids"]
         attention_mask = encoded["attention_mask"]
         labels = input_ids.clone()
+        ignore_id = GemmaTrainingConstants.IGNORE_TOKEN_ID
         am = encoded.get("assistant_masks")
+        # Hugging Face can return assistant_masks with shape matching input_ids but all zeros when the
+        # chat template lacks `{% generation %}` (see tokenizer warning). Using `labels[am == 0]`
+        # would then mask every position. Per-row: use assistant_masks only when it marks at least
+        # one supervised token; otherwise fall back to mask_gemma_prompt_tokens.
         if isinstance(am, torch.Tensor) and am.shape == input_ids.shape:
-            labels[am == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+            degenerate_rows: List[int] = []
+            for i in range(input_ids.size(0)):
+                if int(am[i].sum().item()) > 0:
+                    labels[i][am[i] == 0] = ignore_id
+                else:
+                    degenerate_rows.append(i)
+            if degenerate_rows:
+                if not self._warned_degenerate_assistant_mask:
+                    logger.warning(
+                        "DataCollatorGemmaText: assistant_masks has no supervised tokens for %d/%d row(s); "
+                        "using mask_gemma_prompt_tokens fallback (often: chat template missing the Jinja "
+                        "`generation` keyword so HF cannot build assistant spans).",
+                        len(degenerate_rows),
+                        input_ids.size(0),
+                    )
+                    self._warned_degenerate_assistant_mask = True
+                for i in degenerate_rows:
+                    mask_gemma_prompt_tokens(
+                        labels[i : i + 1],
+                        input_ids[i : i + 1],
+                        self.tokenizer,
+                        self._warned_prompt_masking,
+                        control_token=self._caps["control_token"],
+                    )
         else:
             mask_gemma_prompt_tokens(
                 labels,
@@ -527,7 +558,7 @@ class DataCollatorGemmaText:
                 self._warned_prompt_masking,
                 control_token=self._caps["control_token"],
             )
-        labels[attention_mask == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+        labels[attention_mask == 0] = ignore_id
         encoded["labels"] = labels
         return encoded
 
