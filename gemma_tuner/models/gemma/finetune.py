@@ -57,7 +57,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Union
 
 if TYPE_CHECKING:
     from gemma_tuner.core.profile_config import ProfileConfig
@@ -67,9 +67,6 @@ from datasets import Dataset as HFDataset
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import Dataset
 from transformers import (
-    AutoConfig,
-    AutoModelForCausalLM,
-    AutoModelForImageTextToText,
     AutoProcessor,
     AutoTokenizer,
     Trainer,
@@ -87,17 +84,17 @@ from gemma_tuner.models.common.collators import (
 from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
+from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
     GemmaValidationConstants,
 )
 from gemma_tuner.models.gemma.family import (
-    GemmaFamily,
     assert_entrypoint_support,
     assert_family_supported,
     detect_family,
 )
-from gemma_tuner.utils.dataset_utils import load_dataset_split
+from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
 from gemma_tuner.utils.device import empty_cache, get_device
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
@@ -266,106 +263,6 @@ def _raise_if_lora_targets_use_peft_incompatible_linears(model: torch.nn.Module,
     )
 
 
-def _config_is_multimodal_gemma_like(config: Any) -> bool:
-    """True when the checkpoint is a multimodal Gemma (*ForConditionalGeneration*), not text-only CausalLM.
-
-    Used to pick ``AutoModelForImageTextToText`` / ``AutoModelForMultimodalLM`` over
-    ``AutoModelForCausalLM`` so audio/vision towers stay attached (see gemma4-guide.md).
-    """
-    arch = getattr(config, "architectures", None) or []
-    if isinstance(arch, str):
-        arch = [arch]
-    for name in arch:
-        if isinstance(name, str) and "ForConditionalGeneration" in name:
-            return True
-    mt = getattr(config, "model_type", None)
-    if mt in ("gemma3n", "gemma4"):
-        return True
-    return False
-
-
-def _load_base_model_for_gemma(
-    model_id: str,
-    *,
-    family: GemmaFamily,
-    torch_dtype: torch.dtype,
-    attn_implementation: str,
-) -> Any:
-    """Load base weights using the Auto class that matches ``config.architectures``."""
-    if family == GemmaFamily.GEMMA_4:
-        from gemma_tuner.models.gemma.gemma4_patches import apply_clippable_linear_patch
-
-        apply_clippable_linear_patch()
-
-    try:
-        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
-    except Exception as e:
-        logger.warning(
-            "Could not load AutoConfig for %s (%s); using AutoModelForCausalLM.",
-            model_id,
-            e,
-        )
-        return AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch_dtype,
-            attn_implementation=attn_implementation,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-        )
-
-    if not _config_is_multimodal_gemma_like(config):
-        return AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch_dtype,
-            attn_implementation=attn_implementation,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-        )
-
-    multimodal_lm: Any = None
-    try:
-        from transformers import AutoModelForMultimodalLM
-
-        multimodal_lm = AutoModelForMultimodalLM
-    except ImportError:
-        pass
-
-    loaders: List[Any] = []
-    if multimodal_lm is not None:
-        loaders.append(multimodal_lm)
-    loaders.append(AutoModelForImageTextToText)
-
-    last_err: Optional[Exception] = None
-    for loader_cls in loaders:
-        try:
-            model = loader_cls.from_pretrained(
-                model_id,
-                torch_dtype=torch_dtype,
-                attn_implementation=attn_implementation,
-                low_cpu_mem_usage=True,
-                trust_remote_code=True,
-            )
-            logger.info("Loaded multimodal base model %s via %s", model_id, loader_cls.__name__)
-            return model
-        except Exception as e:
-            last_err = e
-            logger.debug("Loader %s failed for %s: %s", loader_cls.__name__, model_id, e)
-
-    logger.warning(
-        "Multimodal AutoModel loaders failed for %s (%s); falling back to AutoModelForCausalLM — "
-        "encoder towers may be missing. Upgrade transformers or use a compatible revision.",
-        model_id,
-        last_err,
-    )
-    return AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=torch_dtype,
-        attn_implementation=attn_implementation,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True,
-    )
-
-
 def main(profile_config: "ProfileConfig", output_dir: str):
     """Main Gemma 3n LoRA training entry.
 
@@ -434,7 +331,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
 
     image_path_column_resolved = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
     if modality == "image":
-        dataset_dir = os.path.join("data", "datasets", dataset_name)
+        dataset_dir = resolve_data_datasets_dir(dataset_name)
 
         def _resolve_image_paths(batch: dict) -> dict:
             col = image_path_column_resolved
@@ -499,7 +396,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     profile_config["dtype"] = "bfloat16" if torch_dtype == torch.bfloat16 else "float32"
 
     logger.info(f"Loading base model: {model_id}")
-    model = _load_base_model_for_gemma(
+    model = load_base_model_for_gemma(
         model_id,
         family=family,
         torch_dtype=torch_dtype,
