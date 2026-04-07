@@ -22,6 +22,7 @@ def test_detect_family_variants():
     assert detect_family("GOOGLE/GEMMA-3N-E4B-IT") == GemmaFamily.GEMMA_3N
     assert detect_family("google/gemma-4-E4B") == GemmaFamily.GEMMA_4
     assert detect_family("/models/gemma-4-E2B-it") == GemmaFamily.GEMMA_4
+    assert detect_family("fxmarty/tiny-random-GemmaForCausalLM") == GemmaFamily.GEMMA_3N
 
 
 def test_detect_family_unknown():

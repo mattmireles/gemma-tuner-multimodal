@@ -10,6 +10,7 @@ from gemma_tuner.models.gemma.constants import (
     GemmaValidationConstants,
     resolve_processor_sampling_rate,
 )
+from gemma_tuner.models.gemma.family import GemmaFamily, family_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -61,49 +62,79 @@ def validate_bos_tokens_present(encoded: Dict[str, torch.Tensor], tokenizer) -> 
         )
 
 
+def _control_token_subsequence_ids(tokenizer, control_token: str) -> List[int]:
+    """Token ids for ``control_token`` (e.g. ``<start_of_turn>`` or ``<|turn|>model``)."""
+    try:
+        ids = tokenizer.encode(control_token, add_special_tokens=False)
+        if ids:
+            return ids
+    except Exception:
+        pass
+    if hasattr(tokenizer, "convert_tokens_to_ids"):
+        tid = tokenizer.convert_tokens_to_ids(control_token)
+        unk = getattr(tokenizer, "unk_token_id", None)
+        if tid is not None and tid != unk:
+            return [tid]
+    if control_token == "<start_of_turn>" and getattr(tokenizer, "start_of_turn_token_id", None) is not None:
+        return [int(tokenizer.start_of_turn_token_id)]
+    return []
+
+
 def mask_gemma_prompt_tokens(
     labels: torch.Tensor,
     input_ids: torch.Tensor,
     tokenizer,
     warned_prompt_masking: List[bool],
+    *,
+    control_token: str,
 ) -> None:
     """Mask prompt tokens in labels so loss is computed only on the assistant response.
 
     Prefer ``return_assistant_tokens_mask=True`` on ``apply_chat_template`` when the
     tokenizer supports it (see :class:`DataCollatorGemmaText`). This fallback locates the
-    assistant span after the **last** ``<start_of_turn>`` by searching for the tokenized
-    ``model`` role header as a **subsequence** (not a fixed offset), so extra turn markers
-    inside the user turn do not break masking.
+    assistant span after the **last** control-token span (``control_token`` from
+    :func:`~gemma_tuner.models.gemma.family.family_capabilities`) by searching for the
+    tokenized ``model`` role header as a **subsequence** (not a fixed offset), so extra
+    turn markers inside the user turn do not break masking.
     """
-    start_of_turn_id = getattr(tokenizer, "start_of_turn_token_id", None)
-    if start_of_turn_id is None:
-        start_of_turn_id = tokenizer.convert_tokens_to_ids("<start_of_turn>")
-        if start_of_turn_id == getattr(tokenizer, "unk_token_id", None):
-            start_of_turn_id = None
-
-    if start_of_turn_id is None:
+    ctl_ids = _control_token_subsequence_ids(tokenizer, control_token)
+    if not ctl_ids:
         if not warned_prompt_masking[0]:
             logger.warning(
-                "mask_gemma_prompt_tokens: could not resolve <start_of_turn> token ID. "
-                "Prompt tokens will NOT be masked — this degrades fine-tuning quality."
+                "mask_gemma_prompt_tokens: could not resolve control token %r to ids. "
+                "Prompt tokens will NOT be masked — this degrades fine-tuning quality.",
+                control_token,
             )
             warned_prompt_masking[0] = True
         return
 
     ignore_id = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    ctl_len = len(ctl_ids)
     for i in range(labels.size(0)):
-        sot_positions = (input_ids[i] == start_of_turn_id).nonzero(as_tuple=True)[0]
+        row = input_ids[i]
+        if ctl_len == 1:
+            sot_positions = (row == ctl_ids[0]).nonzero(as_tuple=True)[0]
+        else:
+            h = row.tolist()
+            n, m = len(h), ctl_len
+            starts = [s for s in range(0, n - m + 1) if h[s : s + m] == ctl_ids]
+            if starts:
+                sot_positions = torch.tensor(starts, dtype=torch.long, device=row.device)
+            else:
+                sot_positions = row.new_zeros(0, dtype=torch.long)
+
         if len(sot_positions) == 0:
             if not warned_prompt_masking[0]:
                 logger.warning(
-                    "mask_gemma_prompt_tokens: at least one sample has no <start_of_turn> tokens; "
-                    "skipping prompt masking for those rows."
+                    "mask_gemma_prompt_tokens: at least one sample has no control-token span %r; "
+                    "skipping prompt masking for those rows.",
+                    control_token,
                 )
                 warned_prompt_masking[0] = True
             continue
 
-        last_sot = int(sot_positions[-1].item())
-        after = input_ids[i, last_sot + 1 :]
+        last_ctl_start = int(sot_positions[-1].item())
+        after = row[last_ctl_start + ctl_len :]
         response_start: Optional[int] = None
         for header_text in ("model\n", "model"):
             try:
@@ -114,17 +145,17 @@ def mask_gemma_prompt_tokens(
                 continue
             rel = _find_subsequence_ids(after, needle)
             if rel >= 0:
-                response_start = last_sot + 1 + rel + len(needle)
+                response_start = last_ctl_start + ctl_len + rel + len(needle)
                 break
 
         if response_start is None:
             if not warned_prompt_masking[0]:
                 logger.warning(
                     "mask_gemma_prompt_tokens: could not find tokenized 'model' role header "
-                    "after last <start_of_turn> for at least one sample (e.g. index %d, last_sot=%d); "
+                    "after last control span for at least one sample (e.g. index %d, last_ctl_start=%d); "
                     "skipping prompt masking for those rows.",
                     i,
-                    last_sot,
+                    last_ctl_start,
                 )
                 warned_prompt_masking[0] = True
             continue
@@ -134,12 +165,13 @@ def mask_gemma_prompt_tokens(
         labels[i, :response_start] = ignore_id
 
 
-def ensure_gemma_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
-    """Ensure ``token_type_ids`` and ``mm_token_type_ids`` exist for Gemma multimodal forward.
+def inject_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
+    """Inject ``token_type_ids`` and ``mm_token_type_ids`` when the processor omitted them.
 
-    Some processors omit these; Gemma 4 may error or misroute modality tokens without them.
-    When missing, inject zeros shaped like ``input_ids`` (see ``README/guides/apple-silicon/gemma4-guide.md``
-    and https://github.com/huggingface/transformers/issues/45200).
+    Gemma 4 multimodal forwards may error or misroute modality tokens without these keys.
+    When missing, add tensors of zeros shaped like ``input_ids``. See
+    https://github.com/huggingface/transformers/issues/45200 and
+    ``README/guides/apple-silicon/gemma4-guide.md``.
     """
     input_ids = encoded.get("input_ids")
     if input_ids is None:
@@ -149,6 +181,10 @@ def ensure_gemma_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
         encoded["token_type_ids"] = torch.zeros_like(ref)
     if "mm_token_type_ids" not in encoded or encoded.get("mm_token_type_ids") is None:
         encoded["mm_token_type_ids"] = torch.zeros_like(ref)
+
+
+# Backwards compatibility for older imports.
+ensure_gemma_mm_token_type_ids = inject_mm_token_type_ids
 
 
 class DataCollatorGemmaText:
@@ -167,6 +203,8 @@ class DataCollatorGemmaText:
         self,
         tokenizer,
         text_column: str,
+        *,
+        family: GemmaFamily,
         prompt_column: Optional[str] = None,
         max_length: int = 2048,
         sub_mode: str = "instruction",
@@ -180,6 +218,8 @@ class DataCollatorGemmaText:
         self.prompt_column = prompt_column
         self.max_length = max_length
         self.sub_mode = sub_mode
+        self._family = family
+        self._caps = family_capabilities(family)
         self._warned_prompt_masking: List[bool] = [False]
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
@@ -228,7 +268,8 @@ class DataCollatorGemmaText:
                 raise
             encoded = self.tokenizer.apply_chat_template(messages_batch, **tmpl_kwargs)
 
-        ensure_gemma_mm_token_type_ids(encoded)
+        if self._caps["needs_mm_token_type_ids_injection"]:
+            inject_mm_token_type_ids(encoded)
         input_ids = encoded["input_ids"]
         attention_mask = encoded["attention_mask"]
         labels = input_ids.clone()
@@ -236,7 +277,13 @@ class DataCollatorGemmaText:
         if isinstance(am, torch.Tensor) and am.shape == input_ids.shape:
             labels[am == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
         else:
-            mask_gemma_prompt_tokens(labels, input_ids, self.tokenizer, self._warned_prompt_masking)
+            mask_gemma_prompt_tokens(
+                labels,
+                input_ids,
+                self.tokenizer,
+                self._warned_prompt_masking,
+                control_token=self._caps["control_token"],
+            )
         labels[attention_mask == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
         encoded["labels"] = labels
         return encoded
@@ -258,7 +305,8 @@ class DataCollatorGemmaText:
             max_length=self.max_length,
             return_tensors="pt",
         )
-        ensure_gemma_mm_token_type_ids(encoded)
+        if self._caps["needs_mm_token_type_ids_injection"]:
+            inject_mm_token_type_ids(encoded)
         labels = encoded["input_ids"].clone()
         labels[encoded["attention_mask"] == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
         encoded["labels"] = labels
@@ -279,10 +327,19 @@ class DataCollatorGemmaAudio:
     of `audio_values`/`input_features` plus any multimodal masks).
     """
 
-    def __init__(self, processor, text_column: str, sampling_rate_hint: Optional[int] = None):
+    def __init__(
+        self,
+        processor,
+        text_column: str,
+        *,
+        family: GemmaFamily,
+        sampling_rate_hint: Optional[int] = None,
+    ):
         self.processor = processor
         self.text_column = text_column
         self.sampling_rate_hint = sampling_rate_hint
+        self._family = family
+        self._caps = family_capabilities(family)
         self._warned_prompt_masking: List[bool] = [False]
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
@@ -341,7 +398,8 @@ class DataCollatorGemmaAudio:
             sampling_rate=sampling_rate,
         )
 
-        ensure_gemma_mm_token_type_ids(encoded)
+        if self._caps["needs_mm_token_type_ids_injection"]:
+            inject_mm_token_type_ids(encoded)
 
         if hasattr(self.processor, "tokenizer"):
             # After apply_chat_template + processor(); template adds BOS — safe to validate here.
@@ -354,7 +412,11 @@ class DataCollatorGemmaAudio:
                 labels[labels == pad_id] = GemmaTrainingConstants.IGNORE_TOKEN_ID
 
             mask_gemma_prompt_tokens(
-                labels, encoded["input_ids"], self.processor.tokenizer, self._warned_prompt_masking
+                labels,
+                encoded["input_ids"],
+                self.processor.tokenizer,
+                self._warned_prompt_masking,
+                control_token=self._caps["control_token"],
             )
             encoded["labels"] = labels
 

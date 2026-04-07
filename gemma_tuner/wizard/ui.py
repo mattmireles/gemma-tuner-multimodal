@@ -21,15 +21,18 @@ Integrates with:
 - wizard.estimator: configure_method_specifics, estimate_training_time (called after UI steps)
 """
 
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import questionary
+from packaging.version import Version
 from rich.align import Align
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.wizard.base import (
     ModelSpecs,
     TrainingMethod,
@@ -232,8 +235,15 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
 
         choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
 
-        # Recommend the small Gemma 4 instruct checkpoint (best default for most Macs)
-        if display_name == "gemma-4-e2b-it":
+        try:
+            tf_ver = Version(metadata.version("transformers"))
+        except Exception:
+            tf_ver = Version("0")
+        if display_name.startswith("gemma-4") and tf_ver < Version("5.5.0"):
+            choice_text += " (requires Gemma 4 install: pip install -r requirements-gemma4.txt)"
+
+        # Default stack in this repo: Gemma 3n E2B instruct (see README)
+        if display_name == "gemma-3n-e2b-it":
             choice_text += " ⭐ Recommended"
 
         choices.append(
@@ -257,6 +267,14 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
     # Returning None signals cancellation to wizard_main.
     if selected_model is None:
         return None, {}
+
+    section = f"model:{selected_model}"
+    base_model_id = cfg.get(section, "base_model", fallback="").strip()
+    if not base_model_id:
+        raise RuntimeError(
+            f"Missing base_model in [{section}] in config.ini. Set base_model to the Hugging Face model id."
+        )
+    gate_gemma_model(base_model_id, entrypoint="finetune")
 
     return selected_model, {}
 

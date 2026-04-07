@@ -28,6 +28,9 @@ def detect_family(model_id: str) -> GemmaFamily:
         return GemmaFamily.GEMMA_3N
     if "gemma-4" in mid:
         return GemmaFamily.GEMMA_4
+    # Tiny HF stubs used in tests (e.g. fxmarty/tiny-random-GemmaForCausalLM) lack version tokens.
+    if "tiny-random" in mid and "gemma" in mid:
+        return GemmaFamily.GEMMA_3N
     raise ValueError(
         f"Unsupported Gemma model_id for family detection: {model_id!r}. "
         "Expected a Hugging Face id or local path containing 'gemma-3n' or 'gemma-4'."

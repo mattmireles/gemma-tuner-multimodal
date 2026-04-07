@@ -31,6 +31,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import get_device
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ def export_model_dir(model_path_or_profile: str) -> str:
 
         base_model_id = adapter_cfg["base_model_name_or_path"]
         logger.info("Loading base model: %s", base_model_id)
+        gate_gemma_model(base_model_id, entrypoint="export")
 
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_id,
@@ -102,6 +104,7 @@ def export_model_dir(model_path_or_profile: str) -> str:
     else:
         # --- Full model path or HuggingFace Hub id ---
         logger.info("Loading full model: %s", model_path_or_profile)
+        gate_gemma_model(str(model_path_or_profile), entrypoint="export")
         model = AutoModelForCausalLM.from_pretrained(
             model_path_or_profile,
             torch_dtype=torch_dtype,

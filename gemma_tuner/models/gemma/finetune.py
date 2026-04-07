@@ -86,6 +86,7 @@ from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
     GemmaValidationConstants,
 )
+from gemma_tuner.models.gemma.family import assert_entrypoint_support, assert_family_supported, detect_family
 from gemma_tuner.utils.dataset_utils import load_dataset_split
 from gemma_tuner.utils.device import empty_cache, get_device
 
@@ -414,6 +415,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     model_id = profile_config.get("base_model", GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID)
     attn_impl = profile_config.get("attn_implementation", "eager")
 
+    family = detect_family(model_id)
+    assert_family_supported(family)
+    assert_entrypoint_support("finetune", family)
+    logger.info("Gemma family: %s for model_id=%s", family.value, model_id)
+
     processor = None
     text_tokenizer = None
     if modality == "text":
@@ -566,12 +572,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         data_collator = DataCollatorGemmaText(
             tokenizer=text_tokenizer,
             text_column=text_column,
+            family=family,
             prompt_column=prompt_column,
             max_length=max_seq_length,
             sub_mode=text_sub_mode,
         )
     else:
-        data_collator = DataCollatorGemmaAudio(processor=processor, text_column=text_column, sampling_rate_hint=None)
+        data_collator = DataCollatorGemmaAudio(
+            processor=processor, text_column=text_column, family=family, sampling_rate_hint=None
+        )
 
     # WER metrics for speech runs only; text uses loss / optional perplexity in train_results.
     compute_metrics_fn = None

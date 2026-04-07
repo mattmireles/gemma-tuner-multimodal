@@ -131,6 +131,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
 from gemma_tuner.models.gemma.constants import AudioProcessingConstants, resolve_processor_sampling_rate
+from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import probe_bfloat16
 
 
@@ -224,6 +225,8 @@ def main(model_id: str = GemmaProfilerConstants.DEFAULT_MODEL_ID) -> None:
     - Provides baselines for real-time inference performance requirements
     """
     constants = GemmaProfilerConstants
+
+    gate_gemma_model(model_id, entrypoint="gemma_profiler")
 
     # Initialize system resource monitoring for peak memory tracking
     process_monitor = psutil.Process(os.getpid())

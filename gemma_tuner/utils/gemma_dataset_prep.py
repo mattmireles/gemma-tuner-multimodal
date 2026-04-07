@@ -16,6 +16,7 @@ from typing import Dict, List
 from transformers import AutoProcessor
 
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants, resolve_processor_sampling_rate
+from gemma_tuner.models.gemma.family import gate_gemma_model
 
 # Reuse shared audio I/O to support file system and GCS URIs.
 # Only catch ImportError (missing optional deps such as librosa/soundfile) so that
@@ -173,6 +174,7 @@ def validate_single_sample(audio_path: str, text: str, model_id: str) -> None:
     """
     constants = GemmaDatasetPrepConstants
 
+    gate_gemma_model(model_id, entrypoint="gemma_dataset_prep")
     processor = AutoProcessor.from_pretrained(model_id)
     messages = _build_messages(text)
 

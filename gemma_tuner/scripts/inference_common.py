@@ -41,6 +41,7 @@ from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
 from gemma_tuner.models.gemma.constants import AudioProcessingConstants
+from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.dataset_prep import (
     encode_labels,
     load_audio_local_or_gcs,
@@ -283,6 +284,7 @@ def load_model_and_processor(profile_config, device):
             - feature_extractor: processor.feature_extractor (convenience alias, may be None)
     """
     model_name_or_path = profile_config["model_name_or_path"]
+    gate_gemma_model(model_name_or_path, entrypoint="inference_common")
     processor = AutoProcessor.from_pretrained(model_name_or_path)
     tokenizer = processor.tokenizer
     feature_extractor = getattr(processor, "feature_extractor", None)

@@ -8,9 +8,10 @@ import torch
 from gemma_tuner.models.common.collators import (
     DataCollatorGemmaText,
     _find_subsequence_ids,
-    ensure_gemma_mm_token_type_ids,
+    inject_mm_token_type_ids,
 )
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+from gemma_tuner.models.gemma.family import GemmaFamily
 
 
 class _FakeInstructionTokenizer:
@@ -22,6 +23,8 @@ class _FakeInstructionTokenizer:
     start_of_turn_token_id = 7
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        if text == "<start_of_turn>":
+            return [7]
         if text == "model\n":
             return [20, 21]
         # First word of assistant response "Hello" -> single id
@@ -112,6 +115,26 @@ class _FakeCompletionTokenizer:
         return {"input_ids": input_ids, "attention_mask": attention_mask}
 
 
+def test_instruction_gemma4_injects_mm_token_type_ids():
+    tok = _FakeInstructionTokenizer()
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        family=GemmaFamily.GEMMA_4,
+        prompt_column="prompt",
+        max_length=128,
+        sub_mode="instruction",
+    )
+    out = collator(
+        [
+            {"prompt": "p1", "response": "Hello"},
+        ]
+    )
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+
+
 def test_find_subsequence_ids():
     h = torch.tensor([1, 2, 20, 21, 5])
     assert _find_subsequence_ids(h, [20, 21]) == 2
@@ -123,6 +146,7 @@ def test_instruction_submode_masks_prompt_and_padding():
     collator = DataCollatorGemmaText(
         tok,
         text_column="response",
+        family=GemmaFamily.GEMMA_3N,
         prompt_column="prompt",
         max_length=128,
         sub_mode="instruction",
@@ -133,9 +157,7 @@ def test_instruction_submode_masks_prompt_and_padding():
     ]
     out = collator(batch)
     assert "labels" in out and "input_ids" in out
-    assert "token_type_ids" in out and "mm_token_type_ids" in out
-    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
-    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert "token_type_ids" not in out and "mm_token_type_ids" not in out
     labels, input_ids, am = out["labels"], out["input_ids"], out["attention_mask"]
     assert labels.shape == input_ids.shape
     # Padding masked
@@ -155,6 +177,7 @@ def test_instruction_fallback_subsequence_when_extra_tokens_before_model_header(
     collator = DataCollatorGemmaText(
         tok,
         text_column="response",
+        family=GemmaFamily.GEMMA_3N,
         prompt_column="prompt",
         max_length=128,
         sub_mode="instruction",
@@ -172,6 +195,7 @@ def test_instruction_slow_tokenizer_falls_back_to_subsequence_mask():
     collator = DataCollatorGemmaText(
         tok,
         text_column="response",
+        family=GemmaFamily.GEMMA_3N,
         prompt_column="prompt",
         max_length=128,
         sub_mode="instruction",
@@ -189,14 +213,13 @@ def test_completion_submode_masks_only_padding_not_eos_when_pad_equals_eos():
     collator = DataCollatorGemmaText(
         tok,
         text_column="text",
+        family=GemmaFamily.GEMMA_3N,
         prompt_column=None,
         max_length=128,
         sub_mode="completion",
     )
     out = collator([{"text": "a"}, {"text": "bcd"}])
-    assert "token_type_ids" in out and "mm_token_type_ids" in out
-    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
-    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert "token_type_ids" not in out and "mm_token_type_ids" not in out
     labels, input_ids = out["labels"], out["input_ids"]
     assert tok.pad_token_id == tok.eos_token_id
     # Row 0: valid tokens 5,6 — 6 is eos; must not be wiped by a naive pad_id mask
@@ -207,16 +230,16 @@ def test_completion_submode_masks_only_padding_not_eos_when_pad_equals_eos():
 def test_instruction_requires_prompt_column():
     tok = _FakeInstructionTokenizer()
     try:
-        DataCollatorGemmaText(tok, text_column="t", prompt_column=None, sub_mode="instruction")
+        DataCollatorGemmaText(tok, text_column="t", family=GemmaFamily.GEMMA_3N, prompt_column=None, sub_mode="instruction")
     except ValueError as e:
         assert "prompt_column" in str(e).lower()
     else:
         raise AssertionError("expected ValueError")
 
 
-def test_ensure_gemma_mm_token_type_ids_fills_missing_and_none():
+def test_inject_mm_token_type_ids_fills_missing_and_none():
     batch = {"input_ids": torch.tensor([[1, 2], [3, 4]], dtype=torch.long)}
-    ensure_gemma_mm_token_type_ids(batch)
+    inject_mm_token_type_ids(batch)
     assert torch.equal(batch["token_type_ids"], torch.zeros_like(batch["input_ids"]))
     assert torch.equal(batch["mm_token_type_ids"], torch.zeros_like(batch["input_ids"]))
 
@@ -224,7 +247,7 @@ def test_ensure_gemma_mm_token_type_ids_fills_missing_and_none():
         "input_ids": np.array([[1, 2]], dtype=np.int64),
         "token_type_ids": None,
     }
-    ensure_gemma_mm_token_type_ids(batch2)
+    inject_mm_token_type_ids(batch2)
     assert "mm_token_type_ids" in batch2
     assert torch.equal(batch2["token_type_ids"], torch.zeros(1, 2, dtype=torch.long))
     assert torch.equal(batch2["mm_token_type_ids"], torch.zeros(1, 2, dtype=torch.long))
@@ -233,7 +256,7 @@ def test_ensure_gemma_mm_token_type_ids_fills_missing_and_none():
 def test_invalid_sub_mode():
     tok = _FakeInstructionTokenizer()
     try:
-        DataCollatorGemmaText(tok, text_column="t", prompt_column="p", sub_mode="other")
+        DataCollatorGemmaText(tok, text_column="t", family=GemmaFamily.GEMMA_3N, prompt_column="p", sub_mode="other")
     except ValueError as e:
         assert "sub_mode" in str(e).lower()
     else:

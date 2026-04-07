@@ -109,6 +109,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoProcessor
 
 from gemma_tuner.models.gemma.constants import AudioProcessingConstants
+from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import probe_bfloat16
 
 
@@ -232,6 +233,8 @@ def main(model_id: str, adapter_path: str, wav_path: str):
         # Custom model with local paths
         main("/models/gemma-custom", "/adapters/speech-lora", "sample.flac")
     """
+    gate_gemma_model(model_id, entrypoint="gemma_generate")
+
     # Device detection with optimal hardware utilization
     # Priority: MPS (Apple Silicon) > CUDA (NVIDIA) > CPU (universal fallback)
     if torch.backends.mps.is_available():

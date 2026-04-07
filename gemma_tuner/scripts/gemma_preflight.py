@@ -126,6 +126,7 @@ Design Principles:
 
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import sys
@@ -258,6 +259,23 @@ def main() -> int:
     """
     constants = GemmaPreflightConstants
     validation_passed = True
+
+    from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+    from gemma_tuner.models.gemma.family import gate_gemma_model
+
+    _pre = argparse.ArgumentParser(add_help=False)
+    _pre.add_argument(
+        "--model-id",
+        default=GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID,
+        help="HF model id to validate against Gemma family requirements (optional)",
+    )
+    _args, _ = _pre.parse_known_args()
+    try:
+        gate_gemma_model(_args.model_id, entrypoint="gemma_preflight")
+        print(f"{constants.STATUS_INFO} Gemma model-id check OK for {_args.model_id!r}")
+    except Exception as e:
+        print(f"{constants.STATUS_FAIL} Gemma model-id / transformers check: {e}")
+        validation_passed = False
 
     # STEP 1: Python Architecture Validation
     # Critical for optimal Apple Silicon performance - Rosetta emulation causes 2-5x slowdown

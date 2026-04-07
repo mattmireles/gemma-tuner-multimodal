@@ -2,6 +2,7 @@ import torch
 
 from gemma_tuner.models.common.collators import DataCollatorGemmaAudio
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+from gemma_tuner.models.gemma.family import GemmaFamily
 
 
 class DummyProcessor:
@@ -46,7 +47,7 @@ class DummyProcessor:
 
 def test_collator_produces_labels_and_ids():
     proc = DummyProcessor()
-    collator = DataCollatorGemmaAudio(processor=proc, text_column="text")
+    collator = DataCollatorGemmaAudio(processor=proc, text_column="text", family=GemmaFamily.GEMMA_3N)
     batch = [
         {"audio_path": "/path/a.wav", "text": "hello"},
         {"audio_path": "/path/b.wav", "text": "world"},
@@ -66,10 +67,24 @@ def test_collator_produces_labels_and_ids():
     out = collator(batch)
     assert "input_ids" in out and "attention_mask" in out and "labels" in out
     assert out["labels"].shape == out["input_ids"].shape
-    assert "token_type_ids" in out and "mm_token_type_ids" in out
-    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
-    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert "token_type_ids" not in out and "mm_token_type_ids" not in out
     # Ensure PAD becomes IGNORE id where applicable
     mask_zeros = out["attention_mask"] == 0
     assert mask_zeros.any(), "Test expects some zero entries in attention_mask"
     assert (out["labels"][mask_zeros] == GemmaTrainingConstants.IGNORE_TOKEN_ID).all()
+
+
+def test_audio_collator_gemma4_injects_mm_token_type_ids():
+    proc = DummyProcessor()
+    collator = DataCollatorGemmaAudio(processor=proc, text_column="text", family=GemmaFamily.GEMMA_4)
+    import gemma_tuner.utils.dataset_prep as dataset_prep_mod
+
+    def fake_loader(path, sampling_rate=None):
+        return [0.0] * 16000
+
+    dataset_prep_mod.load_audio_local_or_gcs = fake_loader
+
+    out = collator([{"audio_path": "/path/a.wav", "text": "hello"}])
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))

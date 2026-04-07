@@ -43,6 +43,7 @@ except Exception:
     load_audio_local_or_gcs = None
 
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
+from gemma_tuner.models.gemma.family import gate_gemma_model
 
 # Canonical device selection (MPS > CUDA > CPU) from shared utils
 from gemma_tuner.utils.device import get_device, probe_bfloat16
@@ -72,6 +73,8 @@ def main() -> int:
     if wer is None or cer is None:
         print("[ERROR] jiwer not installed. Run: pip install jiwer")
         return 2
+
+    gate_gemma_model(args.model, entrypoint="eval_gemma_asr")
 
     device = get_device()
 
