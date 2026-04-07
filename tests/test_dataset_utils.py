@@ -4,7 +4,11 @@ from pathlib import Path
 import pandas as pd
 
 import gemma_tuner.utils.dataset_utils as _du_mod
-from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
+from gemma_tuner.utils.dataset_utils import (
+    load_dataset_split,
+    resolve_data_datasets_dir,
+    resolve_patches_base_dir,
+)
 
 
 def _write_csv(path, rows):
@@ -33,6 +37,30 @@ def test_resolve_data_datasets_dir_anchors_to_repo_without_cwd_config(tmp_path):
         out = resolve_data_datasets_dir("zzz_nonexistent_dataset_marker")
         repo_root = Path(_du_mod.__file__).resolve().parent.parent.parent
         assert out == str((repo_root / "data" / "datasets" / "zzz_nonexistent_dataset_marker").resolve())
+    finally:
+        os.chdir(cwd)
+
+
+def test_resolve_patches_base_dir_prefers_cwd_when_config_ini_present(tmp_path):
+    (tmp_path / "config.ini").write_text("[x]\na=1\n", encoding="utf-8")
+    base = tmp_path / "data_patches"
+    base.mkdir(parents=True)
+    cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        out = resolve_patches_base_dir("data_patches")
+        assert os.path.samefile(out, str(base))
+    finally:
+        os.chdir(cwd)
+
+
+def test_resolve_patches_base_dir_anchors_to_repo_without_cwd_config(tmp_path):
+    cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        out = resolve_patches_base_dir("data_patches")
+        repo_root = Path(_du_mod.__file__).resolve().parent.parent.parent
+        assert out == str((repo_root / "data_patches").resolve())
     finally:
         os.chdir(cwd)
 

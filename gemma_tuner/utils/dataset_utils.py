@@ -148,6 +148,22 @@ def resolve_data_datasets_dir(dataset_name: str) -> str:
     return str((_REPO_ROOT / "data" / "datasets" / name).resolve())
 
 
+def resolve_patches_base_dir(patches_dir: str) -> str:
+    """Absolute base for patch trees (``<base>/<dataset_source>/override_*/``).
+
+    Uses the same rule as :func:`resolve_data_datasets_dir`: cwd-relative when
+    ``config.ini`` is in cwd, otherwise anchored to the repository root so
+    overrides/blacklists resolve when the CLI runs from outside the repo.
+    """
+    raw = (patches_dir or "data_patches").strip() or "data_patches"
+    p = Path(raw)
+    if p.is_absolute():
+        return str(p.resolve())
+    if Path("config.ini").exists():
+        return str((Path.cwd() / p).resolve())
+    return str((_REPO_ROOT / p).resolve())
+
+
 # Lazy-loaded config singleton. Deferred so tests can os.chdir() or monkeypatch
 # _CONFIG_INI before the first call to load_dataset_split(). Thread-safe for
 # single-threaded training pipelines (all current callers).
@@ -269,7 +285,7 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
             split="train",
             dataset_config=dataset_config,
             max_samples=1000,
-            patches_dir="data_patches/"
+            patches_dir="data_patches/",
         )
         print(f"Loaded {len(dataset)} samples from {source}")
 
@@ -281,6 +297,7 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
           Do-not-blacklist IDs: 8 (these were not blacklisted)
         Final dataset size: 1034 samples
     """
+    patches_dir = resolve_patches_base_dir(patches_dir)
 
     context, adapter = _resolve_load_context(
         split=split,
