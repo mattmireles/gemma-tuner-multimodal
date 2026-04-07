@@ -25,6 +25,8 @@ class DatasetLoadContext:
     modality: str
     text_sub_mode: str
     prompt_column: str | None
+    image_sub_mode: str = "caption"
+    image_path_column: str = "image_path"
 
 
 class DatasetSourceAdapter(Protocol):

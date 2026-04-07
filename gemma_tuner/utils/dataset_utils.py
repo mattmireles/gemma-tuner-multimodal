@@ -111,6 +111,20 @@ def _ensure_text_modality_supported(context: DatasetLoadContext, adapter, stream
         )
 
 
+def _ensure_image_modality_supported(context: DatasetLoadContext, adapter, streaming_enabled: bool) -> None:
+    """Image fine-tuning (v1) is limited to non-streaming local CSV loads."""
+    if context.modality != "image":
+        return
+    if streaming_enabled:
+        raise ValueError("modality=image requires non-streaming dataset loading in v1.")
+    if adapter.name != "local-csv":
+        raise ValueError(
+            "modality=image is only supported for local CSV datasets in v1; "
+            f"got adapter {adapter.name!r} (source_type={context.source_type!r}). "
+            "Use a local [dataset:…] section with a CSV source, not Granary/BigQuery/GCS streaming."
+        )
+
+
 # Anchored config.ini path — resolves relative to the project root regardless of cwd.
 _CONFIG_INI = Path(__file__).resolve().parent.parent.parent / "config.ini"
 
@@ -257,6 +271,7 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
         config=_get_config(),
     )
     _ensure_text_modality_supported(context, adapter, streaming_enabled)
+    _ensure_image_modality_supported(context, adapter, streaming_enabled)
     source = adapter.patch_source(context)
 
     # Debug information for troubleshooting data loading issues
@@ -294,6 +309,15 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
                 "modality=text with text_sub_mode=instruction requires prompt_column in dataset_config (profile)."
             )
         required_columns.add(context.prompt_column)
+    if context.modality == "image":
+        ipc = context.image_path_column.strip() if context.image_path_column else "image_path"
+        required_columns.add(ipc)
+        if context.image_sub_mode == "vqa":
+            if not context.prompt_column:
+                raise ValueError(
+                    "modality=image with image_sub_mode=vqa requires prompt_column in dataset_config (profile)."
+                )
+            required_columns.add(context.prompt_column)
 
     def _validate_columns(columns: Iterable[str]):
         missing = [c for c in required_columns if c not in columns]
@@ -422,6 +446,13 @@ def _resolve_load_context(split, dataset_config, max_samples, patches_dir, strea
     else:
         prompt_column = str(_pc).strip()
 
+    _ism = (dataset_config.get("image_sub_mode") or "caption").strip().lower()
+    _ipc = dataset_config.get("image_path_column")
+    if _ipc is None or (isinstance(_ipc, str) and not str(_ipc).strip()):
+        image_path_column = "image_path"
+    else:
+        image_path_column = str(_ipc).strip()
+
     context = DatasetLoadContext(
         dataset_name=dataset_name,
         dataset_config=dataset_config,
@@ -439,6 +470,8 @@ def _resolve_load_context(split, dataset_config, max_samples, patches_dir, strea
         modality=modality,
         text_sub_mode=text_sub_mode,
         prompt_column=prompt_column,
+        image_sub_mode=_ism,
+        image_path_column=image_path_column,
     )
     return context, resolve_dataset_source_adapter(context)
 
