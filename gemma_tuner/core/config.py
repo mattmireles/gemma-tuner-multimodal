@@ -115,6 +115,7 @@ class ConfigConstants:
         "lora_alpha",
         "warmup_steps",
         "max_samples",
+        "max_seq_length",
     }
 
     FLOAT_COERCION_KEYS = {
@@ -167,6 +168,11 @@ class ConfigConstants:
         "fp16": False,  # Float16 mixed precision training
         "skip_audio_validation": False,  # Skip audio file existence checks (faster but risky)
         "sample_validation_rate": 1.0,  # Fraction of audio files to validate (0.0-1.0)
+        # Text vs audio fine-tuning (defaults preserve existing audio-only behavior)
+        "modality": "audio",
+        "text_sub_mode": "instruction",
+        "prompt_column": None,
+        "max_seq_length": 2048,
     }
 
     # Granary Dataset Integration Constants
@@ -609,6 +615,29 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
             # Validate that target modules are not empty
             if not conf["lora_target_modules"]:
                 raise ValueError("lora_target_modules cannot be empty list when LoRA is enabled")
+
+    # Modality / text-mode keys (defaults applied via FALLBACK_DEFAULTS)
+    if "modality" in conf and conf["modality"] is not None:
+        modality = str(conf["modality"]).strip().lower()
+        conf["modality"] = modality
+        if modality not in ("audio", "text"):
+            raise ValueError(f"modality must be 'audio' or 'text', got {modality!r}")
+    if "text_sub_mode" in conf and conf["text_sub_mode"] is not None:
+        sub = str(conf["text_sub_mode"]).strip().lower()
+        conf["text_sub_mode"] = sub
+        if sub not in ("instruction", "completion"):
+            raise ValueError(f"text_sub_mode must be 'instruction' or 'completion', got {sub!r}")
+    if "prompt_column" in conf:
+        pc = conf["prompt_column"]
+        if pc is None or (isinstance(pc, str) and not str(pc).strip()):
+            conf["prompt_column"] = None
+        elif isinstance(pc, str):
+            conf["prompt_column"] = pc.strip()
+
+    if "max_seq_length" in conf and conf["max_seq_length"] is not None and conf["max_seq_length"] != "":
+        msl = int(conf["max_seq_length"]) if not isinstance(conf["max_seq_length"], int) else conf["max_seq_length"]
+        if msl < 1:
+            raise ValueError(f"max_seq_length must be >= 1, got {msl}")
 
     # Validate data splits are specified
     for split_key in ("train_split", "validation_split"):

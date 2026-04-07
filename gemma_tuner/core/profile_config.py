@@ -125,6 +125,13 @@ class ProfileConfig:
 
     max_samples: Optional[int] = _UNSET  # type: ignore[assignment]
     id_column: Optional[str] = _UNSET  # type: ignore[assignment]
+
+    # ── Modality: audio (speech) vs text-only fine-tuning ──
+
+    modality: str = _UNSET  # type: ignore[assignment]
+    text_sub_mode: str = _UNSET  # type: ignore[assignment]
+    prompt_column: Optional[str] = _UNSET  # type: ignore[assignment]
+    max_seq_length: int = _UNSET  # type: ignore[assignment]
     validation_wer_threshold: Optional[float] = _UNSET  # type: ignore[assignment]
     wer_threshold: Optional[float] = _UNSET  # type: ignore[assignment]
     sample_validation_rate: float = _UNSET  # type: ignore[assignment]
