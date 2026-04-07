@@ -159,10 +159,21 @@ credentials.ini
 distributed_hosts.json
 /temp_configs/
 
+# Local implementation plans (not published)
+README/plans/
+
 # Agent / editor bundles (omit from the published tree)
-.agents/skills/
-.claude/
-.cursor/
+# Checked-in skills: `.claude/skills/**` (mirrors under `.cursor/skills/` and `.agents/skills/` may symlink there).
+.agents/skills/*
+!.agents/skills/create-plan
+.claude/**
+!.claude/skills/
+!.claude/skills/**
+# Ignore Cursor project files except tracked skill mirrors (see `.cursor/skills/create-plan`).
+.cursor/*
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/create-plan
 Claude.md
 
 # User-specific runtime config — may contain GCP project IDs written by the wizard.

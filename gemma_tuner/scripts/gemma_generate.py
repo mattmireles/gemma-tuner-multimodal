@@ -296,9 +296,14 @@ def main(model_id: str, adapter_path: str, wav_path: str):
     # Process multimodal inputs through AutoProcessor
     # This handles audio feature extraction and text tokenization
     # Pass explicit sampling_rate so the processor knows the audio's sample rate
+    prompts = processor.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
     enc = processor(
-        messages=messages,
-        audios=[audio],
+        text=prompts,
+        audio=[audio],
         sampling_rate=GemmaInferenceConstants.TARGET_SAMPLING_RATE,
         return_tensors="pt",
         padding=True,

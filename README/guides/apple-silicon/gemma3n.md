@@ -1,6 +1,6 @@
 # Gemma 3n on Apple Silicon: A Developer's Field Guide
 
-> **Note:** Gemma 4 (`google/gemma-4-E2B`) is now the primary fine-tuning target. The architecture covered here (USM audio encoder, LoRA targets, MPS setup) applies equally to Gemma 4. Gemma 3n remains supported.
+> **Note:** Gemma 4 (`google/gemma-4-E2B`) is now the primary fine-tuning target. The architecture covered here (USM audio encoder, LoRA targets, MPS setup) applies equally to Gemma 4. Gemma 3n remains supported. For Gemma 4–specific multimodal LoRA + MPS pitfalls, see [`gemma4-guide.md`](gemma4-guide.md).
 
 Product integration and CLI behavior: [`../../specifications/Gemma3n.md`](../../specifications/Gemma3n.md).
 

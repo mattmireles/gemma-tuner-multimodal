@@ -291,8 +291,17 @@ def main(model_id: str = GemmaProfilerConstants.DEFAULT_MODEL_ID) -> None:
 
     # Process multimodal inputs through preprocessing pipeline
     # This validates the complete preprocessing workflow used during training
+    prompts = processor.apply_chat_template(
+        multimodal_messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
     processed_inputs = processor(
-        messages=multimodal_messages, audios=[synthetic_audio], return_tensors="pt", padding=True
+        text=prompts,
+        audio=[synthetic_audio],
+        return_tensors="pt",
+        padding=True,
+        sampling_rate=effective_sampling_rate,
     )
 
     # Move all tensors to the selected device for inference

@@ -83,6 +83,9 @@ def test_instruction_submode_masks_prompt_and_padding():
     ]
     out = collator(batch)
     assert "labels" in out and "input_ids" in out
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
     labels, input_ids, am = out["labels"], out["input_ids"], out["attention_mask"]
     assert labels.shape == input_ids.shape
     # Padding masked
@@ -107,6 +110,9 @@ def test_completion_submode_masks_only_padding_not_eos_when_pad_equals_eos():
         sub_mode="completion",
     )
     out = collator([{"text": "a"}, {"text": "bcd"}])
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
     labels, input_ids = out["labels"], out["input_ids"]
     assert tok.pad_token_id == tok.eos_token_id
     # Row 0: valid tokens 5,6 — 6 is eos; must not be wiped by a naive pad_id mask

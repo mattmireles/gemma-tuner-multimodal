@@ -89,6 +89,23 @@ def mask_gemma_prompt_tokens(
             )
 
 
+def ensure_gemma_mm_token_type_ids(encoded: Dict[str, Any]) -> None:
+    """Ensure ``token_type_ids`` and ``mm_token_type_ids`` exist for Gemma multimodal forward.
+
+    Some processors omit these; Gemma 4 may error or misroute modality tokens without them.
+    When missing, inject zeros shaped like ``input_ids`` (see ``README/guides/apple-silicon/gemma4-guide.md``
+    and https://github.com/huggingface/transformers/issues/45200).
+    """
+    input_ids = encoded.get("input_ids")
+    if input_ids is None or not isinstance(input_ids, torch.Tensor):
+        return
+    zeros = torch.zeros_like(input_ids)
+    if "token_type_ids" not in encoded:
+        encoded["token_type_ids"] = zeros
+    if "mm_token_type_ids" not in encoded:
+        encoded["mm_token_type_ids"] = zeros
+
+
 class DataCollatorGemmaText:
     """Batch text-only examples for Gemma CausalLM (no audio forward).
 
@@ -155,6 +172,7 @@ class DataCollatorGemmaText:
             truncation=True,
             max_length=self.max_length,
         )
+        ensure_gemma_mm_token_type_ids(encoded)
         input_ids = encoded["input_ids"]
         attention_mask = encoded["attention_mask"]
         labels = input_ids.clone()
@@ -180,6 +198,7 @@ class DataCollatorGemmaText:
             max_length=self.max_length,
             return_tensors="pt",
         )
+        ensure_gemma_mm_token_type_ids(encoded)
         labels = encoded["input_ids"].clone()
         labels[encoded["attention_mask"] == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
         encoded["labels"] = labels
@@ -261,6 +280,8 @@ class DataCollatorGemmaAudio:
             padding=True,
             sampling_rate=sampling_rate,
         )
+
+        ensure_gemma_mm_token_type_ids(encoded)
 
         if hasattr(self.processor, "tokenizer"):
             validate_bos_tokens_present(encoded, self.processor.tokenizer)

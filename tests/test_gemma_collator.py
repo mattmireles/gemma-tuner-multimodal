@@ -22,10 +22,21 @@ class DummyProcessor:
         self.tokenizer = Tok()
         self.sampling_rate = 16000
 
-    def __call__(self, messages=None, audios=None, return_tensors=None, padding=None, text=None):
+    def apply_chat_template(self, conversation, tokenize=False, add_generation_prompt=False, **kwargs):
+        if tokenize:
+            raise AssertionError("DataCollatorGemmaAudio uses tokenize=False then processor(text=..., audio=...)")
+        if not conversation:
+            return []
+        first = conversation[0]
+        batch_size = 1 if isinstance(first, dict) else len(conversation)
+        return ["dummy prompt"] * batch_size
+
+    def __call__(self, text=None, audio=None, images=None, return_tensors=None, padding=None, **kwargs):
         # Return minimal tensors to mimic processor output.
         # Attention mask includes zeros at the end to exercise PAD-masking logic.
-        batch = len(messages) if messages is not None else len(text)
+        if text is None:
+            raise ValueError("expected text")
+        batch = len(text) if isinstance(text, list) else 1
         input_ids = torch.zeros((batch, 5), dtype=torch.long)
         attention_mask = torch.ones((batch, 5), dtype=torch.long)
         # Set last two positions to zero to simulate padding
@@ -55,6 +66,9 @@ def test_collator_produces_labels_and_ids():
     out = collator(batch)
     assert "input_ids" in out and "attention_mask" in out and "labels" in out
     assert out["labels"].shape == out["input_ids"].shape
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
     # Ensure PAD becomes IGNORE id where applicable
     mask_zeros = out["attention_mask"] == 0
     assert mask_zeros.any(), "Test expects some zero entries in attention_mask"
