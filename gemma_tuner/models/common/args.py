@@ -37,7 +37,6 @@ from typing import TYPE_CHECKING, Dict
 if TYPE_CHECKING:
     from gemma_tuner.core.profile_config import ProfileConfig
 
-from gemma_tuner.constants import TrainingDefaults
 
 try:
     import psutil  # type: ignore

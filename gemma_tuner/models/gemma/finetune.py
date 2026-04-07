@@ -57,7 +57,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, List, Union
 
 if TYPE_CHECKING:
     from gemma_tuner.core.profile_config import ProfileConfig
@@ -439,9 +439,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     # is a real runtime path whenever the split is missing or fails to load.
     # We override to "no" here and log a warning so the failure is visible without
     # crashing the entire training run.
-    requested_eval_strategy = str(
-        profile_config.get("eval_strategy", GemmaTrainingConstants.DEFAULT_EVAL_STRATEGY)
-    )
+    requested_eval_strategy = str(profile_config.get("eval_strategy", GemmaTrainingConstants.DEFAULT_EVAL_STRATEGY))
     if eval_ds is None and requested_eval_strategy != "no":
         logger.warning(
             "eval_strategy=%r requested but no eval_dataset is available; overriding to 'no'.",

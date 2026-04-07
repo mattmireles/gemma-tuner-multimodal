@@ -553,9 +553,7 @@ def update_run_metadata(run_dir: str, **kwargs) -> None:
         # Metadata file exists but is corrupt (e.g. partial write from power loss).
         # Log a warning and start fresh rather than propagating a crash to callers
         # like mark_run_as_completed() that must not be interrupted.
-        logger.warning(
-            "Corrupt metadata file at %s — resetting to defaults. Original content lost.", meta_path
-        )
+        logger.warning("Corrupt metadata file at %s — resetting to defaults. Original content lost.", meta_path)
         meta = {"run_dir": run_dir}
 
     # Merge updates with existing metadata.
@@ -738,7 +736,7 @@ def update_experiments_csv(output_dir: str, run_dir: str) -> str:
     # Atomic write
     tmp_path = csv_path + ".tmp"
     with open(tmp_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for r in rows:
             writer.writerow(r)

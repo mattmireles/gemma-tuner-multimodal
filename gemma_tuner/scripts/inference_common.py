@@ -505,6 +505,7 @@ def _get_row_metrics():
     global _wer_metric_cache, _cer_metric_cache
     if _wer_metric_cache is None or _cer_metric_cache is None:
         import evaluate as _evaluate
+
         _wer_metric_cache = _evaluate.load("wer")
         _cer_metric_cache = _evaluate.load("cer")
     return _wer_metric_cache, _cer_metric_cache
@@ -610,9 +611,9 @@ def run_inference_loop(
     # Late import avoids a circular dependency at module load time:
     # inference_common is imported by evaluate and blacklist, while generate
     # lives in core/inference which does not import inference_common.
-    from gemma_tuner.core.inference import generate
-
     from tqdm import tqdm
+
+    from gemma_tuner.core.inference import generate
 
     def _run_one_pass(loader: DataLoader) -> Tuple[List, List, List]:
         """Single full pass over the DataLoader; returns (preds, refs, ids)."""
@@ -742,7 +743,5 @@ def run_inference_loop(
                 ) from exc
             tried_smaller_batch = True
             current_batch_size = max(1, current_batch_size // 2)
-            logger.warning(
-                "OOM detected during inference. Retrying with batch_size=%d", current_batch_size
-            )
+            logger.warning("OOM detected during inference. Retrying with batch_size=%d", current_batch_size)
             eval_dataloader = make_dataloader(current_batch_size)

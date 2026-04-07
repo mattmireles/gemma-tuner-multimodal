@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import torch
 
-from gemma_tuner.models.gemma.constants import AudioProcessingConstants, GemmaTrainingConstants, GemmaValidationConstants
+from gemma_tuner.models.gemma.constants import (
+    AudioProcessingConstants,
+    GemmaTrainingConstants,
+    GemmaValidationConstants,
+)
 
 logger = logging.getLogger(__name__)
 

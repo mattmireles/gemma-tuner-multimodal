@@ -83,15 +83,15 @@ def configure_method_specifics(
                 alpha = default_alpha
 
         config["lora_alpha"] = alpha
-        config["lora_dropout"] = WizardConstants.DEFAULT_LORA_DROPOUT  # Intentionally higher than GemmaTrainingConstants.LORA_DROPOUT (0.05) for wizard's conservative defaults
+        config["lora_dropout"] = (
+            WizardConstants.DEFAULT_LORA_DROPOUT
+        )  # Intentionally higher than GemmaTrainingConstants.LORA_DROPOUT (0.05) for wizard's conservative defaults
         config["use_peft"] = True
 
     return config
 
 
-def estimate_training_time(
-    method: Dict[str, Any], model: str, dataset: Dict[str, Any]
-) -> Dict[str, Any]:
+def estimate_training_time(method: Dict[str, Any], model: str, dataset: Dict[str, Any]) -> Dict[str, Any]:
     """Estimate training time and resource usage"""
 
     device_info = get_wizard_device_info()
