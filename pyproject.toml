@@ -81,9 +81,9 @@ all = [
 gemma-macos-tuner = "gemma_tuner.cli_typer:app"
 
 [project.urls]
-Homepage = "https://github.com/mattmireles/gemma-macos-fine-tuner"
-Repository = "https://github.com/mattmireles/gemma-macos-fine-tuner"
-Issues = "https://github.com/mattmireles/gemma-macos-fine-tuner/issues"
+Homepage = "https://github.com/mattmireles/gemma-tuner-multimodal"
+Repository = "https://github.com/mattmireles/gemma-tuner-multimodal"
+Issues = "https://github.com/mattmireles/gemma-tuner-multimodal/issues"
 
 [tool.setuptools.packages.find]
 # Discover regular packages from package directories
