@@ -88,10 +88,33 @@ jobs:
           name: junit-${{ matrix.python-version }}
           path: test-reports/*.xml
 
+  unit-gemma4:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.11'
+          architecture: 'arm64'
+          cache: 'pip'
+      - name: Install project and Gemma 4 stack
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-gemma4.txt
+      - name: Run fast tests (Gemma 4 env)
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          pytest -q -m "not slow" --ignore=tests/test_visualizer.py
+
   cli:
     runs-on: macos-latest
     timeout-minutes: 15
-    needs: [lint, unit]
+    needs: [lint, unit, unit-gemma4]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5

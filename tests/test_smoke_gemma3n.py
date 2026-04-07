@@ -1,4 +1,4 @@
-"""End-to-end smoke: text completion mode, tiny public Gemma weights, two train steps."""
+"""End-to-end smoke: Gemma 3n-compatible path, text completion, tiny HF stub, two train steps."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ dtype = float32
 attn_implementation = eager
 optim = adamw_torch
 
-[model:gemma-4-e2b-it]
+[model:gemma-3n-e2b-it]
 base_model = {TINY_GEMMA}
 group = gemma
 per_device_train_batch_size = 1
@@ -66,7 +66,7 @@ max_label_length = 128
 max_duration = 30.0
 
 [profile:text-smoke]
-model = gemma-4-e2b-it
+model = gemma-3n-e2b-it
 dataset = text-smoke
 train_split = train
 validation_split = validation
