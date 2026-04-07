@@ -1,15 +1,6 @@
 # Gemma Multimodal Fine-Tuner
 
-```text
-     ██████╗ ███████╗███╗   ███╗███╗   ███╗ █████╗
-    ██╔════╝ ██╔════╝████╗ ████║████╗ ████║██╔══██╗
-    ██║  ███╗█████╗  ██╔████╔██║██╔████╔██║███████║
-    ██║   ██║██╔══╝  ██║╚██╔╝██║██║╚██╔╝██║██╔══██║
-    ╚██████╔╝███████╗██║ ╚═╝ ██║██║ ╚═╝ ██║██║  ██║
-     ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
-
-              🍎 Fine-Tuner for Apple Silicon
-```
+![Gemma macOS Tuner wizard: system check, then LoRA / model / dataset steps](README/assets/wizard-cli.png)
 
 **Fine-tune Gemma with audio, on your Mac, on data that doesn't fit on your Mac.**
 
@@ -171,8 +162,6 @@ Use a **separate virtual environment** if you want to keep a Gemma 3n-only env a
 ```bash
 gemma-macos-tuner wizard
 ```
-
-![Gemma macOS Tuner wizard: system check, then LoRA / model / dataset steps](README/assets/wizard-cli.png)
 
 The wizard walks you through model selection, dataset config, and training — answering questions and writing `config.ini` for you.
 
