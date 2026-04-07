@@ -29,3 +29,29 @@ def test_bootstrap_sets_mps_env(monkeypatch):
     )
     assert low == 0.7, f"Expected low watermark 0.7, got {low}"
     assert 0.0 < low < high < 1.0
+
+
+def test_bootstrap_loads_dotenv_from_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    (tmp_path / ".env").write_text('HF_TOKEN=dotenv-test-token\n', encoding="utf-8")
+
+    sys.modules.pop("gemma_tuner.core.bootstrap", None)
+    import gemma_tuner.core.bootstrap
+
+    importlib.reload(gemma_tuner.core.bootstrap)
+
+    assert os.environ.get("HF_TOKEN") == "dotenv-test-token"
+
+
+def test_dotenv_does_not_override_existing_env(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HF_TOKEN", "already-set")
+    (tmp_path / ".env").write_text("HF_TOKEN=from-file\n", encoding="utf-8")
+
+    sys.modules.pop("gemma_tuner.core.bootstrap", None)
+    import gemma_tuner.core.bootstrap
+
+    importlib.reload(gemma_tuner.core.bootstrap)
+
+    assert os.environ.get("HF_TOKEN") == "already-set"

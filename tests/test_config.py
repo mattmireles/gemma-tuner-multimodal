@@ -380,3 +380,45 @@ class TestProfileConfig:
         assert result["dataset"] == "dummy"
         assert isinstance(result.max_label_length, int)
         assert result.max_label_length == 128
+
+    def test_profile_overrides_default_num_train_epochs(self):
+        """Explicit [profile] values must win over [DEFAULT] for the same key (wizard epochs)."""
+        cfg = make_cfg(
+            {
+                "DEFAULT": {
+                    "num_train_epochs": "3",
+                    "logging_steps": "25",
+                    "save_steps": "1000",
+                    "save_total_limit": "1",
+                    "gradient_accumulation_steps": "1",
+                    "learning_rate": "1e-5",
+                    "warmup_steps": "50",
+                    "output_dir": "output",
+                },
+                "model:gemma-4-e2b-it": {
+                    "group": "gemma",
+                    "base_model": "google/gemma-4-E2B-it",
+                },
+                "group:gemma": {},
+                "dataset:dummy": {
+                    "source": "dummy_source",
+                    "text_column": "text",
+                    "max_label_length": "128",
+                    "max_duration": "30",
+                    "train_split": "train",
+                    "validation_split": "validation",
+                },
+                "profile:test": {
+                    "model": "gemma-4-e2b-it",
+                    "dataset": "dummy",
+                    "per_device_train_batch_size": "4",
+                    "num_train_epochs": "7",
+                    "logging_steps": "10",
+                    "save_steps": "50",
+                    "save_total_limit": "2",
+                    "gradient_accumulation_steps": "1",
+                },
+            }
+        )
+        result = load_profile_config(cfg, "test")
+        assert result.num_train_epochs == 7

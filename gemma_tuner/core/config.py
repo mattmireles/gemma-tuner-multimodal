@@ -292,13 +292,31 @@ def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> "P
 
     out: Dict = _load_model_dataset_config_dict(cfg, model_name, dataset_name)
 
-    # Layer 6: Profile overrides (highest precedence) — own keys only, no DEFAULT bleed.
+    # Layer 6: Profile overrides (highest precedence) — keys explicitly set in [profile:…].
+    # Do not use _section_own_keys here: it drops any key that also exists in [DEFAULT],
+    # which would ignore explicit profile overrides (e.g. num_train_epochs).
     if cfg.has_section(section):
-        out.update(_section_own_keys(cfg, section))
+        out.update(_profile_section_explicit_keys(cfg, section))
 
     # Validate the merged configuration
     _validate_profile_config(out, required_keys=ConfigConstants.REQUIRED_PROFILE_KEYS)
     return ProfileConfig.from_dict(out)
+
+
+def _profile_section_explicit_keys(cfg: configparser.ConfigParser, section: str) -> Dict:
+    """Return key-value pairs explicitly assigned in ``section`` (typically ``[profile:…]``).
+
+    ConfigParser merges [DEFAULT] into every section; ``options(section)`` lists those keys.
+    :func:`_section_own_keys` excludes any key present in DEFAULT, which incorrectly drops
+    explicit profile overrides when the same key exists in DEFAULT (e.g. ``num_train_epochs``).
+    The parser's internal section mapping only contains keys from the section's own lines.
+    """
+    if not cfg.has_section(section):
+        return {}
+    inner = getattr(cfg, "_sections", {}).get(section)
+    if isinstance(inner, dict) and inner:
+        return dict(inner)
+    return _section_own_keys(cfg, section)
 
 
 def _section_own_keys(cfg: configparser.ConfigParser, section: str) -> Dict:
@@ -315,7 +333,6 @@ def _section_own_keys(cfg: configparser.ConfigParser, section: str) -> Dict:
 
     Called by:
     - _load_model_dataset_config_dict() for group, model, and dataset layers
-    - load_profile_config() already uses the same pattern inline for layer 6
     """
     defaults = set(cfg.defaults().keys())
     return {k: cfg[section][k] for k in cfg.options(section) if k not in defaults}

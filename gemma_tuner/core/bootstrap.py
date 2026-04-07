@@ -15,6 +15,8 @@ Effects:
 - Sets PYTORCH_MPS_LOW_WATERMARK_RATIO  (default 0.70) and ensures low < high
 
 Notes:
+- Loads `.env` from the current directory tree (nearest ancestor) or repo root when present;
+  does not override existing environment variables.
 - Only applies on macOS arm64 (Apple Silicon). Safe no-op elsewhere.
 - This must happen BEFORE importing torch to take effect.
 """
@@ -23,6 +25,59 @@ from __future__ import annotations
 
 import os
 import platform
+from pathlib import Path
+
+
+def _load_dotenv_from_file(env_path: Path) -> None:
+    """
+    Load KEY=value pairs from a .env file into os.environ.
+    Does not override variables already present (same rule as python-dotenv).
+    """
+    try:
+        raw = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, rest = line.partition("=")
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        value = rest.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ[key] = value
+
+
+def _find_dotenv_path() -> Path | None:
+    """Resolve .env: walk up from cwd, else repo root next to gemma_tuner/ (editable install)."""
+    try:
+        cwd = Path.cwd()
+        for p in [cwd, *list(cwd.parents)[:12]]:
+            cand = p / ".env"
+            if cand.is_file():
+                return cand
+    except OSError:
+        pass
+    try:
+        root = Path(__file__).resolve().parents[2]
+        if (root / "pyproject.toml").is_file():
+            cand = root / ".env"
+            if cand.is_file():
+                return cand
+    except (OSError, IndexError):
+        pass
+    return None
+
+
+def _load_repo_dotenv() -> None:
+    path = _find_dotenv_path()
+    if path is not None:
+        _load_dotenv_from_file(path)
 
 
 def _clamp_ratio(var_name: str, default_value: float) -> float:
@@ -63,5 +118,6 @@ def _bootstrap_mps_env() -> None:
         os.environ["PYTORCH_MPS_LOW_WATERMARK_RATIO"] = f"{safe_low:.2f}"
 
 
-# Execute immediately on import
+# Execute immediately on import (dotenv first so HF_TOKEN etc. are visible everywhere)
+_load_repo_dotenv()
 _bootstrap_mps_env()
