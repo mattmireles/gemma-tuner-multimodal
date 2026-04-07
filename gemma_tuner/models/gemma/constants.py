@@ -42,9 +42,9 @@ class GemmaTrainingConstants:
     # implicit fallback in finetune.py uses this constant.
     LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
-    # Default when profile omits base_model. Published multimodal instruct checkpoint:
-    # https://huggingface.co/google/gemma-4-E2B-it
-    DEFAULT_BASE_MODEL_ID = "google/gemma-4-E2B-it"
+    # Default when profile omits base_model. Gemma 3n instruct — matches base
+    # transformers pin (<5.0); see README/plans/gemma4-upgrade.md for Gemma 4 setup.
+    DEFAULT_BASE_MODEL_ID = "google/gemma-3n-E2B-it"
 
     # Special token handling
     IGNORE_TOKEN_ID = TrainingDefaults.IGNORE_TOKEN_ID

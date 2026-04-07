@@ -79,7 +79,7 @@ per_device_eval_batch_size = 1
 # Example LoRA fine-tuning profile.
 # Copy and rename this section; set model, dataset, and hyperparameters.
 [profile:my-lora-run]
-model = gemma-4-e2b
+model = gemma-3n-e2b-it
 dataset = my-dataset
 train_split = train
 validation_split = validation

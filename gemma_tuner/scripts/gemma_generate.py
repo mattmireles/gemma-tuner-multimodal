@@ -116,7 +116,7 @@ class GemmaInferenceConstants:
     """Named constants for Gemma inference configuration and optimization."""
 
     # Device Detection and Optimization
-    DEFAULT_MODEL_ID = "google/gemma-4-E2B-it"  # Default Gemma model for inference
+    DEFAULT_MODEL_ID = "google/gemma-3n-E2B-it"  # Default Gemma model for inference (base pin)
 
     # Device Selection Priority
     # MPS > CUDA > CPU for optimal performance across hardware platforms

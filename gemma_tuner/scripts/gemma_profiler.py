@@ -138,7 +138,7 @@ class GemmaProfilerConstants:
     """Named constants for Gemma performance profiling configuration."""
 
     # Default Configuration
-    DEFAULT_MODEL_ID = "google/gemma-4-E2B-it"  # Default Gemma model for profiling
+    DEFAULT_MODEL_ID = "google/gemma-3n-E2B-it"  # Default Gemma model for profiling (base pin)
 
     # Synthetic Audio Configuration
     # Realistic audio parameters for representative performance testing

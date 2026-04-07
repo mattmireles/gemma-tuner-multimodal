@@ -1,6 +1,9 @@
 # -----------------------------------------------------------------
 # requirements.txt — derived from pyproject.toml [project.dependencies]
 #
+# Optional Gemma 4 stack (transformers 5.5+): install after the base tree with
+#   pip install -r requirements-gemma4.txt
+#
 # pyproject.toml is the single source of truth for dependency bounds.
 # To regenerate a pinned lockfile from this, run:
 #   pip-compile pyproject.toml --output-file requirements.lock
