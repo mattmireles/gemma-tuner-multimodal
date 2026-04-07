@@ -10,9 +10,13 @@ from tests._fakes import FakeImageProcessor
 
 
 def test_image_modality_dataset_and_collator_batch(tmp_path):
-    """Validates CSV schema, path resolution pattern, and DataCollatorGemmaImage batching."""
+    """Validates CSV schema, path resolution, bytes loaded from disk, and DataCollatorGemmaImage batching."""
     import gemma_tuner.utils.dataset_utils as du
-    from gemma_tuner.models.common.collators import DataCollatorGemmaImage, apply_image_token_budget_to_processor
+    from gemma_tuner.models.common.collators import (
+        DataCollatorGemmaImage,
+        _load_image_as_rgb,
+        apply_image_token_budget_to_processor,
+    )
     from gemma_tuner.models.gemma.family import GemmaFamily
     from gemma_tuner.utils.dataset_utils import load_dataset_split
 
@@ -58,9 +62,26 @@ max_duration = 30.0
     assert len(ds) >= 1
     row = ds[0]
     dataset_dir = str(data_dir)
-    path_val = row["image_path"]
+    raw_path = row["image_path"]
+    # Fixture CSV uses paths relative to the dataset directory — smoke must join like training does.
+    assert not Path(str(raw_path)).is_absolute(), "expected relative image_path in CSV for resolution smoke"
+    assert Path(str(raw_path)).name == "img_01.png"
+
+    path_val = raw_path
     if path_val and not Path(path_val).is_absolute():
         path_val = str(Path(dataset_dir) / path_val)
+
+    resolved = Path(path_val).resolve()
+    expected_file = (data_dir / str(raw_path)).resolve()
+    assert resolved == expected_file
+    assert resolved.is_file()
+    assert resolved.stat().st_size > 0
+
+    rgb = _load_image_as_rgb(resolved)
+    assert rgb.mode == "RGB"
+    assert rgb.size[0] > 0 and rgb.size[1] > 0
+
+    assert row["caption"] == "caption 1"
 
     proc = FakeImageProcessor()
     apply_image_token_budget_to_processor(proc, 70)
@@ -83,3 +104,6 @@ max_duration = 30.0
     )
     assert "train_loss" not in batch
     assert "input_ids" in batch and "labels" in batch
+    assert "attention_mask" in batch
+    assert batch["input_ids"].shape == batch["labels"].shape == batch["attention_mask"].shape
+    assert batch["input_ids"].numel() > 0
