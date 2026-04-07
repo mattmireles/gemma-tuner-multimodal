@@ -246,7 +246,76 @@ def _load_image_as_rgb(path: Any) -> Any:
         raise RuntimeError(f"Failed to load image {path!r}: {e}") from e
 
 
-class DataCollatorGemmaImage:
+class DataCollatorGemmaMultimodal:
+    """Shared pipeline for Gemma multimodal collators that use ``processor(text=..., …)``.
+
+    Subclasses set ``processor``, ``_caps`` (from :func:`~gemma_tuner.models.gemma.family.family_capabilities`),
+    and ``_warned_prompt_masking``. Centralizes chat-template rendering, optional ``token_type_ids`` injection,
+    BOS validation, and prompt masking so fixes apply to every modality that follows this pattern.
+    """
+
+    processor: Any
+    _caps: Dict[str, Any]
+    _warned_prompt_masking: List[bool]
+
+    def _apply_chat_template_and_processor(
+        self,
+        messages_batch: List[Any],
+        **processor_kwargs: Any,
+    ) -> Dict[str, Any]:
+        prompts = self.processor.apply_chat_template(
+            messages_batch,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        return self.processor(
+            text=prompts,
+            return_tensors="pt",
+            padding=True,
+            **processor_kwargs,
+        )
+
+    def _inject_mm_token_types_and_validate_bos(self, encoded: Dict[str, Any]) -> None:
+        if self._caps["needs_mm_token_type_ids_injection"]:
+            inject_mm_token_type_ids(encoded)
+        if hasattr(self.processor, "tokenizer"):
+            validate_bos_tokens_present(encoded, self.processor.tokenizer)
+
+    def _labels_with_prompt_mask_and_attention_padding(self, encoded: Dict[str, Any]) -> None:
+        """Clone ``input_ids`` → ``labels``, mask prompt tokens, then mask padding via ``attention_mask``."""
+        labels = encoded["input_ids"].clone()
+        mask_gemma_prompt_tokens(
+            labels,
+            encoded["input_ids"],
+            self.processor.tokenizer,
+            self._warned_prompt_masking,
+            control_token=self._caps["control_token"],
+        )
+        am = encoded.get("attention_mask")
+        if am is not None:
+            labels[am == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+        encoded["labels"] = labels
+
+    def _labels_with_pad_and_prompt_mask_if_missing(self, encoded: Dict[str, Any]) -> None:
+        """Audio path: build ``labels`` only if the processor did not set them; mask pad ids then prompt."""
+        if "labels" in encoded:
+            return
+        labels = encoded["input_ids"].clone()
+        if "attention_mask" in encoded and hasattr(self.processor, "tokenizer"):
+            pad_id = self.processor.tokenizer.pad_token_id
+            labels[labels == pad_id] = GemmaTrainingConstants.IGNORE_TOKEN_ID
+
+        mask_gemma_prompt_tokens(
+            labels,
+            encoded["input_ids"],
+            self.processor.tokenizer,
+            self._warned_prompt_masking,
+            control_token=self._caps["control_token"],
+        )
+        encoded["labels"] = labels
+
+
+class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
     """Batch image+text examples for Gemma multimodal (captioning or VQA).
 
     Uses ``apply_chat_template(..., tokenize=False)`` then ``processor(text=..., images=...)``.
@@ -329,36 +398,9 @@ class DataCollatorGemmaImage:
                 ]
             )
 
-        prompts = self.processor.apply_chat_template(
-            messages_batch,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        encoded = self.processor(
-            text=prompts,
-            images=images,
-            return_tensors="pt",
-            padding=True,
-        )
-
-        if self._caps["needs_mm_token_type_ids_injection"]:
-            inject_mm_token_type_ids(encoded)
-
-        if hasattr(self.processor, "tokenizer"):
-            validate_bos_tokens_present(encoded, self.processor.tokenizer)
-
-        labels = encoded["input_ids"].clone()
-        mask_gemma_prompt_tokens(
-            labels,
-            encoded["input_ids"],
-            self.processor.tokenizer,
-            self._warned_prompt_masking,
-            control_token=self._caps["control_token"],
-        )
-        am = encoded.get("attention_mask")
-        if am is not None:
-            labels[am == 0] = GemmaTrainingConstants.IGNORE_TOKEN_ID
-        encoded["labels"] = labels
+        encoded = self._apply_chat_template_and_processor(messages_batch, images=images)
+        self._inject_mm_token_types_and_validate_bos(encoded)
+        self._labels_with_prompt_mask_and_attention_padding(encoded)
         return encoded
 
 
@@ -489,7 +531,7 @@ class DataCollatorGemmaText:
         return encoded
 
 
-class DataCollatorGemmaAudio:
+class DataCollatorGemmaAudio(DataCollatorGemmaMultimodal):
     """Data collator that packs audio+text into Gemma inputs via AutoProcessor.
 
     Cross-file connections:
@@ -562,39 +604,11 @@ class DataCollatorGemmaAudio:
         # Real Gemma multimodal processors do not accept processor(messages=...).
         # apply_chat_template(tokenize=True) would try load_audio() on placeholder paths;
         # we render prompts first, then attach pre-loaded waveforms via processor(text=..., audio=...).
-        prompts = self.processor.apply_chat_template(
+        encoded = self._apply_chat_template_and_processor(
             messages_batch,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        encoded = self.processor(
-            text=prompts,
             audio=audios,
-            return_tensors="pt",
-            padding=True,
             sampling_rate=sampling_rate,
         )
-
-        if self._caps["needs_mm_token_type_ids_injection"]:
-            inject_mm_token_type_ids(encoded)
-
-        if hasattr(self.processor, "tokenizer"):
-            # After apply_chat_template + processor(); template adds BOS — safe to validate here.
-            validate_bos_tokens_present(encoded, self.processor.tokenizer)
-
-        if "labels" not in encoded:
-            labels = encoded.get("input_ids").clone()
-            if "attention_mask" in encoded and hasattr(self.processor, "tokenizer"):
-                pad_id = self.processor.tokenizer.pad_token_id
-                labels[labels == pad_id] = GemmaTrainingConstants.IGNORE_TOKEN_ID
-
-            mask_gemma_prompt_tokens(
-                labels,
-                encoded["input_ids"],
-                self.processor.tokenizer,
-                self._warned_prompt_masking,
-                control_token=self._caps["control_token"],
-            )
-            encoded["labels"] = labels
-
+        self._inject_mm_token_types_and_validate_bos(encoded)
+        self._labels_with_pad_and_prompt_mask_if_missing(encoded)
         return encoded
