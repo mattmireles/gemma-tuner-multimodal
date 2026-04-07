@@ -251,7 +251,7 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
                 and tf_ver < Version(MIN_TRANSFORMERS_GEMMA4)
             ):
                 choice_text += " (requires Gemma 4 install: pip install -r requirements-gemma4.txt)"
-        except ValueError:
+        except RuntimeError:
             pass
 
         # Default stack in this repo: Gemma 3n E2B instruct (see README)

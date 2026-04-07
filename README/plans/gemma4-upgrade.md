@@ -319,7 +319,7 @@ Family detection and support checks live in one helper. `finetune.py` gets the r
 - **User follows the Gemma 4 install steps with an incompatible torch / peft.** → Preflight runs `assert_family_supported` which checks transformers version. Add a follow-up check for peft >= 0.18.1 and surface a warning. Out of scope for the version assertion proper.
 - **Image PR ships before this plan and re-hardcodes `<start_of_turn>`.** → Coordinate sequencing: image PR consumes the family helper if it lands first, otherwise this plan retrofits it. Either path is ~10 lines.
 - **Collator constructor signature change breaks downstream callers.** → `family` is required and keyword-only, so missing wiring fails immediately in tests instead of silently treating Gemma 4 as 3n.
-- **Gemma 4 tests run on CI with no compatibility install and silently always-skip.** → CI matrix has two jobs: `base` (3n only, 4 tests skip with reason) and `gemma4` (`pip install -e .` + `pip install -r requirements-gemma4.txt`, both run). Catches "always-skipping" via the second job.
+- **Gemma 4 tests run on CI with no compatibility install and silently always-skip.** → CI matrix has two jobs: `base` (3n only, 4 tests skip with reason) and `gemma4` (`pip install -e .` + `pip install -r requirements-gemma4.txt`, both run). The `unit-gemma4` job sets `GEMMA_MACOS_EXPECT_GEMMA4_STACK=1`; `tests/test_gemma4_ci_guard.py` asserts `transformers>=5.5` so a bad resolver fails the job instead of skipping smoke.
 - **Docs overpromise repo-wide Gemma 4 support when only `finetune` is fully upgraded.** → README must explicitly separate "Gemma 4 training path supported" from "non-training entrypoints still 3n-only" until those callers are upgraded.
 
 ## Critical Reminder
