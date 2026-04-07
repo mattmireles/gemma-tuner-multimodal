@@ -1,4 +1,4 @@
-# Gemma Audio Fine-Tuner
+# Gemma Multimodal Fine-Tuner
 
 ```text
      ██████╗ ███████╗███╗   ███╗███╗   ███╗ █████╗
@@ -11,9 +11,9 @@
               🍎 Fine-Tuner for Apple Silicon
 ```
 
-Same artwork as the `gemma-macos-tuner wizard` welcome screen (`gemma_tuner/wizard/ui.py`).
-
 Train **Google Gemma** multimodal (audio + text) models on your own data—with **LoRA**, **PyTorch**, and first-class **Apple Silicon (MPS)** support. The CLI is boring on purpose; your models do not have to be.
+
+**Source:** [github.com/mattmireles/gemma-tuner-multimodal](https://github.com/mattmireles/gemma-tuner-multimodal) (public).
 
 ---
 
