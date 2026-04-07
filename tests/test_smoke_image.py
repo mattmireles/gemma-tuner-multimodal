@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from tests.test_gemma_image_collator import _FakeImageProcessor
+from tests._fakes import FakeImageProcessor
 
 
 def test_image_modality_dataset_and_collator_batch(tmp_path):
@@ -62,7 +62,7 @@ max_duration = 30.0
     if path_val and not Path(path_val).is_absolute():
         path_val = str(Path(dataset_dir) / path_val)
 
-    proc = _FakeImageProcessor()
+    proc = FakeImageProcessor()
     apply_image_token_budget_to_processor(proc, 70)
     collator = DataCollatorGemmaImage(
         processor=proc,

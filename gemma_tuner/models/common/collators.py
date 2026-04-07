@@ -208,6 +208,13 @@ def apply_image_token_budget_to_processor(processor: Any, budget: int) -> None:
     """
     b = int(budget)
     if not hasattr(processor, "image_seq_length"):
+        logger.warning(
+            "apply_image_token_budget_to_processor: processor %r has no image_seq_length; "
+            "cannot apply image_token_budget=%s (train/serve mismatch risk). "
+            "Use a Gemma multimodal processor or a compatible transformers revision.",
+            type(processor).__name__,
+            b,
+        )
         return
     if int(getattr(processor, "image_seq_length", 0)) == b:
         return
@@ -227,6 +234,8 @@ def _load_image_as_rgb(path: Any) -> Any:
     try:
         with Image.open(path) as im:
             return im.convert("RGB")
+    except FileNotFoundError:
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to load image {path!r}: {e}") from e
 
