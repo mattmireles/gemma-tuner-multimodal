@@ -56,7 +56,7 @@ echo "   or run this script with: source setup_mps.sh"
 # Install dependencies
 echo ""
 echo "Installing dependencies..."
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 
 # Verify MPS support
 echo ""

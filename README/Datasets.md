@@ -137,7 +137,7 @@ These keys can appear in `[DEFAULT]`, `[dataset:…]`, `[model:…]`, or `[profi
 | `image_path_column` | `image_path` | CSV column for the image file path (local or supported URI). |
 | `image_token_budget` | `280` | Vision token budget for the processor. Must be one of `70`, `140`, `280`, `560`, `1120` (train/serve must match). |
 
-See `config.ini.example` for commented examples.
+See `config/config.ini.example` for commented examples.
 
 ## Dataset Loading
 

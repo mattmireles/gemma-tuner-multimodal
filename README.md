@@ -52,11 +52,11 @@ If your data lives in GCS or BigQuery, you can do all of this on a laptop withou
 
 ## Supported models
 
-Training targets **Gemma multimodal (text + image + audio)** checkpoints loaded via `base_model` in [`config.ini`](config.ini) and routed to [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py). The default file ships these **`[model:…]`** entries (LoRA on top of the Hub weights):
+Training targets **Gemma multimodal (text + image + audio)** checkpoints loaded via `base_model` in [`config/config.ini`](config/config.ini) and routed to [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py). The default file ships these **`[model:…]`** entries (LoRA on top of the Hub weights):
 
-| Model key (`config.ini`) | Hugging Face `base_model` | Notes |
+| Model key (in `config/config.ini`) | Hugging Face `base_model` | Notes |
 | --- | --- | --- |
-| `gemma-4-e2b-it` | [`google/gemma-4-E2B-it`](https://huggingface.co/google/gemma-4-E2B-it) | Gemma 4 instruct, ~2B — requires `requirements-gemma4.txt` (see Installation) |
+| `gemma-4-e2b-it` | [`google/gemma-4-E2B-it`](https://huggingface.co/google/gemma-4-E2B-it) | Gemma 4 instruct, ~2B — requires `requirements/requirements-gemma4.txt` (see Installation) |
 | `gemma-4-e4b-it` | [`google/gemma-4-E4B-it`](https://huggingface.co/google/gemma-4-E4B-it) | Gemma 4 instruct, ~4B — requires Gemma 4 stack |
 | `gemma-4-e2b` | [`google/gemma-4-E2B`](https://huggingface.co/google/gemma-4-E2B) | Gemma 4 base — requires Gemma 4 stack |
 | `gemma-4-e4b` | [`google/gemma-4-E4B`](https://huggingface.co/google/gemma-4-E4B) | Gemma 4 base — requires Gemma 4 stack |
@@ -78,7 +78,7 @@ Wizard time and memory hints come from [`gemma_tuner/wizard/base.py`](gemma_tune
 | [`gemma_tuner/scripts/finetune.py`](gemma_tuner/scripts/finetune.py) | **Router**: only models whose name contains `gemma` → [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py). |
 | [`gemma_tuner/utils/device.py`](gemma_tuner/utils/device.py) | MPS → CUDA → CPU selection, sync helpers, memory hints. |
 | [`gemma_tuner/utils/dataset_utils.py`](gemma_tuner/utils/dataset_utils.py) | CSV loads, patches, blacklist/protection semantics. |
-| [`gemma_tuner/wizard/`](gemma_tuner/wizard/) | Questionary + Rich UI; training is spawned with `python -m main finetune …` from the repo root (see [`gemma_tuner/wizard/runner.py`](gemma_tuner/wizard/runner.py)). |
+| [`gemma_tuner/wizard/`](gemma_tuner/wizard/) | Questionary + Rich UI; training is spawned with `python -m gemma_tuner.main finetune …` from the repo root (see [`gemma_tuner/wizard/runner.py`](gemma_tuner/wizard/runner.py)). |
 
 **Run layout** (typical):
 
@@ -156,12 +156,12 @@ pip install -e .
 The default dependency pin is tested for **Gemma 3n** on Transformers 4.x. To train or load **Gemma 4** checkpoints you need a newer Transformers line (see [`README/plans/gemma4-upgrade.md`](README/plans/gemma4-upgrade.md)):
 
 ```bash
-pip install -r requirements-gemma4.txt
+pip install -r requirements/requirements-gemma4.txt
 ```
 
 Use a **separate virtual environment** if you want to keep a Gemma 3n-only env and a Gemma 4 env side by side.
 
-**Gemma 3n vs Gemma 4 elsewhere:** `pip install -e .` is enough for Gemma 3n everywhere (including `finetune`). Gemma 4 **training** needs `requirements-gemma4.txt`. Several **non-training** commands (`gemma_generate`, dataset-prep validation used for multimodal probing, ASR eval, etc.) still **reject Gemma 4** model ids with an explicit error until those code paths are upgraded; **`export`** uses the same family-aware loader as `finetune`. Otherwise use a Gemma 3n id or run `finetune` for Gemma 4.
+**Gemma 3n vs Gemma 4 elsewhere:** `pip install -e .` is enough for Gemma 3n everywhere (including `finetune`). Gemma 4 **training** needs `requirements/requirements-gemma4.txt`. Several **non-training** commands (`gemma_generate`, dataset-prep validation used for multimodal probing, ASR eval, etc.) still **reject Gemma 4** model ids with an explicit error until those code paths are upgraded; **`export`** uses the same family-aware loader as `finetune`. Otherwise use a Gemma 3n id or run `finetune` for Gemma 4.
 
 ### 5. Run the wizard
 
@@ -169,7 +169,7 @@ Use a **separate virtual environment** if you want to keep a Gemma 3n-only env a
 gemma-macos-tuner wizard
 ```
 
-The wizard walks you through model selection, dataset config, and training — answering questions and writing `config.ini` for you.
+The wizard walks you through model selection, dataset config, and training — answering questions and writing `config/config.ini` for you.
 
 > **Before the wizard downloads model weights**, you need a Hugging Face account with access to Gemma.
 > Accept the license on the [model card](https://huggingface.co/google/gemma-3n-E2B-it), then authenticate:
@@ -207,7 +207,7 @@ gemma-macos-tuner runs list
 gemma-macos-tuner wizard
 ```
 
-**Migration from `main.py` / old habits:** [`MIGRATION.md`](MIGRATION.md). Runs management moved to the `runs` subcommand—not a separate `manage.py` in this tree.
+**Migration from `main.py` / old habits:** [`docs/MIGRATION.md`](docs/MIGRATION.md). Runs management moved to the `runs` subcommand—not a separate `manage.py` in this tree.
 
 ---
 
@@ -305,7 +305,7 @@ python tools/eval_gemma_asr.py \
 ## Data: CSVs, GCS, BigQuery
 
 - **Local / HTTP / GCS paths** in your prepared CSV; use `gemma-macos-tuner prepare <profile> --no-download` to avoid copying GCS audio locally.
-- **BigQuery import** (wizard or scripts): needs `pip install .[gcp]` and Application Default Credentials (`gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS`). The wizard can materialize `_prepared.csv` and append a dataset section to `config.ini`.
+- **BigQuery import** (wizard or scripts): needs `pip install .[gcp]` and Application Default Credentials (`gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS`). The wizard can materialize `_prepared.csv` and append a dataset section to `config/config.ini`.
 
 Patch layout (by dataset `source`):
 
@@ -340,13 +340,13 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 ```
 
-Preprocessing worker count and dataloader settings are controlled from `config.ini`; defaults favor using available CPU cores for `Dataset.map`.
+Preprocessing worker count and dataloader settings are controlled from `config/config.ini`; defaults favor using available CPU cores for `Dataset.map`.
 
 ---
 
 ## CI & tests
 
-Workflows under [`.github/workflows/`](.github/workflows/): lint (`ruff`), fast tests (`pytest -k "not slow"`), macOS smoke. Regenerate lockfiles with `pip-compile` when you change `pyproject.toml`—see comments in [`requirements.txt`](requirements.txt).
+Workflows under [`.github/workflows/`](.github/workflows/): lint (`ruff`), fast tests (`pytest -k "not slow"`), macOS smoke. Regenerate lockfiles with `pip-compile` when you change `pyproject.toml`—see comments in [`requirements/requirements.txt`](requirements/requirements.txt).
 
 ---
 
@@ -364,14 +364,14 @@ Runs update `output/experiments.csv` and optional SQLite—handy SQL examples ar
 | MPS not available | macOS 12.3+, arm64 Python, current PyTorch. |
 | OOM / swap storm | Smaller batch, gradient checkpointing, lower `PYTORCH_MPS_HIGH_WATERMARK_RATIO`. |
 | Slow training with fallback env on | Unset `PYTORCH_ENABLE_MPS_FALLBACK` after debugging. |
-| Config not found | `GEMMA_TUNER_CONFIG` or run from the directory that contains `config.ini`. |
+| Config not found | `GEMMA_TUNER_CONFIG`, or run from the repo with `config/config.ini`, or pass `--config`. |
 | 401 / gated model / cannot download weights | Accept the license on the model’s Hugging Face page; run `huggingface-cli login` or set `HF_TOKEN`. |
 
 ---
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Prefer extending `cli_typer.py` and shared helpers in `gemma_tuner/core/` over one-off scripts.
+See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md). Prefer extending `cli_typer.py` and shared helpers in `gemma_tuner/core/` over one-off scripts.
 
 ---
 

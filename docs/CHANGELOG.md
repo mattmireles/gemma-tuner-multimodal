@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Repository layout: default `config.ini` lives under `config/`; pip requirement files under `requirements/`; contributor docs under `docs/`; legacy `python main.py` shims under `entrypoints/`.
+
 ## [0.2.0] - 2025-08-19
 
 ### Added

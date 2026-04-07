@@ -2,7 +2,7 @@
 """Compatibility shim for legacy ``main.py`` usage.
 
 Canonical entrypoint is now `gemma-macos-tuner` (`gemma_tuner.cli_typer`).
-This file keeps `python main.py ...` functional by delegating to
+This file keeps `python entrypoints/main.py ...` functional by delegating to
 `gemma_tuner.main`.
 """
 

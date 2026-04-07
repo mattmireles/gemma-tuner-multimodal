@@ -22,7 +22,7 @@ from gemma_tuner.models.gemma.finetune import main as gemma_train
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gemma tiny overfit")
     ap.add_argument("--profile", default="gemma-lora-test", help="Profile name in config.ini")
-    ap.add_argument("--config", default="config.ini", help="Path to config.ini")
+    ap.add_argument("--config", default="config/config.ini", help="Path to config.ini")
     ap.add_argument("--max-samples", type=int, default=32, help="Limit training samples")
     ap.add_argument("--output", default="output/gemma_tiny_overfit", help="Output directory")
     args = ap.parse_args()

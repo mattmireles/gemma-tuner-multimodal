@@ -78,13 +78,13 @@ def _verify_dataframe_dependencies() -> None:
         import pandas  # type: ignore  # noqa: F401
     except Exception:
         raise RuntimeError(
-            "Missing dependency: pandas. Install with 'pip install pandas' or 'pip install -r requirements.txt'."
+            "Missing dependency: pandas. Install with 'pip install pandas' or 'pip install -r requirements/requirements.txt'."
         )
     try:
         import db_dtypes  # type: ignore  # noqa: F401
     except Exception:
         raise RuntimeError(
-            "Missing dependency: db-dtypes. Install with 'pip install db-dtypes' or 'pip install -r requirements.txt'."
+            "Missing dependency: db-dtypes. Install with 'pip install db-dtypes' or 'pip install -r requirements/requirements.txt'."
         )
 
 

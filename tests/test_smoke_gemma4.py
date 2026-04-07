@@ -20,7 +20,7 @@ TINY_GEMMA = "fxmarty/tiny-random-GemmaForCausalLM"
 @pytest.mark.integration
 @pytest.mark.skipif(
     Version(metadata.version("transformers")) < Version("5.5.0"),
-    reason="Gemma 4 training path requires transformers>=5.5 (requirements-gemma4.txt)",
+    reason="Gemma 4 training path requires transformers>=5.5 (requirements/requirements-gemma4.txt)",
 )
 def test_text_completion_smoke_two_steps_gemma4_family(tmp_path, monkeypatch):
     """Forces ``detect_family`` → GEMMA_4 so ``apply_clippable_linear_patch`` runs before load."""

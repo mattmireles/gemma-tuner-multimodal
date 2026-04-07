@@ -169,5 +169,6 @@ README/plans/
 Claude.md
 
 # User-specific runtime config — may contain GCP project IDs written by the wizard.
-# Commit config.ini.example instead; copy it to config.ini to get started.
+# Commit config/config.ini.example instead; copy it to config/config.ini to get started.
+config/config.ini
 config.ini

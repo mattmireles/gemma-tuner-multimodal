@@ -40,7 +40,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: |
-            See CHANGELOG.md for details.
+            See docs/CHANGELOG.md for details.
           files: |
             dist/*
         env:

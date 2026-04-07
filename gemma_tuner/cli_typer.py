@@ -16,7 +16,7 @@ Key responsibilities:
 - Device configuration normalization for Apple Silicon optimization
 
 Called by:
-- Direct shell invocation: `python cli_typer.py <command> <args>`
+- Direct shell invocation: `python entrypoints/cli_typer.py <command> <args>`
 - Shell alias: `gemma-macos-tuner <command> <args>` (if configured)
 - CI/CD pipelines using modern CLI patterns
 - Automated testing frameworks via Typer's testing utilities
@@ -131,7 +131,6 @@ class DefaultPaths:
     """Default file paths used across multiple commands for consistency."""
 
     DEFAULT_OUTPUT_DIR = FileSystem.OUTPUT_DIR_DEFAULT
-    DEFAULT_CONFIG_FILE = "config.ini"
 
 
 # CLI Application Instance with Enhanced Help
@@ -165,7 +164,7 @@ def _normalize_device_defaults(profile_config: ProfileConfig) -> None:
 @app.command()
 def prepare(
     dataset: str = typer.Argument(..., help="Dataset name as defined in config.ini [dataset:*]"),
-    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to configuration file (default: repo config)"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
 ):
     """Prepare dataset for training by downloading and preprocessing audio files.
@@ -185,7 +184,7 @@ def prepare(
 
     Args:
         dataset: Dataset name as defined in config.ini [dataset:*] sections
-        config: Path to INI configuration file (default: config.ini)
+        config: Path to INI configuration file (default: config/config.ini or config.ini)
         json_logging: Enable structured JSON logging format
 
     Side effects:
@@ -200,7 +199,7 @@ def prepare(
 @app.command(name="prepare-granary")
 def prepare_granary(
     profile: str = typer.Argument(..., help="Dataset profile name for Granary dataset (e.g., granary-en)"),
-    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to configuration file (default: repo config)"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
 ):
     """Prepare NVIDIA Granary dataset for training with optimized validation and streaming support.
@@ -219,7 +218,7 @@ def prepare_granary(
 
     Args:
         profile: Dataset profile name (e.g., granary-en) as defined in config.ini
-        config: Path to INI configuration file (default: config.ini)
+        config: Path to INI configuration file (default: config/config.ini or config.ini)
         json_logging: Enable structured JSON logging format
 
     Side effects:
@@ -233,7 +232,7 @@ def prepare_granary(
     from gemma_tuner.scripts.prepare_granary import prepare_granary as _prepare_granary
 
     try:
-        manifest_path = _prepare_granary(profile)
+        manifest_path = _prepare_granary(profile, config_path=config)
         typer.echo("✅ Granary dataset prepared successfully!")
         typer.echo(f"📄 Manifest: {manifest_path}")
         typer.echo(f"🎯 Ready for training with profile: {profile}")
@@ -245,7 +244,7 @@ def prepare_granary(
 @app.command()
 def finetune(
     profile: str = typer.Argument(..., help="Profile name as defined under [profile:*]"),
-    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to configuration file (default: repo config)"),
     max_samples: Optional[int] = typer.Option(None, help="Max samples for quick runs"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
     log_file: Optional[str] = typer.Option(None, help="Optional file path for logs"),
@@ -274,7 +273,7 @@ def finetune(
 
     Args:
         profile: Training profile name as defined in config.ini [profile:*] sections
-        config: Path to INI configuration file (default: config.ini)
+        config: Path to INI configuration file (default: config/config.ini or config.ini)
         max_samples: Optional sample limit for quick training runs
         json_logging: Enable structured JSON logging format
         log_file: Optional custom log file path (default: run_dir/run.log)
@@ -349,7 +348,7 @@ def finetune(
 @app.command()
 def evaluate(
     target: str = typer.Argument(..., help="Profile name or model+dataset (e.g., gemma-3n-e2b-it+test_streaming)"),
-    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to configuration file (default: repo config)"),
     dataset: Optional[str] = typer.Option(None, help="Dataset override when using a profile"),
     max_samples: Optional[int] = typer.Option(None, help="Max samples for quick runs"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
@@ -385,7 +384,7 @@ def evaluate(
 
     Args:
         target: Profile name or model+dataset combination for evaluation
-        config: Path to INI configuration file (default: config.ini)
+        config: Path to INI configuration file (default: config/config.ini or config.ini)
         dataset: Dataset override when evaluating a profile on different data
         max_samples: Optional sample limit for quick evaluation runs
         json_logging: Enable structured JSON logging format
@@ -466,7 +465,7 @@ def export(model_path_or_profile: str = typer.Argument(..., help="Model path or 
 @app.command()
 def blacklist(
     profile: str = typer.Argument(..., help="Profile to generate blacklist for"),
-    config: str = typer.Option(DefaultPaths.DEFAULT_CONFIG_FILE, help="Path to configuration file"),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to configuration file (default: repo config)"),
     split: Optional[str] = typer.Option(None, help="Split override for blacklist generation"),
     max_samples: Optional[int] = typer.Option(None, help="Max samples for quick runs"),
     json_logging: bool = typer.Option(False, "--json-logging", help="Enable JSON logs"),
@@ -496,7 +495,7 @@ def blacklist(
 
     Args:
         profile: Training profile name used to locate the fine-tuned model
-        config: Path to INI configuration file (default: config.ini)
+        config: Path to INI configuration file (default: config/config.ini or config.ini)
         split: Dataset split to analyze (defaults to profile's train split)
         max_samples: Optional sample cap for quick blacklist analysis
         json_logging: Enable structured JSON logging format
@@ -910,7 +909,7 @@ def system_check():
     typer.echo("✅ system-check completed")
 
 
-def _load_config(path: str):
+def _load_config(path: Optional[str]):
     """Load an INI configuration into ConfigParser with no side effects.
 
     Resolves the config path via core.ops._resolve_config_path() so that the

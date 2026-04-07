@@ -89,7 +89,7 @@ def assert_family_supported(family: GemmaFamily) -> None:
     if family == GemmaFamily.GEMMA_4:
         raise RuntimeError(
             f"Gemma 4 requires transformers>={MIN_TRANSFORMERS_GEMMA4}; you have {got}. "
-            "Install the Gemma 4 stack: pip install -r requirements-gemma4.txt "
+            "Install the Gemma 4 stack: pip install -r requirements/requirements-gemma4.txt "
             "(see README.md), or use a Gemma 3n model id."
         )
     raise RuntimeError(f"transformers {got} is below the minimum for Gemma 3n in this repo ({need}).")
@@ -117,7 +117,7 @@ def assert_entrypoint_support(entrypoint: str, family: GemmaFamily) -> None:
     raise RuntimeError(
         f"Gemma 4 is not implemented in {entrypoint!r} yet. "
         "Use `gemma-macos-tuner finetune` with a Gemma 4 model after "
-        "`pip install -r requirements-gemma4.txt`, or switch to a Gemma 3n model id."
+        "`pip install -r requirements/requirements-gemma4.txt`, or switch to a Gemma 3n model id."
     )
 
 

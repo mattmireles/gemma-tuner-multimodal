@@ -255,7 +255,7 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
         hf_id = str(specs.get("hf_id") or "")
         try:
             if detect_family(hf_id) == GemmaFamily.GEMMA_4 and tf_ver < Version(MIN_TRANSFORMERS_GEMMA4):
-                choice_text += " (requires Gemma 4 install: pip install -r requirements-gemma4.txt)"
+                choice_text += " (requires Gemma 4 install: pip install -r requirements/requirements-gemma4.txt)"
         except RuntimeError:
             pass
 

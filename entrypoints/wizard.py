@@ -1,7 +1,7 @@
 """Backward-compatible entrypoint. See wizard/ package for implementation.
 
 This file is kept for compatibility with documented invocations:
-  python wizard.py
+  python entrypoints/wizard.py
 
 The actual implementation lives in the wizard/ package.
 """

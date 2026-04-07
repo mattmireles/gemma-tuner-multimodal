@@ -23,7 +23,7 @@ This guide focuses on **LoRA-style** adaptation for multimodal Gemma on macOS wi
 
 Some **standalone** Hugging Face scripts or third-party writeups assume **Transformers 5.x** or **newer PEFT** for bleeding-edge Gemma 4 features. That is **not** the constraint here: do not upgrade past the repo’s upper bound without running tests and `gemma_preflight`. If you maintain a **separate** environment outside this project, consult [Hugging Face model cards](https://huggingface.co/google) and release notes for minimum versions.
 
-Audio preprocessing in training stacks typically uses **librosa** + **soundfile**; vision stacks use **Pillow**. Match versions to your lockfile or `requirements.txt`.
+Audio preprocessing in training stacks typically uses **librosa** + **soundfile**; vision stacks use **Pillow**. Match versions to your lockfile or `requirements/requirements.txt`.
 
 ## MPS memory and `PYTORCH_MPS_HIGH_WATERMARK_RATIO`
 

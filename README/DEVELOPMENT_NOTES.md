@@ -4,9 +4,9 @@
 We support deterministic installs via a lockfile using `uv` (preferred) or `pip-tools`.
 
 - Generate (uv):
-  - `uv pip compile requirements.txt -o requirements.lock`
+  - `uv pip compile requirements/requirements.txt -o requirements.lock`
 - Generate (pip-tools):
-  - `pip-compile --generate-hashes -o requirements.lock requirements.txt`
+  - `pip-compile --generate-hashes -o requirements.lock requirements/requirements.txt`
 
 Install from lockfile:
 - `uv pip install -r requirements.lock` or `pip install -r requirements.lock`

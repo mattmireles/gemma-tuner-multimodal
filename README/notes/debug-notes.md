@@ -83,7 +83,7 @@ Tokenizer `truncation=True` + `max_length` applies to the full rendered chat; lo
 
 ### Summary
 
-First training step crashed with `RuntimeError: MPS backend out of memory` (~41 GiB allocated) while fine-tuning `gemma-4-e2b-it` with LoRA on text CSV data. Mitigations: **MPS + text** forces `per_device_train_batch_size=1` and `per_device_eval_batch_size=1`, enables **gradient checkpointing** by default for MPS text (opt out via `GEMMA_MPS_ALLOW_NO_GRADIENT_CHECKPOINTING`), passes `gradient_checkpointing` into `TrainingArguments`, calls `enable_input_require_grads()` when checkpointing is on, and caps `max_seq_length` on MPS text using `GEMMA_MPS_MAX_SEQ_LENGTH` (default 2048). Added profile `gemma-csv-gemma4-mps-text` in `config.ini`.
+First training step crashed with `RuntimeError: MPS backend out of memory` (~41 GiB allocated) while fine-tuning `gemma-4-e2b-it` with LoRA on text CSV data. Mitigations: **MPS + text** forces `per_device_train_batch_size=1` and `per_device_eval_batch_size=1`, enables **gradient checkpointing** by default for MPS text (opt out via `GEMMA_MPS_ALLOW_NO_GRADIENT_CHECKPOINTING`), passes `gradient_checkpointing` into `TrainingArguments`, calls `enable_input_require_grads()` when checkpointing is on, and caps `max_seq_length` on MPS text using `GEMMA_MPS_MAX_SEQ_LENGTH` (default 2048). Added profile `gemma-csv-gemma4-mps-text` in `config/config.ini`.
 
 ### Symptom
 
@@ -104,7 +104,7 @@ Unified memory pressure from **Gemma 4 multimodal** weights + **LoRA** + **eager
 **Files:**
 
 - `gemma_tuner/models/gemma/finetune.py` — MPS text batch clamp, gradient checkpointing wiring, optional `GEMMA_MPS_ALLOW_NO_GRADIENT_CHECKPOINTING`, `GEMMA_MPS_MAX_SEQ_LENGTH` cap, `enable_input_require_grads`.
-- `config.ini` — `[profile:gemma-csv-gemma4-mps-text]` with conservative batch/accumulation settings.
+- `config/config.ini` — `[profile:gemma-csv-gemma4-mps-text]` with conservative batch/accumulation settings.
 
 ### Verification
 

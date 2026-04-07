@@ -113,9 +113,14 @@ def _ensure_modality_local_csv_only(
         )
 
 
-# Anchored config.ini path — resolves relative to the project root regardless of cwd.
+# Anchored config path — resolves relative to the project root regardless of cwd.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_CONFIG_INI = _REPO_ROOT / "config.ini"
+_CONFIG_INI = _REPO_ROOT / "config" / "config.ini"
+
+
+def _has_cwd_config() -> bool:
+    """True if a config file is present in cwd (legacy root or under config/)."""
+    return Path("config.ini").exists() or Path("config/config.ini").exists()
 
 
 def resolve_data_datasets_dir(dataset_name: str) -> str:
@@ -131,7 +136,7 @@ def resolve_data_datasets_dir(dataset_name: str) -> str:
     package), so CSVs and image files resolve consistently regardless of cwd.
     """
     name = str(dataset_name).strip()
-    if Path("config.ini").exists():
+    if _has_cwd_config():
         return str((Path("data") / "datasets" / name).resolve())
     return str((_REPO_ROOT / "data" / "datasets" / name).resolve())
 
@@ -147,7 +152,7 @@ def resolve_patches_base_dir(patches_dir: str) -> str:
     p = Path(raw)
     if p.is_absolute():
         return str(p.resolve())
-    if Path("config.ini").exists():
+    if _has_cwd_config():
         return str((Path.cwd() / p).resolve())
     return str((_REPO_ROOT / p).resolve())
 
@@ -168,8 +173,11 @@ def _get_config() -> configparser.ConfigParser:
     if _config is None:
         _config = configparser.ConfigParser()
         cwd_ini = Path("config.ini")
+        cwd_nested = Path("config/config.ini")
         if cwd_ini.exists():
             _config.read(cwd_ini)
+        elif cwd_nested.exists():
+            _config.read(cwd_nested)
         else:
             _config.read(_CONFIG_INI)
     return _config

@@ -17,7 +17,7 @@ from typing import Optional
 # regardless of the caller's working directory.
 # Layout: gemma_tuner/wizard/config_store.py -> three parents up = repo root.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_CONFIG_INI = _PROJECT_ROOT / "config.ini"
+_CONFIG_INI = _PROJECT_ROOT / "config" / "config.ini"
 
 
 def _read_config() -> configparser.ConfigParser:
