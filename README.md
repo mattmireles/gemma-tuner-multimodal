@@ -139,7 +139,23 @@ If you see `x86_64`, your Python is running under Rosetta. Install a native arm6
 from [python.org](https://www.python.org/downloads/macos/) or via Homebrew (`brew install python@3.12`),
 then recreate the venv.
 
-### 3. Install PyTorch
+### 3. Run the setup helper (recommended)
+
+The setup helper creates `config/config.ini` from the example file and checks your environment:
+
+```bash
+python tools/setup_config.py
+```
+
+This creates a working `config/config.ini` and verifies your environment is ready.
+
+**Manual setup alternative:** If you prefer manual setup, copy the example config:
+
+```bash
+cp config/config.ini.example config/config.ini
+```
+
+### 4. Install PyTorch
 
 ```bash
 pip install torch torchaudio
@@ -151,7 +167,13 @@ pip install torch torchaudio
 pip install -e .
 ```
 
-### 4b. Gemma 4 (optional)
+### 5. Install this package
+
+```bash
+pip install -e .
+```
+
+### 5b. Gemma 4 (optional)
 
 The default dependency pin is tested for **Gemma 3n** on Transformers 4.x. To train or load **Gemma 4** checkpoints you need a newer Transformers line (see [`README/plans/gemma4-upgrade.md`](README/plans/gemma4-upgrade.md)):
 
@@ -163,7 +185,7 @@ Use a **separate virtual environment** if you want to keep a Gemma 3n-only env a
 
 **Gemma 3n vs Gemma 4 elsewhere:** `pip install -e .` is enough for Gemma 3n everywhere (including `finetune`). Gemma 4 **training** needs `requirements/requirements-gemma4.txt`. Several **non-training** commands (`gemma_generate`, dataset-prep validation used for multimodal probing, ASR eval, etc.) still **reject Gemma 4** model ids with an explicit error until those code paths are upgraded; **`export`** uses the same family-aware loader as `finetune`. Otherwise use a Gemma 3n id or run `finetune` for Gemma 4.
 
-### 5. Run the wizard
+### 6. Run the wizard
 
 ```bash
 gemma-macos-tuner wizard

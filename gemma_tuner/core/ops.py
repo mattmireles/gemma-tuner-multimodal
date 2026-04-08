@@ -108,10 +108,11 @@ def _resolve_config_path(explicit_path: str | None = None) -> Path:
 
     raise FileNotFoundError(
         "config.ini not found. Options to fix this:\n"
-        "  1. Run from the project root (copy config/config.ini.example to config/config.ini)\n"
-        "  2. Set the GEMMA_TUNER_CONFIG environment variable:\n"
+        "  1. Run the setup helper: python tools/setup_config.py\n"
+        "  2. Or manually: cp config/config.ini.example config/config.ini\n"
+        "  3. Or set the GEMMA_TUNER_CONFIG environment variable:\n"
         "       export GEMMA_TUNER_CONFIG=/path/to/your/config.ini\n"
-        "  3. Pass --config /path/to/config.ini explicitly"
+        "  4. Or pass --config /path/to/config.ini explicitly"
     )
 
 
