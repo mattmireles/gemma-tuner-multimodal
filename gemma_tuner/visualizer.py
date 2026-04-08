@@ -93,8 +93,11 @@ def _emit_worker_loop() -> None:
         try:
             if app is None or socketio is None:
                 continue
+            # Omit ``to=`` — that broadcasts to all clients. Do not pass
+            # ``broadcast=`` here: Flask-SocketIO 5 forwards to python-socketio
+            # ``Server.emit``, which does not accept that kwarg and would raise.
             with app.app_context():
-                socketio.emit(name, payload, namespace="/", broadcast=True)
+                socketio.emit(name, payload, namespace="/")
             _emit_stats["emits"] = int(_emit_stats.get("emits", 0)) + 1
             if _emit_queue is not None:
                 d = _emit_queue.qsize()
