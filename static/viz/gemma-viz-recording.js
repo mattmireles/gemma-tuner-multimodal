@@ -15,10 +15,17 @@
  */
 (function (V) {
 
+// ── tunables (module scope so the modal counter can read WEBM_FRAMES) ───────
+var WEBM_FRAMES = 1800;  // 60 s × 30 fps — output WebM length
+var GIF_STRIDE  = 6;     // every Nth WebM frame → 1800/6 = 300 GIF frames
+var GIF_DELAY   = 100;   // ms per GIF frame → 10 fps
+var GIF_MAX_W   = 720;   // GIF downscale ceiling for shareable file size
+
 // ── internal state ──────────────────────────────────────────────────────────
 var _mediaStream = null;  // MediaStream from getDisplayMedia
 var _recorder    = null;  // MediaRecorder instance
 var _chunks      = [];    // Blob array accumulating raw frames
+var _cachedMimeType = null;  // Lazy result of pickMimeType()
 
 // ── modal DOM refs (lazily populated) ──────────────────────────────────────
 var _progressBar = null;
@@ -29,16 +36,73 @@ var _frameCount  = null;
 // VP8 and then browser-default for Firefox/Safari compatibility. Safari
 // MediaRecorder produces MP4/H.264 regardless of mimeType; the cascade
 // stops before an error and lets the browser pick its own container.
+//
+// Cached: this is browser-static, so the first call is the only call.
 function pickMimeType() {
+    if (_cachedMimeType !== null) return _cachedMimeType;
     var candidates = [
         'video/webm;codecs=vp9',
         'video/webm;codecs=vp8',
         'video/webm'
     ];
     for (var i = 0; i < candidates.length; i++) {
-        if (MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+        if (MediaRecorder.isTypeSupported(candidates[i])) {
+            _cachedMimeType = candidates[i];
+            return _cachedMimeType;
+        }
     }
-    return '';
+    _cachedMimeType = '';
+    return _cachedMimeType;
+}
+
+// ── _awaitEvent: bounded promise wrapper around a media event ───────────────
+// Every `await new Promise((r) => target.onevent = r)` in this file is a
+// hang waiting to happen — if `error` fires instead, or the event simply
+// never comes (codec quirk, OOM, corrupt blob), the modal sticks forever
+// and the button is permanently `processing`. This helper races the success
+// event against an `error` listener and a timeout watchdog so every await
+// either succeeds, rejects with an error, or rejects with a timeout — never
+// hangs. Always cleans up its listeners and timer to avoid leaks.
+function _awaitEvent(target, eventName, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+        var done = false;
+        // `timer` is declared with `var` so the hoisted binding is visible
+        // inside cleanup() — necessary because cleanup is defined before the
+        // setTimeout call assigns it. cleanup() only ever runs after the
+        // timer is assigned (via either the success listener, the error
+        // listener, or the timer itself), so the read is always defined.
+        var timer;
+        var cleanup = function () {
+            target.removeEventListener(eventName, onEvent);
+            target.removeEventListener('error', onError);
+            if (timer) clearTimeout(timer);
+        };
+        var onEvent = function () {
+            if (done) return;
+            done = true;
+            cleanup();
+            resolve();
+        };
+        var onError = function (e) {
+            if (done) return;
+            done = true;
+            cleanup();
+            // Pull the underlying media error if the target exposes one;
+            // otherwise fall back to the event itself for debug context.
+            var detail = (target && target.error && target.error.message)
+                || (e && e.message)
+                || 'unknown';
+            reject(new Error('media error during ' + eventName + ': ' + detail));
+        };
+        target.addEventListener(eventName, onEvent);
+        target.addEventListener('error', onError);
+        timer = setTimeout(function () {
+            if (done) return;
+            done = true;
+            cleanup();
+            reject(new Error(eventName + ' did not fire within ' + timeoutMs + 'ms'));
+        }, timeoutMs);
+    });
 }
 
 // ── start recording ──────────────────────────────────────────────────────────
@@ -62,18 +126,16 @@ async function startRecording() {
     }
 
     // Build the MediaRecorder before wiring listeners so a constructor
-    // failure can't strand the stream + beforeunload handler. If the
-    // primary mime fails AND the bare fallback also fails, tear down
-    // the freshly-acquired stream and reset the button.
+    // failure can't strand the stream + beforeunload handler. pickMimeType
+    // already filtered through isTypeSupported, so this should not throw,
+    // but a malicious browser extension could mess with the constructor —
+    // catch defensively and tear down the stream if it does.
     var mimeType = pickMimeType();
-    var options  = mimeType ? { mimeType: mimeType } : {};
     var recorder;
     try {
-        try {
-            recorder = new MediaRecorder(stream, options);
-        } catch (e) {
-            recorder = new MediaRecorder(stream);
-        }
+        recorder = mimeType
+            ? new MediaRecorder(stream, { mimeType: mimeType })
+            : new MediaRecorder(stream);
     } catch (e) {
         console.error('[recording] MediaRecorder unavailable:', e);
         stream.getTracks().forEach(function (t) { t.stop(); });
@@ -113,21 +175,36 @@ async function stopAndProcess() {
     _setButtonState('processing');
     window.removeEventListener('beforeunload', _warnBeforeUnload);
 
-    // Stop the recorder and collect the final chunk.
-    var rawBlob = await new Promise(function (resolve) {
-        _recorder.onstop = function () {
-            resolve(new Blob(_chunks, { type: 'video/webm' }));
-        };
+    // Show the modal BEFORE awaiting the recorder drain, so the user sees
+    // immediate feedback that work has begun. The drain itself can take
+    // 100-500ms; without this, the button just goes grey for that window.
+    _showModal();
+
+    // Stop the recorder and collect the final chunk. Bounded by _awaitEvent
+    // so a recorder that fails to fire `stop` doesn't strand the modal.
+    var rawBlob;
+    try {
+        var stopPromise = _awaitEvent(_recorder, 'stop', 10000);
         _recorder.stop();
-    });
+        await stopPromise;
+        rawBlob = new Blob(_chunks, { type: 'video/webm' });
+    } catch (e) {
+        console.error('[recording] recorder stop failed:', e);
+        _hideModal();
+        V.isRecording = false;
+        _setButtonState('idle');
+        if (_mediaStream) {
+            _mediaStream.getTracks().forEach(function (t) { t.stop(); });
+            _mediaStream = null;
+        }
+        return;
+    }
 
     // Release the tab-sharing indicator immediately.
     if (_mediaStream) {
         _mediaStream.getTracks().forEach(function (t) { t.stop(); });
         _mediaStream = null;
     }
-
-    _showModal();
 
     var outputs;
     try {
@@ -144,8 +221,9 @@ async function stopAndProcess() {
     V.isRecording = false;
     // Download WebM first (primary artifact), then GIF (sidecar) with a
     // brief delay so both `a.click()` calls are honored by the browser.
+    // The size guard rejects empty blobs (gifenc finishes with no frames).
     _triggerDownload(outputs.webm, 'webm');
-    if (outputs.gif) {
+    if (outputs.gif && outputs.gif.size > 0) {
         setTimeout(function () {
             _triggerDownload(outputs.gif, 'gif');
         }, 500);
@@ -161,56 +239,48 @@ async function stopAndProcess() {
 // wait for `seeked` to fire (which forces the scan), then read duration —
 // `video.duration` is now the real value. We seek back to 0 before returning
 // so the caller starts from a known position.
+//
+// Both seeks use _awaitEvent so a corrupt blob or a browser that simply
+// fails to fire `seeked` rejects with a timeout instead of hanging the UI.
 async function _resolveDuration(video) {
     if (Number.isFinite(video.duration) && video.duration > 0) {
         return video.duration;
     }
-    await new Promise(function (resolve) {
-        var onSeeked = function () {
-            video.removeEventListener('seeked', onSeeked);
-            resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-        // Number.MAX_SAFE_INTEGER is the documented sentinel for this trick;
-        // the browser clamps to the real end and fires `seeked`.
-        video.currentTime = Number.MAX_SAFE_INTEGER;
-    });
+    var seekedPromise = _awaitEvent(video, 'seeked', 10000);
+    // Number.MAX_SAFE_INTEGER is the documented sentinel for this trick;
+    // the browser clamps to the real end and fires `seeked`.
+    video.currentTime = Number.MAX_SAFE_INTEGER;
+    await seekedPromise;
     var duration = video.duration;
     // Seek back to the start so the caller starts from frame 0.
-    await new Promise(function (resolve) {
-        var onSeeked = function () {
-            video.removeEventListener('seeked', onSeeked);
-            resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-        video.currentTime = 0;
-    });
+    var rewindPromise = _awaitEvent(video, 'seeked', 10000);
+    video.currentTime = 0;
+    await rewindPromise;
     return duration;
 }
 
 // ── seek-and-capture: one pass, two outputs ──────────────────────────────────
-// Loads the raw blob into a hidden <video>, seeks to 1800 evenly-spaced
+// Loads the raw blob into a hidden <video>, seeks to WEBM_FRAMES evenly-spaced
 // timestamps, draws each frame to a canvas, and pushes to a new MediaRecorder
-// for the WebM output. Every 6th frame, a downscaled copy is also quantized
-// and pushed to gifenc for the GIF sidecar — 1800/6 = 300 frames = 30 s @ 10 fps.
+// for the WebM output. Every GIF_STRIDE-th frame, a downscaled copy is also
+// quantized and pushed to gifenc for the GIF sidecar.
 // Doing both in one seek loop avoids paying the video decode cost twice.
 // Result: { webm, gif } — exactly 60 s WebM, 30 s GIF, from the same run.
+//
+// Every async wait uses _awaitEvent so the encode either completes, throws,
+// or times out — never hangs. Inner try/finally guarantees the blob URL,
+// inner MediaRecorder, and capture-stream track are all released even if
+// the seek loop throws partway through.
 async function _encodeOutputs(srcBlob) {
-    var WEBM_FRAMES = 1800;   // 60 s × 30 fps
-    var GIF_STRIDE  = 6;      // every 6th WebM frame → 300 GIF frames
-    var GIF_DELAY   = 100;    // ms per GIF frame → 10 fps
-    var GIF_MAX_W   = 720;    // downscale to keep file size shareable
-
     var video = document.createElement('video');
     var videoUrl = URL.createObjectURL(srcBlob);
     video.src   = videoUrl;
     video.muted = true;
 
-    // try/finally guarantees the blob URL is revoked even if encoding throws
-    // partway through — otherwise a corrupt input or a failing GIF frame
-    // would leave the URL pinned for the lifetime of the page.
+    var mr = null;          // inner MediaRecorder for the speedup output
+    var outStream = null;   // canvas captureStream — needs explicit teardown
     try {
-        await new Promise(function (r) { video.onloadedmetadata = r; });
+        await _awaitEvent(video, 'loadedmetadata', 10000);
 
         // Resolve the real duration (works around Chrome's Infinity bug).
         var duration = await _resolveDuration(video);
@@ -227,18 +297,16 @@ async function _encodeOutputs(srcBlob) {
 
         // captureStream(0) = manual frame push via track.requestFrame(); gives
         // precise control over the output frame rate during the seek loop.
-        var outStream = canvas.captureStream(0);
-        var track     = outStream.getVideoTracks()[0];
+        outStream = canvas.captureStream(0);
 
         var outChunks = [];
         var mimeType  = pickMimeType();
-        var outOptions = mimeType ? { mimeType: mimeType } : {};
-        var mr;
-        try {
-            mr = new MediaRecorder(outStream, outOptions);
-        } catch (e) {
-            mr = new MediaRecorder(outStream);
-        }
+        // pickMimeType returns either a supported MIME or '' (browser default).
+        // No need for a separate fallback constructor — the empty string and
+        // an absent options arg are equivalent to the spec.
+        mr = mimeType
+            ? new MediaRecorder(outStream, { mimeType: mimeType })
+            : new MediaRecorder(outStream);
         mr.ondataavailable = function (e) {
             if (e.data && e.data.size > 0) outChunks.push(e.data);
         };
@@ -261,23 +329,42 @@ async function _encodeOutputs(srcBlob) {
             gifCtx = gifCanvas.getContext('2d');
         }
 
+        // Frozen GIF palette — built once from a representative mid-run frame
+        // (the first GIF frame the loop encodes, see below) and reused for
+        // every subsequent frame. Quantizing per-frame would (a) make the
+        // colors flicker as adjacent frames pick subtly different palette
+        // indices, and (b) burn ~10× the encode time on the slowest call in
+        // the loop. The training visualization is a low-color-diversity
+        // amber-on-black scene, so a single palette holds up well across
+        // the whole recap.
+        var gifPalette = null;
+
+        // The first iteration is special: the video is already at currentTime
+        // = 0 from _resolveDuration, so setting currentTime to 0 again may
+        // not fire `seeked` in all browsers (the spec only says it "may").
+        // Skip the seek for i === 0; subsequent iterations always seek to a
+        // different timestamp.
         for (var i = 0; i < WEBM_FRAMES; i++) {
-            video.currentTime = i * dt;
-            await new Promise(function (r) { video.onseeked = r; });
+            if (i > 0) {
+                var seekPromise = _awaitEvent(video, 'seeked', 10000);
+                video.currentTime = i * dt;
+                await seekPromise;
+            }
 
             // WebM frame (every iteration).
             ctx.drawImage(video, 0, 0);
-            track.requestFrame();
+            outStream.getVideoTracks()[0].requestFrame();
 
-            // GIF frame (every GIF_STRIDE iterations). Quantize per-frame with
-            // rgb444 — slightly lower color fidelity than rgb565 but much faster,
-            // and the amber-on-black palette doesn't stress the format.
+            // GIF frame (every GIF_STRIDE iterations). The palette is built
+            // from the first GIF frame and reused for the rest.
             if (gifEnabled && i % GIF_STRIDE === 0) {
                 gifCtx.drawImage(video, 0, 0, gifWidth, gifHeight);
-                var data    = gifCtx.getImageData(0, 0, gifWidth, gifHeight).data;
-                var palette = quantize(data, 256, { format: 'rgb444' });
-                var indexed = applyPalette(data, palette, 'rgb444');
-                gif.writeFrame(indexed, gifWidth, gifHeight, { palette: palette, delay: GIF_DELAY });
+                var data = gifCtx.getImageData(0, 0, gifWidth, gifHeight).data;
+                if (gifPalette === null) {
+                    gifPalette = quantize(data, 256, { format: 'rgb444' });
+                }
+                var indexed = applyPalette(data, gifPalette, 'rgb444');
+                gif.writeFrame(indexed, gifWidth, gifHeight, { palette: gifPalette, delay: GIF_DELAY });
             }
 
             // Update progress modal — reflects seek progress through the loop.
@@ -289,14 +376,16 @@ async function _encodeOutputs(srcBlob) {
             }
 
             // Yield every 60 frames so the browser stays responsive and doesn't
-            // show an "unresponsive page" warning during the 1800-frame loop.
+            // show an "unresponsive page" warning during the long seek loop.
             if (i % 60 === 59) {
                 await new Promise(function (r) { setTimeout(r, 0); });
             }
         }
 
+        var stopPromise = _awaitEvent(mr, 'stop', 10000);
         mr.stop();
-        await new Promise(function (r) { mr.onstop = r; });
+        await stopPromise;
+        mr = null;  // signal to finally: cleanup already complete
 
         var webmBlob = new Blob(outChunks, { type: 'video/webm' });
         var gifBlob  = null;
@@ -306,7 +395,20 @@ async function _encodeOutputs(srcBlob) {
         }
         return { webm: webmBlob, gif: gifBlob };
     } finally {
+        // Stop the inner MediaRecorder if the loop threw before reaching the
+        // normal stop path. We can't await `mr.stop()` here (finally is sync),
+        // so we just call stop() and let the recorder garbage-collect — its
+        // chunks are already lost on a failure path.
+        if (mr && mr.state !== 'inactive') {
+            try { mr.stop(); } catch (e) { /* nothing to do */ }
+        }
+        // Stop the captureStream track so the canvas can be released.
+        if (outStream) {
+            outStream.getTracks().forEach(function (t) { t.stop(); });
+        }
         URL.revokeObjectURL(videoUrl);
+        video.removeAttribute('src');
+        video.load();
     }
 }
 
@@ -396,7 +498,7 @@ function _showModal() {
         'font-family:var(--mono);' +
         'font-size:11px;letter-spacing:0.12em;color:var(--ink-2);' +
         'font-variant-numeric:tabular-nums;';
-    counter.textContent = '0 / 1800';
+    counter.textContent = '0 / ' + WEBM_FRAMES;
     _frameCount = counter;
 
     inner.appendChild(label);
