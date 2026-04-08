@@ -45,14 +45,19 @@ class _TokenizerMaskingGemma3n:
 
 
 class _TokenizerMaskingGemma4:
-    """Minimal tokenizer for mask tests with ``<|turn|>`` (Gemma 4)."""
+    """Minimal tokenizer for mask tests with ``<|turn>`` (Gemma 4 start-of-turn, id 105 in real tokenizer)."""
 
     bos_token_id = 1
     unk_token_id = 3
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
-        if text == "<|turn|>":
+        # Match real Gemma 4 tokenizer behavior: <|turn> is a single special token;
+        # <|turn|> (with bars on both sides) is NOT a special token and tokenizes to
+        # a multi-subword sequence that never appears in the rendered chat.
+        if text == "<|turn>":
             return [50]
+        if text == "<|turn|>":
+            return [900, 901, 902, 903]
         if text == "model\n":
             return [20, 21]
         return [99]
@@ -151,9 +156,9 @@ def test_mask_gemma_prompt_tokens_gemma4_turn_marker():
     input_ids = torch.tensor([[1, 50, 10, 50, 20, 21, 200, 201]])
     labels = input_ids.clone()
     warned = [False]
-    mask_gemma_prompt_tokens(labels, input_ids, tok, warned, control_token="<|turn|>")
+    mask_gemma_prompt_tokens(labels, input_ids, tok, warned, control_token="<|turn>")
     ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
-    # Last <|turn|> at index 3; response_start = 3+1+0+2 = 6
+    # Last <|turn> at index 3; response_start = 3+1+0+2 = 6
     assert (labels[0, :6] == ignore).all()
     assert (labels[0, 6:] == input_ids[0, 6:]).all()
 
