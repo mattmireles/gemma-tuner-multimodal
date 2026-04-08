@@ -87,6 +87,9 @@ per_device_eval_batch_size = 1
 # Copy and rename this section; set model, dataset, and hyperparameters.
 [profile:my-lora-run]
 model = gemma-3n-e2b-it
+# Optional: pin to a specific HuggingFace revision for reproducibility.
+# model_revision = abc123def456  # commit hash or git ref
+
 dataset = my-dataset
 train_split = train
 validation_split = validation

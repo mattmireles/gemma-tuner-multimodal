@@ -409,11 +409,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     profile_config["dtype"] = "bfloat16" if torch_dtype == torch.bfloat16 else "float32"
 
     logger.info(f"Loading base model: {model_id}")
+    model_revision = profile_config.get("model_revision")
+    if model_revision:
+        logger.info(f"Using pinned revision: {model_revision}")
     model = load_base_model_for_gemma(
         model_id,
         family=family,
         torch_dtype=torch_dtype,
         attn_implementation=attn_impl,
+        revision=model_revision,
     )
 
     # LoRA configuration
