@@ -39,6 +39,7 @@ import os
 # the initialized pair.
 # ---------------------------------------------------------------------------
 import os as _os
+import queue
 import secrets as _secrets
 import threading
 import time
@@ -53,6 +54,11 @@ from flask_socketio import SocketIO, emit
 
 from gemma_tuner.visualization.assets import LOCAL_ASSET_PATHS
 from gemma_tuner.visualization.events import build_training_event
+from gemma_tuner.visualization.payload import (
+    finalize_control_payload,
+    finalize_initial_state_payload,
+    finalize_training_payload,
+)
 
 app: Optional[Flask] = None
 socketio: Optional[SocketIO] = None
@@ -61,6 +67,88 @@ logger = logging.getLogger(__name__)
 # Lock that serializes the one-time initialization of app/socketio so that
 # concurrent calls to ``_get_app()`` from different threads are safe.
 _init_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Socket.IO broadcast queue — training thread enqueues; one worker emits.
+# Avoids threading/context surprises with direct socketio.emit from trainers.
+# ---------------------------------------------------------------------------
+_emit_queue: Optional[queue.Queue] = None
+_emit_worker_started = False
+_emit_worker_lock = threading.Lock()
+_emit_stats: Dict[str, Any] = {
+    "emits": 0,
+    "last_step": None,
+    "last_emit_ts": None,
+    "last_error": None,
+    "queue_high": 0,
+}
+_emit_log_last_ts = 0.0
+
+
+def _emit_worker_loop() -> None:
+    global app, socketio, _emit_stats
+    assert _emit_queue is not None
+    while True:
+        name, payload = _emit_queue.get()
+        try:
+            if app is None or socketio is None:
+                continue
+            with app.app_context():
+                socketio.emit(name, payload, namespace="/", broadcast=True)
+            _emit_stats["emits"] = int(_emit_stats.get("emits", 0)) + 1
+            if _emit_queue is not None:
+                d = _emit_queue.qsize()
+                _emit_stats["queue_high"] = max(int(_emit_stats.get("queue_high", 0)), d)
+            if name == "training_update" and "step" in payload:
+                _emit_stats["last_step"] = payload.get("step")
+                _emit_stats["last_emit_ts"] = time.time()
+                _throttled_emit_info_log(payload)
+        except Exception as e:
+            _emit_stats["last_error"] = str(e)
+            logger.debug("Viz emit worker failed: %s", e)
+
+
+def _throttled_emit_info_log(payload: Dict[str, Any]) -> None:
+    global _emit_log_last_ts
+    now = time.time()
+    if now - _emit_log_last_ts < 5.0:
+        return
+    _emit_log_last_ts = now
+    logger.info(
+        "Viz training_update step=%s loss=%s",
+        payload.get("step"),
+        payload.get("loss"),
+    )
+
+
+def _ensure_emit_worker() -> None:
+    global _emit_queue, _emit_worker_started
+    with _emit_worker_lock:
+        if _emit_worker_started:
+            return
+        _emit_queue = queue.Queue()
+        t = threading.Thread(target=_emit_worker_loop, daemon=True, name="gemma-viz-emit")
+        t.start()
+        _emit_worker_started = True
+
+
+def _enqueue_broadcast(event_name: str, payload: Dict[str, Any]) -> None:
+    """Queue a broadcast emit (safe from the training thread)."""
+    _ensure_emit_worker()
+    if _emit_queue is None:
+        return
+    try:
+        _emit_queue.put((event_name, payload))
+    except Exception as e:
+        logger.debug("Viz enqueue failed: %s", e)
+
+
+def get_emit_stats() -> Dict[str, Any]:
+    """Diagnostics for /healthz."""
+    out = dict(_emit_stats)
+    if _emit_queue is not None:
+        out["queue_depth"] = _emit_queue.qsize()
+    return out
 
 
 def _get_app(cors_origin: Optional[Union[str, List[str]]] = None) -> tuple:
@@ -120,6 +208,7 @@ def _get_app(cors_origin: Optional[Union[str, List[str]]] = None) -> tuple:
         socketio = SocketIO(app, cors_allowed_origins=cors_allowed, async_mode="threading")
 
         _register_routes()
+        _ensure_emit_worker()
         return app, socketio
 
 
@@ -428,24 +517,31 @@ class TrainingVisualizer:
                 total_time=current_time - self.start_time,
                 architecture=self.layer_info,
             )
-            self._emit_update(event.as_payload())
+            raw = event.as_payload()
+            if "step" in raw and "loss" in raw:
+                payload = finalize_training_payload(raw)
+            else:
+                payload = finalize_control_payload(raw)
+            self._emit_update(payload)
             self.last_update_time = current_time
 
     def _emit_update(self, data: Dict[str, Any]):
-        """Emit update to all connected clients."""
+        """Queue a broadcast training_update (serialized on the viz worker thread)."""
         try:
-            self.socketio.emit("training_update", data)
+            _enqueue_broadcast("training_update", data)
         except Exception as e:
-            logger.debug(f"Visualizer emit failed: {e}")
+            logger.debug("Visualizer enqueue failed: %s", e)
 
     def update_epoch(self, epoch: int):
         """Update current epoch number."""
         self.epoch = epoch
-        self._emit_update({"epoch": epoch, "event": "epoch_change"})
+        self._emit_update(finalize_control_payload({"epoch": epoch, "event": "epoch_change"}))
 
     def update_validation(self, val_loss: float, val_metrics: Dict[str, float]):
         """Update validation metrics."""
-        self._emit_update({"event": "validation", "val_loss": val_loss, "val_metrics": val_metrics})
+        self._emit_update(
+            finalize_control_payload({"event": "validation", "val_loss": val_loss, "val_metrics": val_metrics})
+        )
 
     def set_training_state(self, is_training: bool):
         """
@@ -466,7 +562,7 @@ class TrainingVisualizer:
             is_training (bool): True if training, False if evaluating
         """
         self.is_training = is_training
-        self._emit_update({"event": "training_state", "is_training": is_training})
+        self._emit_update(finalize_control_payload({"event": "training_state", "is_training": is_training}))
 
 
 # Global visualizer instance
@@ -516,16 +612,16 @@ def _broadcast_initial_state_to_clients() -> None:
     if visualizer is None or socketio is None:
         return
     try:
-        socketio.emit(
-            "initial_state",
+        payload = finalize_initial_state_payload(
             {
                 "architecture": visualizer.layer_info,
                 "total_params": visualizer.total_params,
                 "trainable_params": visualizer.trainable_params,
                 "device": str(visualizer.device),
                 "is_training": visualizer.is_training,
-            },
+            }
         )
+        _enqueue_broadcast("initial_state", payload)
     except Exception as e:
         logger.debug("Visualizer initial_state broadcast failed: %s", e)
 
@@ -580,6 +676,13 @@ def _register_routes():
         - Training throughput statistics
         """
         return render_template("index.html", asset_paths=LOCAL_ASSET_PATHS)
+
+    @app.route("/healthz")
+    def healthz():
+        """Liveness + viz emit diagnostics for operators and the status banner."""
+        from flask import jsonify
+
+        return jsonify({"ok": True, "viz": get_emit_stats()})
 
     @app.route("/static/<path:path>")
     def send_static(path):
@@ -639,13 +742,15 @@ def _register_routes():
             # Send initial state to new client
             emit(
                 "initial_state",
-                {
-                    "architecture": visualizer.layer_info,
-                    "total_params": visualizer.total_params,
-                    "trainable_params": visualizer.trainable_params,
-                    "device": str(visualizer.device),
-                    "is_training": visualizer.is_training,
-                },
+                finalize_initial_state_payload(
+                    {
+                        "architecture": visualizer.layer_info,
+                        "total_params": visualizer.total_params,
+                        "trainable_params": visualizer.trainable_params,
+                        "device": str(visualizer.device),
+                        "is_training": visualizer.is_training,
+                    }
+                ),
             )
 
     @socketio.on("disconnect")
@@ -709,12 +814,14 @@ def _register_routes():
         if visualizer:
             emit(
                 "history_data",
-                {
-                    "loss_history": list(visualizer.loss_history),
-                    "grad_history": list(visualizer.grad_history),
-                    "lr_history": list(visualizer.lr_history),
-                    "memory_history": list(visualizer.memory_history),
-                },
+                finalize_control_payload(
+                    {
+                        "loss_history": list(visualizer.loss_history),
+                        "grad_history": list(visualizer.grad_history),
+                        "lr_history": list(visualizer.lr_history),
+                        "memory_history": list(visualizer.memory_history),
+                    }
+                ),
             )
 
 

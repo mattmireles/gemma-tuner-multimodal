@@ -12,12 +12,20 @@ class VisualizerTrainerCallback(TrainerCallback):
     Lightweight callback that streams training metrics to the built-in visualizer.
 
     Usage: add to a HuggingFace Trainer when profile_config['visualize'] is True.
+    After constructing ``Trainer``, call ``bind_trainer(trainer)`` so the callback can
+    read the last batch/outputs from ``GemmaVizTrainer`` for attention / mel / token panels.
     """
 
     def __init__(self, update_every_steps: int = 10):
+        # Mirrors profile logging_steps (for discoverability); emission rate follows HF on_log.
         self.update_every_steps = max(1, int(update_every_steps))
         self._initialized = False
         self._last_logged_step = -1
+        self._trainer = None
+
+    def bind_trainer(self, trainer) -> None:
+        """Set the Trainer instance (call once after ``Trainer(...)`` construction)."""
+        self._trainer = trainer
 
     def on_train_begin(self, args, state, control, **kwargs):
         model = kwargs.get("model")
@@ -68,46 +76,46 @@ class VisualizerTrainerCallback(TrainerCallback):
     def on_log(self, args, state, control, logs=None, **kwargs):
         if not self._initialized or not logs:
             return
-        # Throttle updates
         if state.global_step is None:
             return
+        # Hugging Face only invokes on_log on its logging schedule (logging_steps,
+        # logging_first_step, etc.). Do NOT gate again with global_step % update_every_steps —
+        # that drops logging_first_step (e.g. step 1) and any step that is not an exact
+        # multiple, so the dashboard stays frozen while the terminal still prints metrics.
         if state.global_step == self._last_logged_step:
             return
-        if state.global_step % self.update_every_steps != 0:
+
+        train_loss = logs.get("loss") or logs.get("train_loss")
+        if train_loss is None:
             return
 
         self._last_logged_step = state.global_step
 
-        model = kwargs.get("model")
         optimizer = kwargs.get("optimizer")
 
-        loss = logs.get("loss") or logs.get("train_loss")
+        loss = train_loss
         try:
             lr = optimizer.param_groups[0]["lr"] if optimizer and optimizer.param_groups else 0.0
         except Exception:
             lr = 0.0
-
-        # Compute grad norm if available
-        grad_norm_sq = 0.0
-        try:
-            if model is not None:
-                for p in model.parameters():
-                    if p.grad is not None:
-                        param_norm = p.grad.data.norm(2)
-                        grad_norm_sq += float(param_norm.item()) ** 2
-            grad_norm = grad_norm_sq**0.5
-        except Exception:
-            grad_norm = 0.0
 
         try:
             from gemma_tuner.visualizer import get_visualizer
 
             viz = get_visualizer()
             if viz:
+                batch = None
+                outputs = None
+                tr = self._trainer
+                if tr is not None:
+                    batch = getattr(tr, "_viz_last_batch", None)
+                    outputs = getattr(tr, "_viz_last_outputs", None)
                 viz.update_training_step(
                     loss=float(loss) if loss is not None else 0.0,
                     learning_rate=float(lr),
                     optimizer=optimizer,
+                    batch=batch,
+                    outputs=outputs,
                     global_step=int(state.global_step),
                 )
         except Exception as e:

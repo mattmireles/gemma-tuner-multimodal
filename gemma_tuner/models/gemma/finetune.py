@@ -85,6 +85,7 @@ from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
 from gemma_tuner.models.common.visualizer import VisualizerTrainerCallback
+from gemma_tuner.models.common.viz_trainer import GemmaVizTrainer
 from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
@@ -676,11 +677,17 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     set_seed(args.seed)
 
     trainer_callbacks: List[Any] = []
-    if profile_config.get("visualize"):
+    _do_viz = bool(profile_config.get("visualize"))
+    if _do_viz:
         _log_every = int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS))
         trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _log_every)))
 
-    trainer = Trainer(
+    trainer_cls = GemmaVizTrainer if _do_viz else Trainer
+    trainer_kwargs: dict[str, Any] = {}
+    if _do_viz:
+        trainer_kwargs["visualize"] = True
+
+    trainer = trainer_cls(
         model=model,
         args=args,
         train_dataset=train_ds,
@@ -689,7 +696,18 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         compute_metrics=compute_metrics_fn,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         callbacks=trainer_callbacks,
+        **trainer_kwargs,
     )
+
+    if _do_viz:
+        for cb in trainer_callbacks:
+            if isinstance(cb, VisualizerTrainerCallback):
+                cb.bind_trainer(trainer)
+        if gradient_checkpointing:
+            logger.info(
+                "Visualization: gradient checkpointing is on; some models omit attention tensors "
+                "when checkpointing — attention heatmaps may stay empty unless the stack returns them."
+            )
 
     logger.info("Starting Gemma LoRA training...")
     train_result = trainer.train()
