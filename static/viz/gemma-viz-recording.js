@@ -111,9 +111,9 @@ async function stopAndProcess() {
 
     _showModal();
 
-    var outBlob;
+    var outputs;
     try {
-        outBlob = await _speedUpTo60s(rawBlob);
+        outputs = await _encodeOutputs(rawBlob);
     } catch (e) {
         console.error('[recording] speedup failed:', e);
         _hideModal();
@@ -124,16 +124,29 @@ async function stopAndProcess() {
 
     _hideModal();
     V.isRecording = false;
-    _triggerDownload(outBlob);
+    // Download WebM first (primary artifact), then GIF (sidecar) with a
+    // brief delay so both `a.click()` calls are honored by the browser.
+    _triggerDownload(outputs.webm, 'webm');
+    if (outputs.gif) {
+        setTimeout(function () {
+            _triggerDownload(outputs.gif, 'gif');
+        }, 500);
+    }
     _setButtonState('idle');
 }
 
-// ── seek-and-capture speedup ──────────────────────────────────────────────────
+// ── seek-and-capture: one pass, two outputs ──────────────────────────────────
 // Loads the raw blob into a hidden <video>, seeks to 1800 evenly-spaced
-// timestamps, draws each frame to a canvas, and pushes to a new MediaRecorder.
-// Result: exactly 60 seconds of output at 30 fps regardless of input duration.
-async function _speedUpTo60s(srcBlob) {
-    var TARGET_FRAMES = 1800;  // 60 s × 30 fps
+// timestamps, draws each frame to a canvas, and pushes to a new MediaRecorder
+// for the WebM output. Every 6th frame, a downscaled copy is also quantized
+// and pushed to gifenc for the GIF sidecar — 1800/6 = 300 frames = 30 s @ 10 fps.
+// Doing both in one seek loop avoids paying the video decode cost twice.
+// Result: { webm, gif } — exactly 60 s WebM, 30 s GIF, from the same run.
+async function _encodeOutputs(srcBlob) {
+    var WEBM_FRAMES = 1800;   // 60 s × 30 fps
+    var GIF_STRIDE  = 6;      // every 6th WebM frame → 300 GIF frames
+    var GIF_DELAY   = 100;    // ms per GIF frame → 10 fps
+    var GIF_MAX_W   = 720;    // downscale to keep file size shareable
 
     var video = document.createElement('video');
     video.src  = URL.createObjectURL(srcBlob);
@@ -141,15 +154,16 @@ async function _speedUpTo60s(srcBlob) {
     await new Promise(function (r) { video.onloadedmetadata = r; });
 
     var duration = video.duration;
-    var dt       = duration / TARGET_FRAMES;
+    var dt       = duration / WEBM_FRAMES;
 
+    // WebM canvas + MediaRecorder (full resolution).
     var canvas   = document.createElement('canvas');
     canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     var ctx = canvas.getContext('2d');
 
-    // captureStream(0) = manual frame push via track.requestFrame().
-    // This gives precise control over the output frame rate during the seek loop.
+    // captureStream(0) = manual frame push via track.requestFrame(); gives
+    // precise control over the output frame rate during the seek loop.
     var outStream = canvas.captureStream(0);
     var track     = outStream.getVideoTracks()[0];
 
@@ -167,18 +181,48 @@ async function _speedUpTo60s(srcBlob) {
     };
     mr.start();
 
-    for (var i = 0; i < TARGET_FRAMES; i++) {
+    // GIF setup — gracefully skip if gifenc is not loaded (script missing,
+    // older browser, CSP blocking, etc.). The WebM still ships.
+    var gifEnabled = typeof window.gifenc === 'object' &&
+                     typeof window.gifenc.GIFEncoder === 'function';
+    var gif, gifCanvas, gifCtx, gifWidth, gifHeight, quantize, applyPalette;
+    if (gifEnabled) {
+        quantize     = window.gifenc.quantize;
+        applyPalette = window.gifenc.applyPalette;
+        gif          = window.gifenc.GIFEncoder();
+        gifWidth  = Math.min(video.videoWidth, GIF_MAX_W);
+        gifHeight = Math.round(video.videoHeight * (gifWidth / video.videoWidth));
+        gifCanvas = document.createElement('canvas');
+        gifCanvas.width  = gifWidth;
+        gifCanvas.height = gifHeight;
+        gifCtx = gifCanvas.getContext('2d');
+    }
+
+    for (var i = 0; i < WEBM_FRAMES; i++) {
         video.currentTime = i * dt;
         await new Promise(function (r) { video.onseeked = r; });
+
+        // WebM frame (every iteration).
         ctx.drawImage(video, 0, 0);
         track.requestFrame();
 
-        // Update progress modal.
+        // GIF frame (every GIF_STRIDE iterations). Quantize per-frame with
+        // rgb444 — slightly lower color fidelity than rgb565 but much faster,
+        // and the amber-on-black palette doesn't stress the format.
+        if (gifEnabled && i % GIF_STRIDE === 0) {
+            gifCtx.drawImage(video, 0, 0, gifWidth, gifHeight);
+            var data    = gifCtx.getImageData(0, 0, gifWidth, gifHeight).data;
+            var palette = quantize(data, 256, { format: 'rgb444' });
+            var indexed = applyPalette(data, palette, 'rgb444');
+            gif.writeFrame(indexed, gifWidth, gifHeight, { palette: palette, delay: GIF_DELAY });
+        }
+
+        // Update progress modal — reflects seek progress through the loop.
         if (_progressBar) {
-            _progressBar.style.width = (((i + 1) / TARGET_FRAMES) * 100).toFixed(1) + '%';
+            _progressBar.style.width = (((i + 1) / WEBM_FRAMES) * 100).toFixed(1) + '%';
         }
         if (_frameCount) {
-            _frameCount.textContent = (i + 1) + ' / ' + TARGET_FRAMES;
+            _frameCount.textContent = (i + 1) + ' / ' + WEBM_FRAMES;
         }
 
         // Yield every 60 frames so the browser stays responsive and doesn't
@@ -192,15 +236,22 @@ async function _speedUpTo60s(srcBlob) {
     await new Promise(function (r) { mr.onstop = r; });
 
     URL.revokeObjectURL(video.src);
-    return new Blob(outChunks, { type: 'video/webm' });
+
+    var webmBlob = new Blob(outChunks, { type: 'video/webm' });
+    var gifBlob  = null;
+    if (gifEnabled) {
+        gif.finish();
+        gifBlob = new Blob([gif.bytes()], { type: 'image/gif' });
+    }
+    return { webm: webmBlob, gif: gifBlob };
 }
 
 // ── download trigger ──────────────────────────────────────────────────────────
-function _triggerDownload(blob) {
+function _triggerDownload(blob, ext) {
     var now = new Date();
     var pad = function (n) { return String(n).padStart(2, '0'); };
     var date = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-    var fname = 'gemma-training-' + date + '.webm';
+    var fname = 'gemma-training-' + date + '.' + (ext || 'webm');
 
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
