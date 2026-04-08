@@ -14,6 +14,16 @@
 
 ---
 
+## Watch your model learn
+
+![Real-time training visualizer: loss curve, attention heatmap, gradient signal, memory, and token predictions — updating live as training runs on Apple Silicon](README/assets/training-visualizer.png)
+
+Loss curve. Attention heatmap. Gradient signal strength. Memory pressure. Token-by-token predictions — all updating in real time, in your browser, while the model trains on your Mac. No TensorBoard. No notebook. One flag in your config, one URL in your terminal.
+
+→ [Setup takes 30 seconds](#training-visualizer)
+
+---
+
 ## LoRA for Gemma 4 & 3n — why not just use…?
 
 | | **This** | MLX-LM | Unsloth | axolotl |
@@ -162,18 +172,13 @@ huggingface-cli login
 
 ### 6. Gemma 4 (optional)
 
-The default `pip install -e .` pin is tested with **Gemma 3n** on Transformers 4.x.
-To train **Gemma 4** checkpoints you need a newer Transformers line
-(see [`README/plans/gemma4-upgrade.md`](README/plans/gemma4-upgrade.md)):
+The base install (`pip install -e .`) pins Transformers ≥5.5 — both **Gemma 3n** and **Gemma 4** families work out of the box. Gemma 4 checkpoints need a slightly newer PEFT:
 
 ```bash
 pip install -r requirements/requirements-gemma4.txt
 ```
 
-Use a separate virtual environment if you want a Gemma 3n env and a Gemma 4 env
-side by side. `finetune` and `export` are family-aware. Several non-training
-commands (`gemma_generate`, dataset-prep multimodal probing, ASR eval) still
-reject Gemma 4 ids with an explicit error until those code paths are upgraded.
+`finetune` and `export` are family-aware. A few non-training commands (`gemma_generate`, multimodal probing, ASR eval) still reject Gemma 4 ids until those code paths are upgraded.
 
 ### 7. Run the wizard
 
@@ -192,42 +197,23 @@ environment issues.
 
 ---
 
-## Try it: happy path with the bundled sample
+## Zero to training in 90 seconds
 
-The repo ships a tiny text instruction-tuning dataset at
-[`data/datasets/sample-text/`](data/datasets/sample-text/) (16 train rows, 5
-validation rows; columns: `id,prompt,response`). It exists so you can confirm the
-full pipeline works end-to-end before plugging in your own data.
-
-The fastest way to use it is the wizard:
+The repo ships a 16-row instruction-tuning dataset at [`data/datasets/sample-text/`](data/datasets/sample-text/) — translations, summaries, trivia, haiku, JSON conversion. Small enough to finish in under a minute. Large enough to prove the full pipeline works: data loading, tokenization, LoRA, checkpointing, export.
 
 ```bash
 gemma-macos-tuner wizard
 ```
 
-Then pick:
+Pick **Instruction tuning → gemma-3n-e2b-it → sample-text**, accept the defaults, and watch it train. First run downloads ~5 GB of base weights from Hugging Face (step 5 above must be done). Every run after that starts in seconds.
 
-1. **What kind of fine-tuning?** → *Instruction tuning (text — prompt + response columns)*
-2. **Model** → *gemma-3n-e2b-it ⭐ Recommended*
-3. **Dataset** → *✨ sample-text — Bundled sample (text instruction tuning) — recommended first run*
-4. Accept the defaults for the remaining hyperparameter prompts.
-
-This trains a small LoRA adapter on top of `google/gemma-3n-E2B-it` for one epoch
-and writes outputs under `output/`. The first run downloads the base weights from
-Hugging Face (~5 GB) — make sure you have completed step 5 above.
-
-If you'd rather skip the prompts (e.g. for CI / scripts), the same dataset is
-also wired up as a profile in `config/config.ini` for direct use:
+Or skip the wizard entirely:
 
 ```bash
 gemma-macos-tuner finetune sample-text
 ```
 
-Once a sample run works end-to-end, run the wizard again with your own dataset
-under `data/datasets/<your-name>/` — it will appear in the dataset list
-automatically.
-
-If you chose **text completion** (single full-sequence column) instead of instruction tuning, the bundled sample is not listed in the wizard — it only has `prompt` and `response` columns. Use your own CSV under `data/datasets/<name>/` or the **custom** dataset option.
+Once the sample run finishes, drop your own CSV under `data/datasets/<your-name>/` and run the wizard again — it picks up new datasets automatically.
 
 ---
 
@@ -431,9 +417,28 @@ data_patches/{source}/
 
 ---
 
-## Training visualizer (optional)
+## Training visualizer
 
-Install `viz` extras, set `visualize=true` in the profile, and open the URL the trainer prints (default bind `127.0.0.1`, port starting at 8080). If Flask isn't installed, training still runs — the visualizer is skipped silently.
+Six live panels in your browser while the model trains:
+
+| Panel | What it shows |
+| --- | --- |
+| **Loss curve** | Per-step loss over time — the single most important number in training |
+| **Attention heatmap** | Where the model is looking across the input, layer by layer |
+| **Signal strength** | Gradient norm — are the updates meaningful or vanishing? |
+| **Step size** | Learning rate at each step (schedule + warmup visible at a glance) |
+| **Memory** | GPU/MPS memory in GB — catch pressure before it becomes a crash |
+| **Token predictions** | Top-5 next-token probabilities — watch the model's guesses sharpen in real time |
+
+**Setup:**
+
+```bash
+pip install -e ".[viz]"
+```
+
+Then set `visualize = true` in your profile and run training. The trainer prints a URL (default `127.0.0.1:8080`). Open it. That's it.
+
+If Flask isn't installed, training still runs — the visualizer is skipped silently. No dependency, no breakage.
 
 ---
 
@@ -460,12 +465,6 @@ Preprocessing worker count and dataloader settings are controlled from `config/c
 ## CI & tests
 
 Workflows under [`.github/workflows/`](.github/workflows/): lint (`ruff`), fast tests (`pytest -k "not slow"`), macOS smoke. Regenerate lockfiles with `pip-compile` when you change `pyproject.toml`—see comments in [`requirements/requirements.txt`](requirements/requirements.txt).
-
----
-
-## Experiment index
-
-Runs update `output/experiments.csv` and optional SQLite—handy SQL examples are still valid; swap profile names for whatever you actually train.
 
 ---
 
