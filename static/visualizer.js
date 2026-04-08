@@ -544,12 +544,15 @@ function initCharts() {
         data: {
             labels: [],
             datasets: [{
-                label: 'Training Loss',
+                label: 'loss',
                 data: [],
-                borderColor: '#FF00CC',
-                backgroundColor: 'rgba(255, 0, 204, 0.1)',
-                tension: 0.4,
-                fill: true
+                borderColor: '#FFB000',
+                backgroundColor: 'rgba(255, 176, 0, 0.08)',
+                borderWidth: 1.5,
+                tension: 0.35,
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 0
             }]
         },
         options: {
@@ -557,21 +560,27 @@ function initCharts() {
             maintainAspectRatio: false,
             animation: { duration: 0 },
             scales: {
-                x: { 
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
+                x: {
+                    display: false,
+                    grid: { display: false },
+                    ticks: { display: false }
                 },
-                y: { 
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
+                y: {
+                    grid: { color: 'rgba(255, 255, 255, 0.04)', drawBorder: false },
+                    ticks: {
+                        color: '#3A3A38',
+                        font: { family: 'ui-monospace, "SF Mono", monospace', size: 10 },
+                        maxTicksLimit: 4
+                    }
                 }
             },
             plugins: {
-                legend: { labels: { color: '#FFFFFF' } }
+                legend: { display: false },
+                tooltip: { enabled: false }
             }
         }
     });
-    
+
     // Gradient chart
     const gradCtx = document.getElementById('gradient-chart').getContext('2d');
     gradientChart = new Chart(gradCtx, {
@@ -579,12 +588,15 @@ function initCharts() {
         data: {
             labels: [],
             datasets: [{
-                label: 'Gradient Norm',
+                label: 'signal',
                 data: [],
-                borderColor: '#9933CC',
-                backgroundColor: 'rgba(153, 51, 204, 0.1)',
-                tension: 0.4,
-                fill: true
+                borderColor: '#FFB000',
+                backgroundColor: 'rgba(255, 176, 0, 0.06)',
+                borderWidth: 1,
+                tension: 0.35,
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 0
             }]
         },
         options: {
@@ -592,53 +604,50 @@ function initCharts() {
             maintainAspectRatio: false,
             animation: { duration: 0 },
             scales: {
-                x: { 
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
-                },
-                y: { 
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
-                }
+                x: { display: false, grid: { display: false }, ticks: { display: false } },
+                y: { display: false, grid: { display: false }, ticks: { display: false } }
             },
-            plugins: {
-                legend: { labels: { color: '#FFFFFF' } }
-            }
+            plugins: { legend: { display: false }, tooltip: { enabled: false } }
         }
     });
-    
+
     // Memory chart
     const memCtx = document.getElementById('memory-chart').getContext('2d');
     memoryChart = new Chart(memCtx, {
         type: 'bar',
         data: {
-            labels: ['GPU Memory'],
+            labels: [''],
             datasets: [{
-                label: 'Memory (GB)',
+                label: 'memory',
                 data: [0],
-                backgroundColor: 'rgba(0, 153, 255, 0.6)',
-                borderColor: '#0099FF',
-                borderWidth: 2
+                backgroundColor: 'rgba(255, 176, 0, 0.55)',
+                borderColor: '#FFB000',
+                borderWidth: 0,
+                borderRadius: 0,
+                maxBarThickness: 22
             }]
         },
         options: {
+            indexAxis: 'y',
             responsive: true,
             maintainAspectRatio: false,
-            animation: { duration: 200 },
+            animation: { duration: 240 },
             scales: {
-                y: { 
+                x: {
                     beginAtZero: true,
                     max: 16,
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
-                }
+                    grid: { display: false },
+                    ticks: {
+                        color: '#3A3A38',
+                        font: { family: 'ui-monospace, "SF Mono", monospace', size: 10 }
+                    }
+                },
+                y: { display: false, grid: { display: false } }
             },
-            plugins: {
-                legend: { display: false }
-            }
+            plugins: { legend: { display: false }, tooltip: { enabled: false } }
         }
     });
-    
+
     // Learning rate chart
     const lrCtx = document.getElementById('lr-chart').getContext('2d');
     lrChart = new Chart(lrCtx, {
@@ -646,12 +655,15 @@ function initCharts() {
         data: {
             labels: [],
             datasets: [{
-                label: 'Learning Rate',
+                label: 'step size',
                 data: [],
-                borderColor: '#FF00CC',
-                backgroundColor: 'rgba(255, 0, 204, 0.1)',
-                tension: 0.4,
-                fill: true
+                borderColor: '#FFB000',
+                backgroundColor: 'rgba(255, 176, 0, 0.06)',
+                borderWidth: 1,
+                tension: 0.35,
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 0
             }]
         },
         options: {
@@ -659,19 +671,10 @@ function initCharts() {
             maintainAspectRatio: false,
             animation: { duration: 0 },
             scales: {
-                x: { 
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
-                },
-                y: { 
-                    type: 'logarithmic',
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                    ticks: { color: '#FFFFFF' }
-                }
+                x: { display: false, grid: { display: false }, ticks: { display: false } },
+                y: { type: 'logarithmic', display: false, grid: { display: false }, ticks: { display: false } }
             },
-            plugins: {
-                legend: { labels: { color: '#FFFFFF' } }
-            }
+            plugins: { legend: { display: false }, tooltip: { enabled: false } }
         }
     });
 }
@@ -788,17 +791,17 @@ function updateGradientChart(gradNorm, step) {
 function updateMemoryChart(memoryGB) {
     memoryChart.data.datasets[0].data[0] = memoryGB;
     
-    // Change color based on memory usage
+    // Calm amber until memory is in danger; rose only when nearing the cap.
     const percentage = memoryGB / 16;
     let color;
-    if (percentage < 0.5) {
-        color = 'rgba(0, 153, 255, 0.6)';  // Blue for low
-    } else if (percentage < 0.8) {
-        color = 'rgba(153, 51, 204, 0.6)';  // Purple for medium
+    if (percentage < 0.85) {
+        color = 'rgba(255, 176, 0, 0.55)';  // amber
+    } else if (percentage < 0.95) {
+        color = 'rgba(255, 176, 0, 0.85)';  // amber, intensified
     } else {
-        color = 'rgba(255, 0, 204, 0.6)';  // Pink for high
+        color = 'rgba(255, 77, 109, 0.85)'; // rose — the only danger signal
     }
-    
+
     memoryChart.data.datasets[0].backgroundColor = color;
     memoryChart.update('none');
 }
