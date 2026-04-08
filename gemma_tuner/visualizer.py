@@ -403,7 +403,32 @@ def init_visualizer(model: nn.Module, device: torch.device) -> TrainingVisualize
     if visualizer is not None:
         visualizer.shutdown()
     visualizer = TrainingVisualizer(model, device)
+    _broadcast_initial_state_to_clients()
     return visualizer
+
+
+def _broadcast_initial_state_to_clients() -> None:
+    """Notify connected Socket.IO clients after the global visualizer is ready.
+
+    Browsers often connect when the Flask server starts, before ``train()`` runs;
+    ``handle_connect`` may have run while ``visualizer`` was still ``None``.
+    """
+    global visualizer, socketio
+    if visualizer is None or socketio is None:
+        return
+    try:
+        socketio.emit(
+            "initial_state",
+            {
+                "architecture": visualizer.layer_info,
+                "total_params": visualizer.total_params,
+                "trainable_params": visualizer.trainable_params,
+                "device": str(visualizer.device),
+                "is_training": visualizer.is_training,
+            },
+        )
+    except Exception as e:
+        logger.debug("Visualizer initial_state broadcast failed: %s", e)
 
 
 def get_visualizer() -> Optional[TrainingVisualizer]:

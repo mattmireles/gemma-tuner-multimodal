@@ -84,6 +84,7 @@ from gemma_tuner.models.common.collators import (
 from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
+from gemma_tuner.models.common.visualizer import VisualizerTrainerCallback
 from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
@@ -674,6 +675,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     # Seed for reproducibility
     set_seed(args.seed)
 
+    trainer_callbacks: List[Any] = []
+    if profile_config.get("visualize"):
+        _log_every = int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS))
+        trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _log_every)))
+
     trainer = Trainer(
         model=model,
         args=args,
@@ -682,6 +688,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         data_collator=data_collator,
         compute_metrics=compute_metrics_fn,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+        callbacks=trainer_callbacks,
     )
 
     logger.info("Starting Gemma LoRA training...")

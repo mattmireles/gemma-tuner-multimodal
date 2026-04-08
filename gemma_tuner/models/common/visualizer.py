@@ -16,7 +16,12 @@ class VisualizerTrainerCallback(TrainerCallback):
         self._last_logged_step = -1
 
     def on_train_begin(self, args, state, control, **kwargs):
-        self.initialize(kwargs.get("model"))
+        model = kwargs.get("model")
+        if model is None:
+            trainer = kwargs.get("trainer")
+            if trainer is not None:
+                model = getattr(trainer, "model", None)
+        self.initialize(model)
 
     def initialize(self, model) -> None:
         # Lazily initialize the visualizer with the model and device.
