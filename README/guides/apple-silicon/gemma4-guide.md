@@ -12,16 +12,16 @@ This guide focuses on **LoRA-style** adaptation for multimodal Gemma on macOS wi
 
 ## Stack versions: this repo vs “latest HF”
 
-**This repository** intentionally pins a Transformers 4.x line (see [`pyproject.toml`](../../../pyproject.toml)):
+**Core dependency bounds** are in [`pyproject.toml`](../../../pyproject.toml) (and mirrored in [`requirements/requirements.txt`](../../../requirements/requirements.txt)). **`transformers` has no upper cap** so an editable install can coexist with the optional Gemma 4 stack.
 
-| Package | Pinned in this repo (check file for updates) |
-| --- | --- |
-| `transformers` | `>=4.46.0,<5.0.0` |
-| `peft` | `>=0.9.0` |
-| `datasets` | `>=4.0.0` |
-| `accelerate` | `>=0.27.2` |
+| Package | Base (this repo) | Gemma 4 (add [`requirements-gemma4.txt`](../../../requirements/requirements-gemma4.txt)) |
+| --- | --- | --- |
+| `transformers` | `>=4.46.0` | `>=5.5.0` |
+| `peft` | `>=0.9.0` | `>=0.18.1` (via Gemma 4 file) |
+| `datasets` | `>=4.0.0` | (unchanged) |
+| `accelerate` | `>=0.27.2` | (unchanged) |
 
-Some **standalone** Hugging Face scripts or third-party writeups assume **Transformers 5.x** or **newer PEFT** for bleeding-edge Gemma 4 features. That is **not** the constraint here: do not upgrade past the repo’s upper bound without running tests and `gemma_preflight`. If you maintain a **separate** environment outside this project, consult [Hugging Face model cards](https://huggingface.co/google) and release notes for minimum versions.
+**Gemma 3n** paths are fine on Transformers 4.46+. **Gemma 4** training in this repo expects you to install the Gemma 4 stack after the base tree (`pip install -r requirements/requirements-gemma4.txt`). Run tests and `gemma_preflight` after any major version bump. If you maintain a **separate** environment outside this project, consult [Hugging Face model cards](https://huggingface.co/google) and release notes for minimum versions.
 
 Audio preprocessing in training stacks typically uses **librosa** + **soundfile**; vision stacks use **Pillow**. Match versions to your lockfile or `requirements/requirements.txt`.
 

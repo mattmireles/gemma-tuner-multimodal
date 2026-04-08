@@ -13,8 +13,8 @@
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121  (CUDA)
 # -----------------------------------------------------------------
 
-# Hugging Face ecosystem
-transformers>=4.46.0,<5.0.0
+# Hugging Face ecosystem (must match pyproject.toml [project.dependencies])
+transformers>=4.46.0
 datasets>=4.0.0
 accelerate>=0.27.2
 evaluate>=0.4.1
