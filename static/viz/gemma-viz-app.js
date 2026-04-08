@@ -116,7 +116,20 @@ function handleTrainingUpdate(data) {
         V.updateTokenCloud(data.token_probs);
     }
     
-    // Update spectrogram
+    // Audio: auto-reveal the "listening" panel the first time a real
+    // spectrogram arrives in the training stream. Text-only runs never
+    // see this panel; audio runs see it the moment there's real data.
+    // After the auto-reveal, the user's explicit dock toggle wins (so
+    // they can turn it off again and it stays off for the rest of the
+    // session).
+    if (data.mel_spectrogram && !V.autoShowedSpectrogram) {
+        V.autoShowedSpectrogram = true;
+        V.enableSpectrogram = true;
+        const card = document.getElementById('spectrogram-canvas')?.closest('.panel');
+        if (card) card.style.display = '';
+        const btn = document.getElementById('toggle-spec');
+        if (btn) btn.classList.add('active');
+    }
     if (V.enableSpectrogram && data.mel_spectrogram) {
         V.updateSpectrogram(data.mel_spectrogram);
     }

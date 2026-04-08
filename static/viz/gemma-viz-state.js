@@ -22,7 +22,21 @@
         enable3D: urlParams.get('show3D') === '1' && !lightMode,
         enableAttention: urlParams.get('showAttention') !== '0' && !lightMode,
         enableTokens: urlParams.get('showTokens') !== '0' && !lightMode,
-        enableSpectrogram: urlParams.get('showSpectrogram') !== '0' && !lightMode,
+        // Audio panel: always starts off, regardless of URL params.
+        // Auto-revealed the first time a training update carries a
+        // mel_spectrogram payload (see handleTrainingUpdate). Text-only
+        // runs never see the panel; audio runs see it the moment real
+        // spectrogram data starts flowing. The dock "audio" button still
+        // lets the user force-show or hide it after the fact.
+        //
+        // Note: the URL flag (?showSpectrogram=...) is intentionally
+        // removed. Earlier versions used it to *disable* a default-on
+        // panel; now that the panel is default-off in the HTML, a URL
+        // "enable" flag would also need a boot-time DOM unhide to avoid
+        // drift between the state var and the panel visibility. Simpler
+        // to drop the override entirely and let data drive visibility.
+        enableSpectrogram: false,
+        autoShowedSpectrogram: false,
 
         scene: null,
         camera: null,
