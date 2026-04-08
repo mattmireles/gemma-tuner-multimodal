@@ -2,6 +2,15 @@
  * Socket.IO, training handlers, DOM, animation loop (window.GemmaViz).
  */
 (function (V) {
+/** Hero caption: "Your machine is <verb>." — lifecycle only (lowercase). */
+const HERO_VERBS = { READY: 'getting ready', LEARN: 'learning', DONE: 'done learning' };
+
+function setHeroVerb(phrase) {
+    const el = document.getElementById('hero-verb');
+    if (!el) return;
+    el.textContent = phrase;
+}
+
 function initSocket() {
     V.socket = io({
         reconnectionAttempts: Infinity,
@@ -31,9 +40,16 @@ function initSocket() {
     V.socket.on('initial_state', (data) => {
         console.log('📊 Received initial state:', data);
         updateStats(data);
+        if (data && data.is_training === true) {
+            setHeroVerb(HERO_VERBS.LEARN);
+        }
     });
-    
+
     V.socket.on('training_update', (data) => {
+        if (data && data.event === 'training_finished') {
+            setHeroVerb(HERO_VERBS.DONE);
+            return;
+        }
         if (!V.isPaused) {
             handleTrainingUpdate(data);
         }
@@ -49,6 +65,7 @@ function handleTrainingUpdate(data) {
     if (window.__vizStatus && window.__vizStatus.markTrainingData) {
         window.__vizStatus.markTrainingData();
     }
+
     // Update stats
     if (data.step !== undefined) {
         document.getElementById('step-count').textContent = data.step;
@@ -62,6 +79,8 @@ function handleTrainingUpdate(data) {
     
     // Update loss chart + hero
     if (data.loss !== undefined) {
+        V.hasSeenTrainingLoss = true;
+        setHeroVerb(HERO_VERBS.LEARN);
         V.updateHeroLoss(data.loss);
         V.updateLossChart(data.loss, data.step);
         
@@ -163,6 +182,10 @@ function loadHistoricalData(data) {
     if (data.loss_history && data.loss_history.length && window.__vizStatus && window.__vizStatus.markTrainingData) {
         window.__vizStatus.markTrainingData();
     }
+    if (data.loss_history && data.loss_history.length) {
+        V.hasSeenTrainingLoss = true;
+        setHeroVerb(HERO_VERBS.LEARN);
+    }
     // Load loss history
     if (data.loss_history && data.loss_history.length) {
         data.loss_history.forEach((loss, i) => {
@@ -205,24 +228,25 @@ function animate() {
     
     V.lastFrameTime = currentTime;
     
-    // Animate 3D neural network
+    // Decay the galaxy's emissive level toward 0 every frame, then re-render
+    // the scene. The ONLY thing that drives motion in the galaxy now is the
+    // training stream itself: every gradient update brightens it via
+    // updateNeuralNetworkGradients(), and the decay here pulls it back down
+    // between updates. A stalled run goes quiet within a couple of seconds;
+    // an active run shimmers continuously. Mouse rotation still works inside
+    // window.animateNetwork().
+    //
+    // Removed in this pass: the constant rotation.y += 0.002, the
+    // sin(time)-based breathing pulse on .scale, and the slow core spin.
+    // All three were ambient motion uncoupled from training data — the kind
+    // of "screensaver" motion that makes a panel feel salient without saying
+    // anything. The user explicitly flagged this as distracting.
+    if (V.neuralNetwork && !V.isPaused && !V.reducedMotion) {
+        V.applyGalaxyEmissive();
+    }
+
     if (window.animateNetwork) {
         window.animateNetwork();
-    }
-    
-    // Slow rotation, slow breathing pulse, slow core spin — the lava-lamp
-    // ambient life that says "the room is alive even between training steps."
-    // Suppressed entirely under prefers-reduced-motion.
-    if (V.neuralNetwork && !V.isPaused && !V.reducedMotion) {
-        V.neuralNetwork.rotation.y += 0.002;
-        const pulse = Math.sin(currentTime * 0.001) * 0.08 + 1;
-        V.neuralNetwork.scale.set(pulse, pulse, pulse);
-        V.neuralNetwork.traverse((obj) => {
-            if (obj.userData && obj.userData.isCore) {
-                obj.rotation.x += 0.006;
-                obj.rotation.y += 0.009;
-            }
-        });
     }
 }
 
@@ -235,6 +259,9 @@ V.animate = animate;
 
 function boot() {
     console.log('🚀 Initializing Gemma Training Visualizer...');
+
+    V.hasSeenTrainingLoss = false;
+    setHeroVerb(HERO_VERBS.READY);
 
     V.initSocket();
     try {

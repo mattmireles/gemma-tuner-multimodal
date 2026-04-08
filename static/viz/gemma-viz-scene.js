@@ -335,27 +335,69 @@ function maybeRebuildGalaxyFromArchitecture(arch, totalParams, trainableParams) 
 }
 
 
+/**
+ * Called from handleTrainingUpdate() on every training step. We do NOT apply
+ * the new intensity directly to materials here — instead we write it to a
+ * shared buffer (V.galaxyEmissive) that the animate() loop reads and decays
+ * frame-by-frame. The visible result: the galaxy brightens on each step and
+ * fades between them. The decay rate, set in animate(), means a fast training
+ * run shimmers continuously and a stalled run quiets down within ~1s.
+ *
+ * Damping: previous version went 0.35 → 1.30 emissive and scaled neurons
+ * 1.0 → 1.22, which read as a uniform throb across the whole galaxy and
+ * over-promised that "layers light up as they learn." The pulse is uniform
+ * because the only signal we receive is the global gradient norm, so this
+ * pass keeps the dynamic range tight: a quiet shimmer, not a throb.
+ */
 function updateNeuralNetworkGradients(gradNorm) {
     const intensity = Math.min(gradNorm / 10, 1);
-    const baseEmissive = 0.35;
-    V.galaxyNeuronMeshes.forEach((neuron) => {
+    // Take the max of the existing buffer and the new intensity so a fresh
+    // step always brightens the galaxy, even if a previous step is still
+    // mid-decay. The decay loop in animate() will pull it back toward 0.
+    if (intensity > V.galaxyEmissive) {
+        V.galaxyEmissive = intensity;
+    }
+}
+
+/**
+ * Per-frame applier for the galaxy emissive buffer.
+ *
+ * Reads V.galaxyEmissive (set by training updates), decays it slightly toward
+ * zero, and writes the resulting intensity to every neuron material and the
+ * core. Decay factor 0.985 gives roughly a 1.2s half-life at 60 fps — fast
+ * enough that a stalled training run goes quiet within a couple of seconds,
+ * slow enough that a 5 steps/s run looks continuously alive.
+ *
+ * Called from animate() on every requestAnimationFrame tick.
+ */
+function applyGalaxyEmissive() {
+    if (!V.neuralNetwork) return;
+    V.galaxyEmissive *= 0.985;
+    if (V.galaxyEmissive < 0.001) V.galaxyEmissive = 0;
+
+    // Tight dynamic range: 0.35 baseline → 0.75 peak, scale 1.0 → 1.05.
+    // The galaxy reads as a quiet shimmer, not a throb.
+    const i = V.galaxyEmissive;
+    const neuronEmissive = 0.35 + i * 0.40;
+    const scale = 1 + i * 0.05;
+
+    for (let k = 0; k < V.galaxyNeuronMeshes.length; k++) {
+        const neuron = V.galaxyNeuronMeshes[k];
         if (neuron.material) {
-            neuron.material.emissiveIntensity = baseEmissive + intensity * 0.95;
-            const scale = 1 + intensity * 0.22;
+            neuron.material.emissiveIntensity = neuronEmissive;
             neuron.scale.set(scale, scale, scale);
         }
-    });
-    if (V.neuralNetwork) {
-        V.neuralNetwork.traverse((obj) => {
-            if (obj.userData && obj.userData.isCore && obj.material) {
-                obj.material.emissiveIntensity = 0.75 + intensity * 0.55;
-            }
-        });
     }
+    V.neuralNetwork.traverse((obj) => {
+        if (obj.userData && obj.userData.isCore && obj.material) {
+            obj.material.emissiveIntensity = 0.75 + i * 0.35;
+        }
+    });
 }
 
 V.init3DNeuralNetwork = init3DNeuralNetwork;
 V.maybeRebuildGalaxyFromArchitecture = maybeRebuildGalaxyFromArchitecture;
 V.updateNeuralNetworkGradients = updateNeuralNetworkGradients;
+V.applyGalaxyEmissive = applyGalaxyEmissive;
 
 })(window.GemmaViz);

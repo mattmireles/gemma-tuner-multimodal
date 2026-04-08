@@ -720,6 +720,13 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     train_result = trainer.train()
     logger.info("Training complete. Saving adapter...")
     trainer.save_model()
+    if _do_viz:
+        try:
+            from gemma_tuner.visualizer import broadcast_training_finished
+
+            broadcast_training_finished()
+        except Exception as e:
+            logger.debug("broadcast_training_finished failed (non-fatal): %s", e)
 
     persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
 

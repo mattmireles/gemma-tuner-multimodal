@@ -156,7 +156,13 @@
             color: var(--amber);
         }
 
-        /* ---- the learning curve, the second protagonist ---- */
+        /* ---- the learning curve, the second protagonist ----
+
+           Same typographic register as the room panels: a hairline divider
+           on top, then a `panel-title` + `panel-subtitle` pair, then the
+           canvas. This is the change that makes the chart legible — without
+           the title the curve was a big nameless object on the right side
+           of the hero. */
 
         .curve {
             position: relative;
@@ -164,13 +170,13 @@
             height: 100%;
             display: flex;
             flex-direction: column;
+            border-top: 1px solid var(--ink-3);
+            padding-top: 12px;
         }
         .curve .curve-frame {
             position: relative;
             flex: 1;
             min-height: 0;
-            border-top: 1px solid var(--ink-3);
-            padding-top: 8px;
         }
         .curve canvas {
             width: 100% !important;
@@ -388,7 +394,7 @@
         }
         .loading i { display: none; }
         .loading::before {
-            content: "your machine is waking up";
+            content: "your machine is getting ready";
             color: var(--ink-2);
             animation: breathe 2.6s ease-in-out infinite;
         }
@@ -458,10 +464,12 @@
                 <div class="loss-value num" id="loss-value">—</div>
                 <div class="loss-label">loss</div>
                 <div class="caption">
-                    Your machine is <span class="verb">learning</span>.
+                    Your machine is <span class="verb" id="hero-verb">getting ready</span>.
                 </div>
             </div>
             <div class="curve">
+                <div class="panel-title">loss · over time</div>
+                <div class="panel-subtitle">how wrong the model still is, step by step</div>
                 <div class="curve-frame">
                     <canvas id="loss-chart"></canvas>
                 </div>
@@ -472,7 +480,7 @@
         <section class="room">
             <div class="panel network">
                 <div class="panel-title">inside the model</div>
-                <div class="panel-subtitle">layers light up as they learn</div>
+                <div class="panel-subtitle">lit by the gradients flowing through it</div>
                 <div class="panel-body">
                     <div id="neural-network-3d"></div>
                 </div>
@@ -531,10 +539,10 @@
     </div>
 
     <script src="/static/viz/status.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-state.js?v=1"></script>
+    <script src="/static/viz/gemma-viz-state.js?v=2"></script>
     <script src="/static/viz/gemma-viz-charts.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-scene.js?v=1"></script>
+    <script src="/static/viz/gemma-viz-scene.js?v=2"></script>
     <script src="/static/viz/gemma-viz-panels.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-app.js?v=2"></script>
+    <script src="/static/viz/gemma-viz-app.js?v=4"></script>
 </body>
 </html>

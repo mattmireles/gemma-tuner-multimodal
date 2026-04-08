@@ -154,6 +154,16 @@ def get_emit_stats() -> Dict[str, Any]:
     return out
 
 
+def broadcast_training_finished() -> None:
+    """Tell connected dashboards that training finished (adapter saved)."""
+    from gemma_tuner.visualization.payload import finalize_control_payload
+
+    _enqueue_broadcast(
+        "training_update",
+        finalize_control_payload({"event": "training_finished"}),
+    )
+
+
 def _get_app(cors_origin: Optional[Union[str, List[str]]] = None) -> tuple:
     """
     Return the ``(app, socketio)`` pair, creating them on first call.

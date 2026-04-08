@@ -13,7 +13,13 @@
         animationFrameId: null,
 
         lightMode: lightMode,
-        enable3D: urlParams.get('show3D') !== '0' && !lightMode,
+        // The 3D galaxy is opt-in via the dock "model" toggle (or ?show3D=1).
+        // Reason: the panel is visually salient but the only training signal
+        // it actually receives is the *global* gradient norm, which it then
+        // pulses uniformly across every neuron — there is no per-layer signal
+        // available, so the galaxy cannot honestly "show" learning happening
+        // anywhere specific. Hidden by default; opt in for spectacle.
+        enable3D: urlParams.get('show3D') === '1' && !lightMode,
         enableAttention: urlParams.get('showAttention') !== '0' && !lightMode,
         enableTokens: urlParams.get('showTokens') !== '0' && !lightMode,
         enableSpectrogram: urlParams.get('showSpectrogram') !== '0' && !lightMode,
@@ -26,6 +32,13 @@
         galaxyLastFingerprint: '',
         GALAXY_MAX_NODES: 340,
         GOLDEN_ANGLE: 2.39996322972865332,
+
+        // Galaxy emissive level — written by updateNeuralNetworkGradients on
+        // every training step, decayed each frame in animate(). The result is
+        // that the galaxy brightens on each step and fades between them, so
+        // its visible rhythm literally is the training step rate. A stalled
+        // run quiets down; an active run shimmers.
+        galaxyEmissive: 0,
 
         lossChart: null,
         gradientChart: null,
