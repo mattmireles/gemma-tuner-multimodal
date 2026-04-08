@@ -43,7 +43,7 @@ import threading
 import time
 import webbrowser
 from collections import deque
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 _init_lock = threading.Lock()
 
 
-def _get_app(cors_origin: Optional[str] = None) -> tuple:
+def _get_app(cors_origin: Optional[Union[str, List[str]]] = None) -> tuple:
     """
     Return the ``(app, socketio)`` pair, creating them on first call.
 
@@ -78,9 +78,10 @@ def _get_app(cors_origin: Optional[str] = None) -> tuple:
     - The ``if __name__ == "__main__"`` test-mode block
 
     Args:
-        cors_origin: CORS allowed origin string, e.g.
-            ``"http://127.0.0.1:8080"``.  Defaults to
-            ``"http://127.0.0.1:8080"`` when not supplied.
+        cors_origin: CORS allowed origin(s). Browsers treat ``http://127.0.0.1``
+            and ``http://localhost`` as **different** origins; pass both (or a
+            list) so Socket.IO works whether the user opens either URL.
+            Defaults to 127.0.0.1 and localhost on port 8080 when not supplied.
 
     Returns:
         Tuple of ``(Flask app, SocketIO instance)``.
@@ -108,13 +109,14 @@ def _get_app(cors_origin: Optional[str] = None) -> tuple:
         app.config["SECRET_KEY"] = _os.environ.get("VIZ_SECRET_KEY") or _secrets.token_hex(32)
 
         if cors_origin is None:
-            cors_origin = "http://127.0.0.1:8080"
+            cors_allowed: List[str] = ["http://127.0.0.1:8080", "http://localhost:8080"]
+        elif isinstance(cors_origin, str):
+            cors_allowed = [cors_origin]
+        else:
+            cors_allowed = list(cors_origin)
 
-        # CORS restricted to the specific localhost origin the server will
-        # actually serve on.  Never use cors_allowed_origins="*": any
-        # webpage the user has open could then connect and exfiltrate live
-        # training telemetry.
-        socketio = SocketIO(app, cors_allowed_origins=cors_origin, async_mode="threading")
+        # CORS restricted to explicit localhost origins. Never use "*".
+        socketio = SocketIO(app, cors_allowed_origins=cors_allowed, async_mode="threading")
 
         _register_routes()
         return app, socketio
@@ -477,7 +479,7 @@ def _register_routes():
             - Path traversal prevention handled by Flask
             - Only serves files from designated static directory
         """
-        return send_from_directory("static", path)
+        return send_from_directory(app.static_folder, path)
 
     # SocketIO events
     @socketio.on("connect")
@@ -690,8 +692,10 @@ def start_visualization_server(host="127.0.0.1", port=VisualizationConstants.DEF
     # Initialize app/socketio with CORS origin matching the actual port the
     # server will bind to.  This fixes the bug where CORS was hardcoded to
     # port 8080 even when the server fell back to a different port.
-    cors_origin = f"http://{host}:{port}"
-    _app, _sio = _get_app(cors_origin=cors_origin)
+    # ``localhost`` and ``127.0.0.1`` are different browser origins — allow both
+    # so Socket.IO connects whether the user opened either URL.
+    cors_origins = [f"http://127.0.0.1:{port}", f"http://localhost:{port}"]
+    _app, _sio = _get_app(cors_origin=cors_origins)
 
     def run_server():
         """
@@ -734,7 +738,7 @@ if __name__ == "__main__":
     #   Werkzeug to the network).
     # debug=False: never expose Werkzeug's interactive debugger, which
     #   provides an unauthenticated Python REPL.
-    _app, _sio = _get_app(cors_origin="http://127.0.0.1:8080")
+    _app, _sio = _get_app(cors_origin=["http://127.0.0.1:8080", "http://localhost:8080"])
     print("Starting Gemma Training Visualizer in test mode...")
-    print("Open http://localhost:8080 in your browser")
+    print("Open http://127.0.0.1:8080 or http://localhost:8080 in your browser")
     _sio.run(_app, host="127.0.0.1", port=8080, debug=False, allow_unsafe_werkzeug=True)

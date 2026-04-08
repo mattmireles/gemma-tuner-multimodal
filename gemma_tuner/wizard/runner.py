@@ -210,9 +210,8 @@ def offer_gemma4_install(*, context: str) -> None:
     # whose argv[0] is not directly executable by ``os.execv(sys.executable, …)``.
     # ``-m gemma_tuner.cli_typer`` always works regardless of entry point.
     #
-    # We intentionally target ``cli_typer`` (not the legacy ``main`` module) so
-    # the restarted wizard does not print the deprecation banner that
-    # ``gemma_tuner.main`` shows on every invocation.
+    # We intentionally target ``cli_typer`` (canonical module) rather than
+    # ``gemma_tuner.main`` (thin compatibility shim around the same app).
     #
     # Forward the original argv tail (``sys.argv[1:]``, normally ``["wizard"]``)
     # so any CLI flags the user passed to ``gemma-macos-tuner wizard`` survive
@@ -404,7 +403,7 @@ def execute_training(profile_config: Dict[str, Any]):
             [
                 sys.executable,
                 "-m",
-                "gemma_tuner.main",  # Legacy Typer entry (repo root main.py was removed)
+                "gemma_tuner.main",  # Shim; same as ``python -m gemma_tuner.cli_typer``
                 "finetune",  # Training operation
                 profile_name,  # Generated wizard profile
                 "--config",  # Custom configuration file
