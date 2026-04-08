@@ -309,11 +309,37 @@ def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] 
 
     datasets = detect_datasets()
 
+    # Surface the bundled text sample at the top of the local-dataset list so
+    # first-time users see "try this first" before scrolling. The sample only has
+    # prompt/response columns (no audio_path, no image_path), so we only promote
+    # it — and only show it at all — when the user picked text instruction tuning
+    # in Step 1. Showing it for audio or image would lead to a guaranteed runtime
+    # error during training.
+    sample_promoted: list[Dict[str, Any]] = []
+    other_local: list[Dict[str, Any]] = []
+    other_virtual: list[Dict[str, Any]] = []
+    text_sub_mode = str(finetuning.get("text_sub_mode", "instruction")).lower()
+    sample_compatible = modality == "text" and text_sub_mode == "instruction"
+    for dataset in datasets:
+        if dataset.get("is_sample"):
+            if sample_compatible:
+                sample_promoted.append(dataset)
+            # Skip the sample entirely for non-text modalities — it has no
+            # audio_path / image_path column and would crash training.
+            continue
+        if dataset.get("type") in ("local_csv", "local_audio"):
+            other_local.append(dataset)
+        else:
+            other_virtual.append(dataset)
+    datasets = sample_promoted + other_local + other_virtual
+
     choices = []
     for dataset in datasets:
         if modality in ("text", "image") and dataset.get("type") in ("bigquery_import", "granary_setup"):
             continue
-        if dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
+        if dataset.get("is_sample"):
+            choice_text = f"✨ {dataset['name']} — {dataset['description']}"
+        elif dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
             choice_text = f"📁 {dataset['name']} - {dataset['description']}"
         else:
             choice_text = f"⚙️ {dataset['description']}"

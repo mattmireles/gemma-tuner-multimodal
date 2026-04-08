@@ -14,6 +14,7 @@ Called by:
 
 import configparser
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -22,12 +23,13 @@ from typing import Any, Dict
 
 # Rich for beautiful terminal UI
 # --- Cross-module wizard imports ---------------------------------------------------
-# Import shared UI singletons from base
-from gemma_tuner.wizard.base import (
-    console,
-)
+from gemma_tuner.wizard.base import SAMPLE_DATASET_NAME, console
 from gemma_tuner.wizard.config import generate_profile_config
-from gemma_tuner.wizard.config_store import _read_config
+from gemma_tuner.wizard.config_store import (
+    _CONFIG_INI,
+    _read_config,
+    ensure_bundled_sample_config_sections,
+)
 from gemma_tuner.wizard.estimator import configure_method_specifics, estimate_training_time
 from gemma_tuner.wizard.ui import (
     configure_image_columns,
@@ -40,6 +42,66 @@ from gemma_tuner.wizard.ui import (
     show_confirmation_screen,
     show_welcome_screen,
 )
+
+# ---------------------------------------------------------------------------
+# bootstrap helpers
+# ---------------------------------------------------------------------------
+
+
+def _ensure_config_ini_exists() -> None:
+    """Make sure ``config/config.ini`` is present and contains the sample sections.
+
+    Two scenarios both need to "just work":
+
+    1. **Fresh checkout** — the user has never run the wizard. ``config.ini`` does
+       not exist (it is gitignored because the wizard writes local paths and GCP
+       project IDs into it). Without bootstrapping, the model selection step would
+       fail with "No Gemma models found in config.ini" before the user could do
+       anything. Fix: copy ``config.ini.example`` over.
+
+    2. **Pre-existing user config** — the user already has a ``config.ini`` from
+       before the bundled sample existed. Their file has ``[model:*]`` sections
+       but no ``[dataset:sample-text]`` / ``[profile:sample-text]``. If they pick
+       the sample in the dataset selection step, ``generate_profile_config()``
+       would crash because ``load_model_dataset_config()`` requires the dataset
+       section. Fix: idempotently inject the two sections when the sample
+       directory exists on disk but the sections are missing from config.
+
+    Both repairs are no-ops when nothing needs to change.
+    """
+    if not _CONFIG_INI.exists():
+        example_path = _CONFIG_INI.with_name("config.ini.example")
+        if example_path.exists():
+            _CONFIG_INI.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(example_path), str(_CONFIG_INI))
+            console.print(
+                f"[green]Created [bold]{_CONFIG_INI.relative_to(_CONFIG_INI.parent.parent)}[/bold] "
+                f"from [bold]config.ini.example[/bold].[/green]"
+            )
+            console.print(
+                "[dim]This file is gitignored — edit it freely. The wizard will also write "
+                "to it (e.g. BigQuery project IDs).[/dim]\n"
+            )
+        # If even the example is missing the checkout is broken; let the
+        # downstream "no models" error fire so the user gets a clear signal.
+
+    _ensure_sample_sections_present()
+
+
+def _ensure_sample_sections_present() -> None:
+    """Add ``[dataset:sample-text]`` / ``[profile:sample-text]`` if the sample exists on disk.
+
+    Delegates to :func:`ensure_bundled_sample_config_sections` (single source of truth:
+    ``config.ini.example``).
+    """
+    if ensure_bundled_sample_config_sections(
+        config_ini=_CONFIG_INI,
+        sample_dataset_name=SAMPLE_DATASET_NAME,
+    ):
+        console.print(
+            f"[dim]Added bundled [bold]{SAMPLE_DATASET_NAME}[/bold] dataset/profile to config.ini.[/dim]"
+        )
+
 
 # ---------------------------------------------------------------------------
 # execute_training
@@ -376,6 +438,11 @@ def wizard_main():
         Completion: "✅ Training completed successfully! Model saved in output/"
     """
     try:
+        # Bootstrap config.ini from the committed example on first run.
+        # Must run before show_welcome_screen / select_model so the rest of the
+        # wizard can read [model:*] and [dataset:*] sections without crashing.
+        _ensure_config_ini_exists()
+
         # Step 0: Elegant introduction with system profiling
         # Creates confidence through hardware verification and beautiful design
         show_welcome_screen()

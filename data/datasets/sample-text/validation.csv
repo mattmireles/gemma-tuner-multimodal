@@ -1,0 +1,6 @@
+id,prompt,response
+1,"Translate to French: Thank you very much.","Merci beaucoup."
+2,"Translate to Spanish: Good night.","Buenas noches."
+3,"What is the capital of Canada?","Ottawa."
+4,"What is the chemical symbol for silver?","Ag."
+5,"Convert to JSON: name is Ben, age is 24, role is designer.","{""name"": ""Ben"", ""age"": 24, ""role"": ""designer""}"

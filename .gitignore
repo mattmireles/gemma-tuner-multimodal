@@ -133,7 +133,10 @@ experiments.db
 distributed_training_result.pt
 output/
 data/audio/
-data/datasets/
+data/datasets/*
+# Allow the bundled happy-path sample dataset (CSVs only).
+!data/datasets/sample-text/
+data/datasets/sample-text/.cache/
 data_patches/
 exports/
 
@@ -165,6 +168,8 @@ README/plans/
 # Agent / editor bundles (local only)
 .agents/
 .claude/
+# Explicit: david-ogilvy copywriting skill lives under .claude/skills/ (local; adapted from gist)
+.claude/skills/david-ogilvy/
 .cursor/
 Claude.md
 
