@@ -148,12 +148,12 @@ def select_finetuning_kind() -> Optional[Dict[str, Any]]:
     console.print("\n[bold]Step 1: What kind of fine-tuning?[/bold]")
     choices = [
         {
-            "name": "Speech-to-text (audio + transcript)",
-            "value": {"modality": "audio", "text_sub_mode": "instruction"},
-        },
-        {
             "name": "Instruction tuning (text — prompt + response columns)",
             "value": {"modality": "text", "text_sub_mode": "instruction"},
+        },
+        {
+            "name": "Speech-to-text (audio + transcript)",
+            "value": {"modality": "audio", "text_sub_mode": "instruction"},
         },
         {
             "name": "Continued pretraining / style (text — single text column)",

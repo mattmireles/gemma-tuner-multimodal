@@ -99,6 +99,14 @@ class VisualizerTrainerCallback(TrainerCallback):
         except Exception:
             lr = 0.0
 
+        # HF Trainer computes the gradient norm BEFORE zeroing gradients and
+        # writes it to logs["grad_norm"]. We must read it here — by the time
+        # on_log fires, optimizer.zero_grad() has already run, so trying to
+        # re-compute the norm by walking model.parameters() downstream would
+        # see every p.grad as None and return a constant 0.0 (which is what
+        # was happening before this fix: "signal strength stays at 0").
+        grad_norm = logs.get("grad_norm")
+
         try:
             from gemma_tuner.visualizer import get_visualizer
 
@@ -117,6 +125,7 @@ class VisualizerTrainerCallback(TrainerCallback):
                     batch=batch,
                     outputs=outputs,
                     global_step=int(state.global_step),
+                    gradient_norm=float(grad_norm) if grad_norm is not None else None,
                 )
         except Exception as e:
             logger.debug("Visualizer on_log push failed: %s", e)

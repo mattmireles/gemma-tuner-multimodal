@@ -158,11 +158,25 @@ function initEventListeners() {
     });
 
     // Sound button — opt-in beep oscillator from V.playLossSound().
+    //
+    // Labels are imperative so the off switch is findable: "sound" when
+    // off (i.e. "click to turn sound on"), "mute" when on (click to
+    // stop). A user frantically hunting for the off switch scans for
+    // the word that describes the action they want, which is "mute" —
+    // not "sound on," which reads as a status and hides the affordance.
     document.getElementById('sound-btn').addEventListener('click', () => {
         V.soundEnabled = !V.soundEnabled;
-        const btn = document.getElementById('sound-btn');
-        btn.textContent = V.soundEnabled ? 'sound on' : 'sound';
-        btn.classList.toggle('active', V.soundEnabled);
+        applySoundButtonState();
+    });
+
+    // Global ESC mute — the fastest possible off switch. If the beeps
+    // surprise you, Escape kills them from anywhere on the page without
+    // needing to find the dock.
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && V.soundEnabled) {
+            V.soundEnabled = false;
+            applySoundButtonState();
+        }
     });
 
     // Fullscreen button
@@ -173,6 +187,20 @@ function initEventListeners() {
             document.exitFullscreen();
         }
     });
+}
+
+/**
+ * Sync the sound dock button label + active state to V.soundEnabled.
+ *
+ * Kept as a small helper because both the click handler and the ESC-key
+ * handler need to rewrite the same DOM in the same way — without this
+ * the ESC path leaves the button reading "mute" while the state is off.
+ */
+function applySoundButtonState() {
+    const btn = document.getElementById('sound-btn');
+    if (!btn) return;
+    btn.textContent = V.soundEnabled ? 'mute' : 'sound';
+    btn.classList.toggle('active', V.soundEnabled);
 }
 
 function updateStats(data) {
