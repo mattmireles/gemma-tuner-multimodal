@@ -14,6 +14,7 @@ import librosa
 import numpy as np
 
 from gemma_tuner.models.gemma.constants import AudioProcessingConstants
+from gemma_tuner.utils.safe_io import validate_safe_path
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +161,12 @@ def load_audio_local_or_gcs(
 
     # Local file path
     try:
-        audio = librosa.load(path_or_audio, sr=sampling_rate)[0]
+        # Validate path to prevent directory traversal attacks
+        safe_path = validate_safe_path(path_or_audio, allow_symlinks=False)
+        audio = librosa.load(str(safe_path), sr=sampling_rate)[0]
         return _clip_audio_float32(audio)
+    except ValueError as e:
+        raise AudioLoadError(f"Invalid audio path '{path_or_audio}': {e}") from e
     except Exception as e:
         raise AudioLoadError(f"Failed to load audio from local path '{path_or_audio}': {e}") from e
 
