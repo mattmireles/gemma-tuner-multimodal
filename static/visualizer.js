@@ -24,6 +24,11 @@ let enableSpectrogram = urlParams.get('showSpectrogram') !== '0' && !lightMode;
 // Three.js objects
 let scene, camera, renderer;
 let neuralNetwork = null;
+/** @type {THREE.Mesh[]} Neuron spheres for gradient pulsing */
+let galaxyNeuronMeshes = [];
+let galaxyLastFingerprint = '';
+const GALAXY_MAX_NODES = 340;
+const GOLDEN_ANGLE = 2.39996322972865332;
 let particles = [];
 
 // Chart.js objects
@@ -234,8 +239,8 @@ function init3DNeuralNetwork() {
     directionalLight.position.set(1, 1, 1);
     scene.add(directionalLight);
     
-    // Create neural network structure
-    createNeuralNetworkMesh();
+    // Placeholder spiral until ``initial_state`` delivers HF architecture
+    createNeuralNetworkMesh(null);
     
     // Add mouse controls
     let mouseX = 0, mouseY = 0;
@@ -263,77 +268,269 @@ function init3DNeuralNetwork() {
     window.animateNetwork = animateNetwork;
 }
 
-/**
- * Create the 3D neural network mesh
- */
-function createNeuralNetworkMesh() {
-    const group = new THREE.Group();
-    
-    // Create layers (encoder, decoder)
-    const layers = [];
-    const layerCount = 6;
-    const neuronsPerLayer = 8;
-    const layerSpacing = 5;
-    
-    for (let l = 0; l < layerCount; l++) {
-        const layer = new THREE.Group();
-        const isEncoder = l < layerCount / 2;
-        
-        for (let n = 0; n < neuronsPerLayer; n++) {
-            // Create neuron
-            const geometry = new THREE.SphereGeometry(0.3, 16, 16);
-            const material = new THREE.MeshPhongMaterial({
-                color: isEncoder ? 0xFF00CC : 0x0099FF,  // Pink for encoder, Blue for decoder
-                emissive: isEncoder ? 0xFF00CC : 0x0099FF,
-                emissiveIntensity: 0.2
-            });
-            const neuron = new THREE.Mesh(geometry, material);
-            
-            // Position in circle
-            const angle = (n / neuronsPerLayer) * Math.PI * 2;
-            const radius = 3;
-            neuron.position.x = Math.cos(angle) * radius;
-            neuron.position.y = Math.sin(angle) * radius;
-            neuron.position.z = (l - layerCount / 2) * layerSpacing;
-            
-            // Store reference
-            neuron.userData = { layer: l, index: n };
-            layer.add(neuron);
+function _hashString(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+}
+
+function _mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+        let t = (a += 0x6d2b79f5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function mergeArchDefaults(arch) {
+    const a = arch || {};
+    return {
+        encoder_layers: a.encoder_layers || 0,
+        decoder_layers: a.decoder_layers || 0,
+        num_hidden_layers: a.num_hidden_layers || 0,
+        hidden_size: a.hidden_size || 2048,
+        attention_heads: a.attention_heads || 8,
+        vocab_size: a.vocab_size || 256000,
+        total_params: a.total_params || 0,
+        trainable_params: a.trainable_params || 0,
+        model_type: a.model_type || 'unknown',
+    };
+}
+
+function estimateRingCount(merged) {
+    let n = merged.num_hidden_layers;
+    if (!n) n = merged.encoder_layers + merged.decoder_layers;
+    if (!n && merged.total_params) {
+        const tp = Math.max(10, merged.total_params);
+        n = Math.max(4, Math.min(48, Math.round(Math.log10(tp) * 8)));
+    }
+    if (!n) n = 14;
+    return Math.max(4, Math.min(48, n));
+}
+
+function disposeGalaxyContents() {
+    galaxyNeuronMeshes = [];
+    if (!scene || !neuralNetwork) return;
+    scene.remove(neuralNetwork);
+    neuralNetwork.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+            else obj.material.dispose();
         }
-        
-        layers.push(layer);
-        group.add(layer);
-    }
-    
-    // Create connections between layers
-    const connectionMaterial = new THREE.LineBasicMaterial({
-        color: 0x9933CC,  // Purple for connections
-        opacity: 0.3,
-        transparent: true
     });
-    
-    for (let l = 0; l < layers.length - 1; l++) {
-        const currentLayer = layers[l];
-        const nextLayer = layers[l + 1];
-        
-        currentLayer.children.forEach((neuron1, i) => {
-            nextLayer.children.forEach((neuron2, j) => {
-                // Create connection with some probability for visual clarity
-                if (Math.random() > 0.7) {
-                    const points = [];
-                    points.push(neuron1.position.clone());
-                    points.push(neuron2.position.clone());
-                    
-                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                    const line = new THREE.Line(geometry, connectionMaterial);
-                    group.add(line);
-                }
-            });
-        });
+    neuralNetwork = null;
+}
+
+/**
+ * Build a generic barred-spiral "galaxy" from HF architecture fields (any Gemma / modality).
+ * @param {object|null} arch — from ``initial_state.architecture`` or training payload
+ */
+function createNeuralNetworkMesh(arch) {
+    if (!scene) return;
+
+    const container = document.getElementById('neural-network-3d');
+    disposeGalaxyContents();
+
+    const merged = mergeArchDefaults(arch);
+    const rng = _mulberry32(_hashString(JSON.stringify(merged)) || 0xcafebabe);
+
+    const ringCount = estimateRingCount(merged);
+    const hidden = Math.max(256, merged.hidden_size);
+    let nodesPerRing = Math.round(Math.sqrt(hidden / 96) * 3.5);
+    nodesPerRing = Math.max(6, Math.min(22, nodesPerRing));
+    let totalNodes = ringCount * nodesPerRing;
+    if (totalNodes > GALAXY_MAX_NODES) {
+        nodesPerRing = Math.max(4, Math.floor(GALAXY_MAX_NODES / ringCount));
     }
-    
+
+    const group = new THREE.Group();
+    group.userData = { arch: merged, neuronMeshes: [] };
+
+    const arms = Math.max(3, Math.min(12, merged.attention_heads || 6));
+    const positions = [];
+
+    for (let ring = 0; ring < ringCount; ring++) {
+        const t = ring / Math.max(1, ringCount - 1);
+        const spiralR = 0.9 + t * 7.2;
+        const z = (ring - (ringCount - 1) / 2) * 1.02;
+        const hue = 0.72 + 0.28 * t;
+
+        for (let n = 0; n < nodesPerRing; n++) {
+            const arm = n % arms;
+            const ang =
+                (2 * Math.PI * (n / nodesPerRing)) +
+                ring * GOLDEN_ANGLE +
+                (arm / arms) * 0.55;
+            const wobble = (rng() - 0.5) * 0.35;
+            const radiusJ = spiralR + wobble + Math.sin(ring * 0.45 + arm) * 0.12;
+            const x = Math.cos(ang) * radiusJ;
+            const y = Math.sin(ang) * radiusJ;
+
+            positions.push({ x, y, z, ring, hue });
+        }
+    }
+
+    const sphereR = 0.11 + Math.min(0.14, Math.log10(Math.max(merged.vocab_size, 1000)) * 0.018);
+    const matForHue = (hue, emissiveScale) => {
+        const c = new THREE.Color().setHSL(hue % 1, 0.82, 0.58);
+        return new THREE.MeshStandardMaterial({
+            color: c,
+            emissive: c.clone().multiplyScalar(0.35),
+            emissiveIntensity: emissiveScale,
+            metalness: 0.35,
+            roughness: 0.35,
+        });
+    };
+
+    positions.forEach((p) => {
+        const geo = new THREE.SphereGeometry(sphereR, 10, 10);
+        const mat = matForHue(p.hue, 0.45 + rng() * 0.25);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(p.x, p.y, p.z);
+        mesh.userData = { ring: p.ring, idx };
+        group.add(mesh);
+        group.userData.neuronMeshes.push(mesh);
+        galaxyNeuronMeshes.push(mesh);
+    });
+
+    const lineMat = new THREE.LineBasicMaterial({
+        color: 0x8844ff,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+    });
+    const linePoints = [];
+    for (let ring = 0; ring < ringCount - 1; ring++) {
+        const base = ring * nodesPerRing;
+        const nextBase = (ring + 1) * nodesPerRing;
+        for (let n = 0; n < nodesPerRing; n++) {
+            const a = positions[base + n];
+            const b = positions[nextBase + ((n + Math.floor(rng() * 3)) % nodesPerRing)];
+            if (!a || !b) continue;
+            if (rng() > 0.42) continue;
+            linePoints.push(
+                new THREE.Vector3(a.x, a.y, a.z),
+                new THREE.Vector3(b.x, b.y, b.z)
+            );
+        }
+    }
+    if (linePoints.length) {
+        const lg = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const lines = new THREE.LineSegments(lg, lineMat);
+        group.add(lines);
+    }
+
+    const coreR = 0.55 + 0.08 * Math.log10(Math.max(merged.vocab_size, 1024));
+    const coreGeo = new THREE.IcosahedronGeometry(coreR, 1);
+    const coreMat = new THREE.MeshStandardMaterial({
+        color: 0xff00cc,
+        emissive: 0x440066,
+        emissiveIntensity: 0.9,
+        metalness: 0.2,
+        roughness: 0.25,
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.userData.isCore = true;
+    group.add(core);
+
+    const dustN = Math.min(6000, Math.max(1200, Math.floor((merged.total_params || 5e8) / 1.2e6)));
+    const dustPos = new Float32Array(dustN * 3);
+    const dustCol = new Float32Array(dustN * 3);
+    for (let i = 0; i < dustN; i++) {
+        const u = rng();
+        const v = rng();
+        const theta = 2 * Math.PI * u;
+        const phi = Math.acos(2 * v - 1);
+        const rr = 3 + rng() * 11;
+        dustPos[i * 3] = rr * Math.sin(phi) * Math.cos(theta);
+        dustPos[i * 3 + 1] = rr * Math.sin(phi) * Math.sin(theta);
+        dustPos[i * 3 + 2] = rr * Math.cos(phi) * 0.35 + (rng() - 0.5) * 4;
+        const col = new THREE.Color().setHSL(0.55 + rng() * 0.35, 0.7, 0.55);
+        dustCol[i * 3] = col.r;
+        dustCol[i * 3 + 1] = col.g;
+        dustCol[i * 3 + 2] = col.b;
+    }
+    const dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+    dustGeo.setAttribute('color', new THREE.BufferAttribute(dustCol, 3));
+    const dustMat = new THREE.PointsMaterial({
+        size: 0.045,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const dust = new THREE.Points(dustGeo, dustMat);
+    group.add(dust);
+
+    const rimLight = new THREE.PointLight(0x00ccff, 1.1, 80);
+    rimLight.position.set(14, 8, 10);
+    group.add(rimLight);
+    const fillLight = new THREE.PointLight(0xff00aa, 0.65, 80);
+    fillLight.position.set(-12, -6, -8);
+    group.add(fillLight);
+
+    group.userData.label =
+        merged.model_type +
+        ' · ' +
+        ringCount +
+        ' rings × ' +
+        nodesPerRing +
+        ' · ' +
+        (merged.total_params ? (merged.total_params / 1e6).toFixed(1) + 'M params' : '');
+
     neuralNetwork = group;
     scene.add(neuralNetwork);
+
+    const titleEl = document.querySelector('#neural-network-3d')?.closest('.viz-panel')?.querySelector('.panel-title');
+    if (titleEl && merged.model_type !== 'unknown') {
+        titleEl.replaceChildren();
+        const ic = document.createElement('i');
+        ic.className = 'fas fa-network-wired';
+        titleEl.appendChild(ic);
+        titleEl.appendChild(document.createTextNode(' Neural Galaxy — '));
+        const span = document.createElement('span');
+        span.style.opacity = '0.75';
+        span.style.fontSize = '0.72em';
+        span.style.fontWeight = 'normal';
+        span.textContent = merged.model_type;
+        titleEl.appendChild(span);
+    }
+}
+
+function galaxyFingerprint(arch, totalParams, trainableParams) {
+    const a = arch || {};
+    return [
+        a.model_type,
+        a.num_hidden_layers,
+        a.encoder_layers,
+        a.decoder_layers,
+        a.hidden_size,
+        a.attention_heads,
+        a.vocab_size,
+        totalParams || 0,
+        trainableParams || 0,
+    ].join('|');
+}
+
+function maybeRebuildGalaxyFromArchitecture(arch, totalParams, trainableParams) {
+    if (!enable3D || !scene || !arch) return;
+    const tp = totalParams ?? arch.total_params ?? 0;
+    const trp = trainableParams ?? arch.trainable_params ?? 0;
+    const fp = galaxyFingerprint(arch, tp, trp);
+    if (fp === galaxyLastFingerprint) return;
+    galaxyLastFingerprint = fp;
+    const merged = mergeArchDefaults(arch);
+    merged.total_params = tp || merged.total_params;
+    merged.trainable_params = trp || merged.trainable_params;
+    createNeuralNetworkMesh(merged);
 }
 
 /**
@@ -534,6 +731,14 @@ function handleTrainingUpdate(data) {
     if (enableSpectrogram && data.mel_spectrogram) {
         updateSpectrogram(data.mel_spectrogram);
     }
+
+    if (data.architecture) {
+        maybeRebuildGalaxyFromArchitecture(
+            data.architecture,
+            data.total_params ?? data.architecture.total_params,
+            data.trainable_params ?? data.architecture.trainable_params
+        );
+    }
     
     // Sound effects
     if (soundEnabled && data.loss !== undefined) {
@@ -620,25 +825,22 @@ function updateLearningRateChart(lr, step) {
  * Update neural network based on gradients
  */
 function updateNeuralNetworkGradients(gradNorm) {
-    if (!neuralNetwork) return;
-    
-    // Pulse neurons based on gradient magnitude
     const intensity = Math.min(gradNorm / 10, 1);
-    
-    neuralNetwork.children.forEach((layer) => {
-        if (layer.children) {
-            layer.children.forEach((neuron) => {
-                if (neuron.material) {
-                    // Animate emissive intensity
-                    neuron.material.emissiveIntensity = 0.2 + intensity * 0.8;
-                    
-                    // Scale based on gradient
-                    const scale = 1 + intensity * 0.2;
-                    neuron.scale.set(scale, scale, scale);
-                }
-            });
+    const baseEmissive = 0.35;
+    galaxyNeuronMeshes.forEach((neuron) => {
+        if (neuron.material) {
+            neuron.material.emissiveIntensity = baseEmissive + intensity * 0.95;
+            const scale = 1 + intensity * 0.22;
+            neuron.scale.set(scale, scale, scale);
         }
     });
+    if (neuralNetwork) {
+        neuralNetwork.traverse((obj) => {
+            if (obj.userData && obj.userData.isCore && obj.material) {
+                obj.material.emissiveIntensity = 0.75 + intensity * 0.55;
+            }
+        });
+    }
 }
 
 /**
@@ -832,6 +1034,9 @@ function updateStats(data) {
         const millions = (data.total_params / 1e6).toFixed(1);
         document.getElementById('param-count').textContent = `${millions}M`;
     }
+    if (data.architecture) {
+        maybeRebuildGalaxyFromArchitecture(data.architecture, data.total_params, data.trainable_params);
+    }
 }
 
 /**
@@ -883,13 +1088,17 @@ function animate() {
         window.animateNetwork();
     }
     
-    // Rotate neural network
+    // Rotate neural network + slow core spin
     if (neuralNetwork && !isPaused) {
         neuralNetwork.rotation.y += 0.002;
-        
-        // Pulse effect
-        const pulse = Math.sin(currentTime * 0.001) * 0.1 + 1;
+        const pulse = Math.sin(currentTime * 0.001) * 0.08 + 1;
         neuralNetwork.scale.set(pulse, pulse, pulse);
+        neuralNetwork.traverse((obj) => {
+            if (obj.userData && obj.userData.isCore) {
+                obj.rotation.x += 0.006;
+                obj.rotation.y += 0.009;
+            }
+        });
     }
 }
 
