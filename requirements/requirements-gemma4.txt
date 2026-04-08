@@ -1,9 +1,10 @@
-# Gemma 4 compatibility stack — install on top of a normal editable install:
+# Gemma 4 compatibility stack — optional on top of a normal editable install:
 #   pip install -e .
 #   pip install -r requirements/requirements-gemma4.txt
 #
-# Gemma 4 needs transformers>=5.5 (model registration, multimodal classes).
-# Install on top of the base tree from pyproject.toml / requirements.txt.
+# Base pyproject.toml already requires transformers>=5.5.0; this file repeats
+# that pin and adds a PEFT floor for Gemma 4 LoRA. Use it when you want an
+# explicit one-shot install or to bump PEFT without re-reading pyproject.
 # See README/plans/gemma4-upgrade.md.
 
 transformers>=5.5.0

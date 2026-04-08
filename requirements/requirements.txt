@@ -1,8 +1,9 @@
 # -----------------------------------------------------------------
 # requirements.txt — derived from pyproject.toml [project.dependencies]
 #
-# Optional Gemma 4 stack (transformers 5.5+): install after the base tree with
+# Extra Gemma 4 / PEFT pins (optional): install after the base tree with
 #   pip install -r requirements/requirements-gemma4.txt
+# Base transformers is already >=5.5.0 in pyproject.toml.
 #
 # pyproject.toml is the single source of truth for dependency bounds.
 # To regenerate a pinned lockfile from this, run:
@@ -14,7 +15,7 @@
 # -----------------------------------------------------------------
 
 # Hugging Face ecosystem (must match pyproject.toml [project.dependencies])
-transformers>=4.46.0
+transformers>=5.5.0
 datasets>=4.0.0
 accelerate>=0.27.2
 evaluate>=0.4.1

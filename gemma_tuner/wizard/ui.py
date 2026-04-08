@@ -731,6 +731,11 @@ def show_confirmation_screen(
     method_config["visualize"] = enable_viz
 
     if enable_viz:
+        from gemma_tuner.wizard.runner import ensure_viz_dependencies_installed
+
+        ensure_viz_dependencies_installed(method_config)
+
+    if method_config.get("visualize"):
         console.print("[green]✨ Visualization will open in your browser when training starts![/green]")
 
     # Confirmation prompt. None means non-interactive stdin — treat as cancellation.

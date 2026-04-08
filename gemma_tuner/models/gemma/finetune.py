@@ -648,6 +648,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         except Exception as e:
             logger.warning("enable_input_require_grads() failed (continuing): %s", e)
 
+    _do_viz = bool(profile_config.get("visualize"))
+    _logging_steps = int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS))
+    if _do_viz:
+        # HF only calls TrainerCallback.on_log on the logging_steps schedule; the
+        # dashboard follows that cadence. Force 1 so the visualizer updates every
+        # optimizer step while viz is on (profile logging_steps is ignored).
+        _logging_steps = 1
+        logger.info("Visualization: logging_steps=1 (dashboard updates every training step).")
+
     train_kw = dict(
         output_dir=output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
@@ -657,7 +666,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         learning_rate=learning_rate,
         bf16=use_bf16,
         gradient_checkpointing=gradient_checkpointing,
-        logging_steps=int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS)),
+        logging_steps=_logging_steps,
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
         eval_strategy=effective_eval_strategy,
         report_to=[],
@@ -677,10 +686,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     set_seed(args.seed)
 
     trainer_callbacks: List[Any] = []
-    _do_viz = bool(profile_config.get("visualize"))
     if _do_viz:
-        _log_every = int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS))
-        trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _log_every)))
+        trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _logging_steps)))
 
     trainer_cls = GemmaVizTrainer if _do_viz else Trainer
     trainer_kwargs: dict[str, Any] = {}

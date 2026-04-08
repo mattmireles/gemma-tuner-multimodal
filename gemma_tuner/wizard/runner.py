@@ -13,6 +13,7 @@ Called by:
 """
 
 import configparser
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -232,6 +233,53 @@ def _preflight_gemma4_dependency() -> None:
     if _is_gemma4_supported():
         return
     offer_gemma4_install(context="Install now to use Gemma 4 models, or skip to use Gemma 3n only.")
+
+
+# ---------------------------------------------------------------------------
+# Training visualizer (optional [viz] extra)
+# ---------------------------------------------------------------------------
+
+#: Packages needed for the live training dashboard (Flask + Socket.IO).
+#: Must match ``[project.optional-dependencies].viz`` in ``pyproject.toml``.
+_VIZ_DEPS: tuple[str, ...] = (
+    "flask>=2.3.0,<3.0.0",
+    "flask-socketio>=5.3.0,<6.0.0",
+    "python-socketio>=5.9.0,<6.0.0",
+)
+
+
+def _viz_dependencies_installed() -> bool:
+    return importlib.util.find_spec("flask") is not None and importlib.util.find_spec("flask_socketio") is not None
+
+
+def _viz_install_command() -> list[str]:
+    return [sys.executable, "-m", "pip", "install", *_VIZ_DEPS]
+
+
+def ensure_viz_dependencies_installed(method_config: Dict[str, Any]) -> None:
+    """Install viz extras when the user opted in; disable ``visualize`` if install fails.
+
+    Uses ``sys.executable -m pip`` so packages land in the same interpreter as the
+    wizard (including the ``gemma-macos-tuner`` console script). No process restart
+    is required; training runs in a subprocess that sees the new installs.
+    """
+    if not method_config.get("visualize"):
+        return
+    if _viz_dependencies_installed():
+        return
+    console.print("\n[dim]Installing visualization server dependencies (Flask, Socket.IO)…[/dim]")
+    console.print(f"[dim]{' '.join(_viz_install_command())}[/dim]\n")
+    try:
+        subprocess.run(_viz_install_command(), check=True)
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            f"[red]Could not install visualization dependencies (exit {exc.returncode}). "
+            f"Training will continue without the dashboard.[/red]\n"
+            f"[dim]Manual install: {' '.join(_viz_install_command())}[/dim]"
+        )
+        method_config["visualize"] = False
+        return
+    console.print("[green]✓ Visualization dependencies installed.[/green]")
 
 
 # ---------------------------------------------------------------------------
