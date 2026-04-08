@@ -14,7 +14,7 @@ Institutional memory for the Gemma training dashboard (Socket.IO + Chart.js + Th
 
 ### Summary
 
-Charts stayed empty while the hero loss moved because **`idx` was undefined** in the galaxy `forEach`, which threw during **3D init before `initCharts()`**, and a **second `io()`** in the template masked the failure for the hero only. **Fix:** define `idx` in the callback, run **`initCharts()` first**, wrap 3D init in **try/catch**, move hero loss into **`visualizer.js`**, remove the duplicate inline Socket.IO bridge, add **`broadcast=True`** on server-side `emit`, fix **`.panel`** selector for the galaxy title, hydrate **memory** from history, and guard chart updaters if charts failed to construct.
+Charts stayed empty while the hero loss moved because **`idx` was undefined** in the galaxy `forEach`, which threw during **3D init before `initCharts()`**, and a **second `io()`** in the template masked the failure for the hero only. **Fix:** define `idx` in the callback, run **`initCharts()` first**, wrap 3D init in **try/catch**, move hero loss into the viz bundle, remove the duplicate inline Socket.IO bridge, fix **`.panel`** selector for the galaxy title, hydrate **memory** from history, and guard chart updaters if charts failed to construct. **Do not** pass **`broadcast=`** to **`SocketIO.emit`** (Flask-SocketIO 5 / python-socketio): omit `to=` to broadcast to all; `broadcast=True` raises and breaks the emit worker so **live updates never arrive** (history still works via the request handler).
 
 ### Symptom
 
@@ -37,7 +37,7 @@ Confirmed in code review: **`mesh.userData = { ring: p.ring, idx }`** referenced
 
 - `static/visualizer.js` — `forEach((p, idx) => …)`; `initCharts()` before 3D; try/catch on 3D; `updateHeroLoss` + history/memory hydration; chart `if (!lossChart) return` guards; `.panel` for title.
 - `templates/index.html` — removed duplicate inline `io()` bridge; cache-bust `visualizer.js?v=5`.
-- `gemma_tuner/visualizer.py` — `training_update` and post-init `initial_state` use `namespace="/", broadcast=True`.
+- `gemma_tuner/visualizer.py` — viz worker uses `socketio.emit(..., namespace="/")` only (no `broadcast=` kwarg).
 - **2026-04-08 follow-up:** `GemmaVizTrainer` + `VisualizerTrainerCallback.bind_trainer()` plumb `batch` / `outputs` from the last forward into `build_training_event` (attention, token top‑k, mel or image preview). With **gradient checkpointing**, some stacks still omit attentions — see training log warning.
 
 ### Verification
@@ -62,7 +62,7 @@ Browser: reload dashboard with `--visualize`; expect Chart.js lines to draw and 
 - [ ] `training_update` payloads include scalars when you expect chart motion.
 
 ```bash
-grep -n "forEach((p, idx)" static/visualizer.js
+grep -n "forEach((p, idx)" static/viz/gemma-viz-scene.js
 ```
 
 ---
@@ -71,7 +71,7 @@ grep -n "forEach((p, idx)" static/visualizer.js
 
 | Dimension | Grade | Note |
 |-----------|-------|------|
-| **Architecture** | **B** (post-fix) | Single `io()` in `visualizer.js`; charts init before 3D; explicit server `broadcast`. |
+| **Architecture** | **B** (post-fix) | Single `io()` in viz bundle; charts init before 3D; `SocketIO.emit` without invalid `broadcast=` kwarg. |
 | **Correctness risk** | **B** (post-fix) | `idx` fixed; try/catch + chart guards limit blast radius. |
 | **Complexity debt** | **C** | Partial `training_update` shapes + multimodal nulls on HF path unchanged. |
 
