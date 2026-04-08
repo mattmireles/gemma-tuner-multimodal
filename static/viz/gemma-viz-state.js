@@ -12,6 +12,13 @@
         soundEnabled: false,
         animationFrameId: null,
 
+        // Recording state — managed by gemma-viz-recording.js.
+        // isRecording: true while MediaRecorder is active.
+        // recordingAutoStopped: true if training_finished triggered the stop
+        //   (vs. the user pressing Stop manually).
+        isRecording: false,
+        recordingAutoStopped: false,
+
         lightMode: lightMode,
         // The 3D galaxy is opt-in via the dock "model" toggle (or ?show3D=1).
         // Reason: the panel is visually salient but the only training signal

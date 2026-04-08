@@ -48,6 +48,12 @@ function initSocket() {
     V.socket.on('training_update', (data) => {
         if (data && data.event === 'training_finished') {
             setHeroVerb(HERO_VERBS.DONE);
+            // Auto-stop recording when training ends so the recap captures
+            // the complete run without requiring the user to remember to stop.
+            if (V.recording && V.recording.isActive()) {
+                V.recordingAutoStopped = true;
+                V.recording.stop();
+            }
             return;
         }
         if (!V.isPaused) {
@@ -187,6 +193,20 @@ function initEventListeners() {
             document.exitFullscreen();
         }
     });
+
+    // Record button — start or stop the tab recording.
+    // The recording module (gemma-viz-recording.js) may be absent (script
+    // error, custom embed) so guard with a V.recording existence check.
+    const recBtn = document.getElementById('record-btn');
+    if (recBtn && V.recording) {
+        recBtn.addEventListener('click', () => {
+            if (V.recording.isActive()) {
+                V.recording.stop();
+            } else {
+                V.recording.start();
+            }
+        });
+    }
 }
 
 /**

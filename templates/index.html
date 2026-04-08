@@ -394,6 +394,11 @@
            <i> tags into innerHTML; the modern handlers use textContent and
            any stale <i> elements that slip through stay invisible. */
         .control-btn i { display: none; }
+        .control-btn:disabled {
+            opacity: 0.25;
+            cursor: default;
+            pointer-events: none;
+        }
 
         /* ---- the empty room: shown until the first step lands ---- */
 
@@ -562,13 +567,15 @@
         <button class="control-btn" id="toggle-attn">attention</button>
         <button class="control-btn" id="toggle-tokens">tokens</button>
         <button class="control-btn" id="toggle-spec">audio</button>
+        <button class="control-btn" id="record-btn">record</button>
     </div>
 
     <script src="/static/viz/status.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-state.js?v=4"></script>
+    <script src="/static/viz/gemma-viz-state.js?v=5"></script>
     <script src="/static/viz/gemma-viz-charts.js?v=4"></script>
     <script src="/static/viz/gemma-viz-scene.js?v=2"></script>
     <script src="/static/viz/gemma-viz-panels.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-app.js?v=6"></script>
+    <script src="/static/viz/gemma-viz-recording.js?v=1"></script>
+    <script src="/static/viz/gemma-viz-app.js?v=7"></script>
 </body>
 </html>
