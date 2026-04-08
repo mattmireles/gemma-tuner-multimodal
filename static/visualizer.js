@@ -50,6 +50,36 @@ let lastFrameTime = Date.now();
 let frameCount = 0;
 let fps = 60;
 
+// Honor prefers-reduced-motion. Read once at module load — the OS-level
+// preference rarely changes mid-session, and a live MediaQueryList listener
+// would just complicate the animate() hot path.
+const reducedMotion =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Hero loss display (single source of truth — no duplicate io() in the template) */
+let lastHeroLoss = null;
+
+function formatHeroLoss(n) {
+    if (n === null || n === undefined || Number.isNaN(n)) return '—';
+    if (n >= 100) return n.toFixed(1);
+    if (n >= 10) return n.toFixed(2);
+    return n.toFixed(3);
+}
+
+function updateHeroLoss(n) {
+    const el = document.getElementById('loss-value');
+    if (!el) return;
+    if (n === null || n === undefined || Number.isNaN(n)) return;
+    el.textContent = formatHeroLoss(n);
+    if (lastHeroLoss !== null && n > lastHeroLoss * 1.02) {
+        el.classList.add('is-rising');
+        setTimeout(() => el.classList.remove('is-rising'), 600);
+    }
+    lastHeroLoss = n;
+}
+
 // Audio context for sound effects (optional)
 let audioContext = null;
 let oscillator = null;
@@ -61,14 +91,23 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 Initializing Gemma Training Visualizer...');
     
     initSocket();
-    initBackgroundParticles();
-    if (enable3D) {
-        init3DNeuralNetwork();
-    } else {
-        const panel = document.getElementById('neural-network-3d');
-        if (panel && panel.parentElement) panel.parentElement.style.display = 'none';
+    try {
+        initCharts();
+    } catch (e) {
+        console.error('Chart init failed:', e);
     }
-    initCharts();
+    if (enable3D) {
+        try {
+            init3DNeuralNetwork();
+        } catch (e) {
+            console.error('3D visualizer init failed (charts still work):', e);
+        }
+    } else {
+        // Hide the whole panel card (title + body), not just the canvas slot,
+        // so we don't leave an orphaned title.
+        const card = document.getElementById('neural-network-3d')?.closest('.panel');
+        if (card) card.style.display = 'none';
+    }
     initEventListeners();
     
     // Start animation loop
@@ -79,25 +118,70 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('loading').style.display = 'none';
     }, 1000);
 
-    // Wire feature toggle buttons
-    const toggle = (id, stateVarName, onToggle) => {
+    // Wire feature toggle buttons.
+    //
+    // The previous implementation was `window[stateVarName] = !window[...]`,
+    // which silently failed: top-level `let` bindings (enable3D, etc.) do not
+    // become window properties, so the toggles wrote to window while the rest
+    // of the code read the closure binding. Buttons appeared to do nothing.
+    //
+    // Fix: pass an explicit getter/setter pair so the click handler can read
+    // and write the actual let binding via closures.
+    const toggle = (id, getter, setter, onToggle) => {
         const el = document.getElementById(id);
         if (!el) return;
+        el.classList.toggle('active', getter());
         el.addEventListener('click', () => {
-            window[stateVarName] = !window[stateVarName];
-            el.classList.toggle('active', window[stateVarName]);
-            if (typeof onToggle === 'function') onToggle(window[stateVarName]);
+            const next = !getter();
+            setter(next);
+            el.classList.toggle('active', next);
+            if (typeof onToggle === 'function') onToggle(next);
         });
     };
 
-    toggle('toggle-3d', 'enable3D', (on) => {
-        const panel = document.getElementById('neural-network-3d').parentElement;
-        panel.style.display = on ? '' : 'none';
-        if (on && !renderer) init3DNeuralNetwork();
-    });
-    toggle('toggle-attn', 'enableAttention');
-    toggle('toggle-tokens', 'enableTokens');
-    toggle('toggle-spec', 'enableSpectrogram');
+    toggle(
+        'toggle-3d',
+        () => enable3D,
+        (v) => { enable3D = v; },
+        (on) => {
+            const card = document.getElementById('neural-network-3d')?.closest('.panel');
+            if (card) card.style.display = on ? '' : 'none';
+            if (on && !renderer) {
+                try {
+                    init3DNeuralNetwork();
+                } catch (e) {
+                    console.error('3D visualizer init failed:', e);
+                }
+            }
+        }
+    );
+    toggle(
+        'toggle-attn',
+        () => enableAttention,
+        (v) => { enableAttention = v; },
+        (on) => {
+            const card = document.getElementById('attention-canvas')?.closest('.panel');
+            if (card) card.style.display = on ? '' : 'none';
+        }
+    );
+    toggle(
+        'toggle-tokens',
+        () => enableTokens,
+        (v) => { enableTokens = v; },
+        (on) => {
+            const sec = document.getElementById('token-cloud')?.closest('.saying');
+            if (sec) sec.style.display = on ? '' : 'none';
+        }
+    );
+    toggle(
+        'toggle-spec',
+        () => enableSpectrogram,
+        (v) => { enableSpectrogram = v; },
+        (on) => {
+            const card = document.getElementById('spectrogram-canvas')?.closest('.panel');
+            if (card) card.style.display = on ? '' : 'none';
+        }
+    );
 });
 
 /**
@@ -137,75 +221,6 @@ function initSocket() {
     socket.on('history_data', (data) => {
         console.log('📈 Received history data');
         loadHistoricalData(data);
-    });
-}
-
-/**
- * Initialize animated background particles
- */
-function initBackgroundParticles() {
-    const canvas = document.getElementById('particles-bg');
-    const ctx = canvas.getContext('2d');
-    
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    
-    const particles = [];
-    const particleCount = 100;
-    
-    for (let i = 0; i < particleCount; i++) {
-        particles.push({
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height,
-            vx: (Math.random() - 0.5) * 0.5,
-            vy: (Math.random() - 0.5) * 0.5,
-            size: Math.random() * 2
-        });
-    }
-    
-    function drawParticles() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        particles.forEach((p, i) => {
-            // Create gradient color based on particle position
-            const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
-            const t = i / particleCount;
-            if (t < 0.4) {
-                gradient.addColorStop(0, 'rgba(255, 0, 204, 0.8)'); // Pink
-                gradient.addColorStop(1, 'rgba(255, 0, 204, 0)');
-            } else if (t < 0.7) {
-                gradient.addColorStop(0, 'rgba(153, 51, 204, 0.8)'); // Purple
-                gradient.addColorStop(1, 'rgba(153, 51, 204, 0)');
-            } else {
-                gradient.addColorStop(0, 'rgba(0, 153, 255, 0.8)'); // Blue
-                gradient.addColorStop(1, 'rgba(0, 153, 255, 0)');
-            }
-            
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Update position
-            p.x += p.vx;
-            p.y += p.vy;
-            
-            // Wrap around screen
-            if (p.x < 0) p.x = canvas.width;
-            if (p.x > canvas.width) p.x = 0;
-            if (p.y < 0) p.y = canvas.height;
-            if (p.y > canvas.height) p.y = 0;
-        });
-        
-        requestAnimationFrame(drawParticles);
-    }
-    
-    drawParticles();
-    
-    // Handle window resize
-    window.addEventListener('resize', () => {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
     });
 }
 
@@ -359,7 +374,9 @@ function createNeuralNetworkMesh(arch) {
         const t = ring / Math.max(1, ringCount - 1);
         const spiralR = 0.9 + t * 7.2;
         const z = (ring - (ringCount - 1) / 2) * 1.02;
-        const hue = 0.72 + 0.28 * t;
+        // warm sweep: deep ember (inner rings) → bright gold (outer rings).
+        // stays inside the amber signature; depth reads as warmth, not hue.
+        const hue = 0.08 + 0.055 * t;
 
         for (let n = 0; n < nodesPerRing; n++) {
             const arm = n % arms;
@@ -378,17 +395,20 @@ function createNeuralNetworkMesh(arch) {
 
     const sphereR = 0.11 + Math.min(0.14, Math.log10(Math.max(merged.vocab_size, 1000)) * 0.018);
     const matForHue = (hue, emissiveScale) => {
-        const c = new THREE.Color().setHSL(hue % 1, 0.82, 0.58);
+        // Lightness rides the t ring-index so the galaxy reads as depth,
+        // not color cycling. Saturation stays high to keep the amber warm.
+        const l = 0.42 + (hue - 0.08) * 2.4;           // 0.42 → 0.55 ish
+        const c = new THREE.Color().setHSL(hue % 1, 0.92, Math.min(0.62, l));
         return new THREE.MeshStandardMaterial({
             color: c,
-            emissive: c.clone().multiplyScalar(0.35),
+            emissive: c.clone().multiplyScalar(0.4),
             emissiveIntensity: emissiveScale,
-            metalness: 0.35,
+            metalness: 0.3,
             roughness: 0.35,
         });
     };
 
-    positions.forEach((p) => {
+    positions.forEach((p, idx) => {
         const geo = new THREE.SphereGeometry(sphereR, 10, 10);
         const mat = matForHue(p.hue, 0.45 + rng() * 0.25);
         const mesh = new THREE.Mesh(geo, mat);
@@ -400,9 +420,9 @@ function createNeuralNetworkMesh(arch) {
     });
 
     const lineMat = new THREE.LineBasicMaterial({
-        color: 0x8844ff,
+        color: 0xff8800,           // warm ember, additive — reads as a glow
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.20,
         blending: THREE.AdditiveBlending,
     });
     const linePoints = [];
@@ -429,9 +449,9 @@ function createNeuralNetworkMesh(arch) {
     const coreR = 0.55 + 0.08 * Math.log10(Math.max(merged.vocab_size, 1024));
     const coreGeo = new THREE.IcosahedronGeometry(coreR, 1);
     const coreMat = new THREE.MeshStandardMaterial({
-        color: 0xff00cc,
-        emissive: 0x440066,
-        emissiveIntensity: 0.9,
+        color: 0xffb000,           // the signature amber — this is the sun
+        emissive: 0x663300,
+        emissiveIntensity: 0.95,
         metalness: 0.2,
         roughness: 0.25,
     });
@@ -451,7 +471,12 @@ function createNeuralNetworkMesh(arch) {
         dustPos[i * 3] = rr * Math.sin(phi) * Math.cos(theta);
         dustPos[i * 3 + 1] = rr * Math.sin(phi) * Math.sin(theta);
         dustPos[i * 3 + 2] = rr * Math.cos(phi) * 0.35 + (rng() - 0.5) * 4;
-        const col = new THREE.Color().setHSL(0.55 + rng() * 0.35, 0.7, 0.55);
+        // dust = warm starfield, scattered across the amber range with a few
+        // near-white motes for highlights. no cool tones — the room is warm.
+        const cool = rng() < 0.18;
+        const col = cool
+            ? new THREE.Color().setHSL(0.11, 0.15, 0.78 + rng() * 0.12)   // pale warm white
+            : new THREE.Color().setHSL(0.07 + rng() * 0.08, 0.75, 0.55 + rng() * 0.18);
         dustCol[i * 3] = col.r;
         dustCol[i * 3 + 1] = col.g;
         dustCol[i * 3 + 2] = col.b;
@@ -470,10 +495,12 @@ function createNeuralNetworkMesh(arch) {
     const dust = new THREE.Points(dustGeo, dustMat);
     group.add(dust);
 
-    const rimLight = new THREE.PointLight(0x00ccff, 1.1, 80);
+    // rim = warm cream, fill = deep ember. all-warm three-point lighting:
+    // contrast comes from intensity and direction, not from cool/warm split.
+    const rimLight = new THREE.PointLight(0xffe8b8, 1.15, 80);
     rimLight.position.set(14, 8, 10);
     group.add(rimLight);
-    const fillLight = new THREE.PointLight(0xff00aa, 0.65, 80);
+    const fillLight = new THREE.PointLight(0xff7a1a, 0.65, 80);
     fillLight.position.set(-12, -6, -8);
     group.add(fillLight);
 
@@ -489,19 +516,18 @@ function createNeuralNetworkMesh(arch) {
     neuralNetwork = group;
     scene.add(neuralNetwork);
 
-    const titleEl = document.querySelector('#neural-network-3d')?.closest('.viz-panel')?.querySelector('.panel-title');
-    if (titleEl && merged.model_type !== 'unknown') {
-        titleEl.replaceChildren();
-        const ic = document.createElement('i');
-        ic.className = 'fas fa-network-wired';
-        titleEl.appendChild(ic);
-        titleEl.appendChild(document.createTextNode(' Neural Galaxy — '));
-        const span = document.createElement('span');
-        span.style.opacity = '0.75';
-        span.style.fontSize = '0.72em';
-        span.style.fontWeight = 'normal';
-        span.textContent = merged.model_type;
-        titleEl.appendChild(span);
+    // Replace the static panel subtitle with a quiet model fingerprint
+    // (e.g. "whisper · 244M params") so a first-time user sees what their
+    // machine is actually training. The panel title — "inside the model" —
+    // stays put; this updates the line beneath it.
+    const panelEl = document.querySelector('#neural-network-3d')?.closest('.panel');
+    const subtitleEl = panelEl?.querySelector('.panel-subtitle');
+    if (subtitleEl && merged.model_type && merged.model_type !== 'unknown') {
+        const parts = [merged.model_type];
+        if (merged.total_params) {
+            parts.push((merged.total_params / 1e6).toFixed(0) + 'M params');
+        }
+        subtitleEl.textContent = parts.join(' · ');
     }
 }
 
@@ -566,12 +592,11 @@ function initCharts() {
                     ticks: { display: false }
                 },
                 y: {
-                    grid: { color: 'rgba(255, 255, 255, 0.04)', drawBorder: false },
-                    ticks: {
-                        color: '#3A3A38',
-                        font: { family: 'ui-monospace, "SF Mono", monospace', size: 10 },
-                        maxTicksLimit: 4
-                    }
+                    // The heartbeat number above the chart is the value
+                    // reference. The curve is the shape of the story.
+                    display: false,
+                    grid: { display: false },
+                    ticks: { display: false }
                 }
             },
             plugins: {
@@ -694,8 +719,9 @@ function handleTrainingUpdate(data) {
         document.getElementById('speed').textContent = data.steps_per_second.toFixed(1);
     }
     
-    // Update loss chart
+    // Update loss chart + hero
     if (data.loss !== undefined) {
+        updateHeroLoss(data.loss);
         updateLossChart(data.loss, data.step);
         
         // Create particle explosion on low loss
@@ -753,6 +779,7 @@ function handleTrainingUpdate(data) {
  * Update loss chart
  */
 function updateLossChart(loss, step) {
+    if (!lossChart) return;
     const maxPoints = 100;
     
     lossChart.data.labels.push(step || lossChart.data.labels.length);
@@ -771,6 +798,7 @@ function updateLossChart(loss, step) {
  * Update gradient chart
  */
 function updateGradientChart(gradNorm, step) {
+    if (!gradientChart) return;
     const maxPoints = 100;
     
     gradientChart.data.labels.push(step || gradientChart.data.labels.length);
@@ -789,6 +817,7 @@ function updateGradientChart(gradNorm, step) {
  * Update memory chart
  */
 function updateMemoryChart(memoryGB) {
+    if (!memoryChart) return;
     memoryChart.data.datasets[0].data[0] = memoryGB;
     
     // Calm amber until memory is in danger; rose only when nearing the cap.
@@ -810,6 +839,7 @@ function updateMemoryChart(memoryGB) {
  * Update learning rate chart
  */
 function updateLearningRateChart(lr, step) {
+    if (!lrChart) return;
     const maxPoints = 100;
     
     lrChart.data.labels.push(step || lrChart.data.labels.length);
@@ -1000,22 +1030,22 @@ function playLossSound(loss) {
  * Initialize event listeners
  */
 function initEventListeners() {
-    // Pause button
+    // Pause button — clean lowercase label, no injected icon markup.
     document.getElementById('pause-btn').addEventListener('click', () => {
         isPaused = !isPaused;
         const btn = document.getElementById('pause-btn');
-        btn.innerHTML = isPaused ? '<i class="fas fa-play"></i> Resume' : '<i class="fas fa-pause"></i> Pause';
+        btn.textContent = isPaused ? 'resume' : 'pause';
         btn.classList.toggle('active', isPaused);
     });
-    
-    // Sound button
+
+    // Sound button — opt-in beep oscillator from playLossSound().
     document.getElementById('sound-btn').addEventListener('click', () => {
         soundEnabled = !soundEnabled;
         const btn = document.getElementById('sound-btn');
-        btn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i> Sound' : '<i class="fas fa-volume-mute"></i> Sound';
+        btn.textContent = soundEnabled ? 'sound on' : 'sound';
         btn.classList.toggle('active', soundEnabled);
     });
-    
+
     // Fullscreen button
     document.getElementById('fullscreen-btn').addEventListener('click', () => {
         if (!document.fullscreenElement) {
@@ -1047,10 +1077,11 @@ function updateStats(data) {
  */
 function loadHistoricalData(data) {
     // Load loss history
-    if (data.loss_history) {
+    if (data.loss_history && data.loss_history.length) {
         data.loss_history.forEach((loss, i) => {
             updateLossChart(loss, i);
         });
+        updateHeroLoss(data.loss_history[data.loss_history.length - 1]);
     }
     
     // Load gradient history
@@ -1065,6 +1096,10 @@ function loadHistoricalData(data) {
         data.lr_history.forEach((lr, i) => {
             updateLearningRateChart(lr, i);
         });
+    }
+
+    if (data.memory_history && data.memory_history.length) {
+        updateMemoryChart(data.memory_history[data.memory_history.length - 1]);
     }
 }
 
@@ -1091,8 +1126,10 @@ function animate() {
         window.animateNetwork();
     }
     
-    // Rotate neural network + slow core spin
-    if (neuralNetwork && !isPaused) {
+    // Slow rotation, slow breathing pulse, slow core spin — the lava-lamp
+    // ambient life that says "the room is alive even between training steps."
+    // Suppressed entirely under prefers-reduced-motion.
+    if (neuralNetwork && !isPaused && !reducedMotion) {
         neuralNetwork.rotation.y += 0.002;
         const pulse = Math.sin(currentTime * 0.001) * 0.08 + 1;
         neuralNetwork.scale.set(pulse, pulse, pulse);

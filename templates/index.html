@@ -51,10 +51,6 @@
             font-feature-settings: "tnum";
         }
 
-        /* The legacy background canvas is kept (the JS still draws to it)
-           but hidden — its pink/purple/blue palette belongs to the old room. */
-        #particles-bg { display: none; }
-
         /* The legacy FPS counter is kept (the JS writes to it) but hidden.
            A serious instrument does not advertise its frame rate. */
         .fps-counter { display: none; }
@@ -182,14 +178,21 @@
             display: block;
         }
 
-        /* ---- band 3: the room — three windows + a quiet column ---- */
+        /* ---- band 3: the room — three windows + a quiet column ----
+
+           Flexbox (not grid) so that toggling a panel off via the dock
+           lets the surviving panels reflow and fill the space. With grid
+           the column would persist as an empty gap. */
 
         .room {
-            display: grid;
-            grid-template-columns: 1.6fr 1fr 1fr 1fr;
+            display: flex;
             gap: 18px;
             min-height: 0;
         }
+        .room > .panel.network     { flex: 1.6 1 0; min-width: 0; }
+        .room > .panel.attention   { flex: 1 1 0;   min-width: 0; }
+        .room > .panel.spectrogram { flex: 1 1 0;   min-width: 0; }
+        .room > .diagnostics       { flex: 1 1 0;   min-width: 0; }
 
         .panel {
             position: relative;
@@ -331,7 +334,7 @@
             box-shadow: 0 0 6px rgba(255, 176, 0, 0.6);
         }
 
-        /* ---- the dock — quiet, lower-right ---- */
+        /* ---- the dock — quiet, lower-right, recedes when idle ---- */
 
         .controls {
             position: fixed;
@@ -340,7 +343,12 @@
             display: flex;
             gap: 14px;
             z-index: 100;
+            opacity: 0.35;
+            transition: opacity 360ms ease;
         }
+        .controls:hover,
+        .controls:focus-within { opacity: 1; }
+
         .control-btn {
             background: none;
             border: none;
@@ -356,8 +364,9 @@
         }
         .control-btn:hover { color: var(--ink-2); }
         .control-btn.active { color: var(--amber); }
-        /* The JS rewrites button innerHTML with FontAwesome <i> tags;
-           we keep those silent. */
+        /* Buttons render as plain text — the JS used to inject FontAwesome
+           <i> tags into innerHTML; the modern handlers use textContent and
+           any stale <i> elements that slip through stay invisible. */
         .control-btn i { display: none; }
 
         /* ---- the empty room: shown until the first step lands ---- */
@@ -388,6 +397,24 @@
             50%      { opacity: 0.85; }
         }
 
+        /* ---- accessibility: honor prefers-reduced-motion ---- */
+
+        @media (prefers-reduced-motion: reduce) {
+            /* The empty-room caption stops breathing — it just sits, fully lit. */
+            .loading::before {
+                animation: none;
+                opacity: 0.85;
+            }
+            /* The heartbeat number changes color but does not transition. */
+            .heartbeat .loss-value { transition: none; }
+            /* No tween on the token cloud either. */
+            .token { transition: none; }
+            /* The control dock stops easing on hover. */
+            .control-btn { transition: none; }
+            /* The 3D network's rotation/pulse is gated in JS via
+               window.matchMedia('(prefers-reduced-motion: reduce)'). */
+        }
+
         /* ---- responsive: collapse the room on narrow screens ---- */
 
         @media (max-width: 1280px) {
@@ -406,9 +433,6 @@
     </style>
 </head>
 <body>
-    <!-- legacy canvas (hidden via CSS) -->
-    <canvas id="particles-bg"></canvas>
-
     <!-- the empty room, shown until the first step arrives -->
     <div class="loading" id="loading"><i></i></div>
 
@@ -497,65 +521,15 @@
 
     <!-- the dock -->
     <div class="controls">
-        <button class="control-btn" id="pause-btn"><i></i>pause</button>
-        <button class="control-btn" id="sound-btn"><i></i>sound</button>
-        <button class="control-btn" id="fullscreen-btn"><i></i>fullscreen</button>
-        <button class="control-btn" id="toggle-3d"><i></i>model</button>
-        <button class="control-btn" id="toggle-attn"><i></i>attention</button>
-        <button class="control-btn" id="toggle-tokens"><i></i>tokens</button>
-        <button class="control-btn" id="toggle-spec"><i></i>audio</button>
+        <button class="control-btn" id="pause-btn">pause</button>
+        <button class="control-btn" id="sound-btn">sound</button>
+        <button class="control-btn" id="fullscreen-btn">fullscreen</button>
+        <button class="control-btn" id="toggle-3d">model</button>
+        <button class="control-btn" id="toggle-attn">attention</button>
+        <button class="control-btn" id="toggle-tokens">tokens</button>
+        <button class="control-btn" id="toggle-spec">audio</button>
     </div>
 
-    <!-- a tiny bridge: keep the giant loss number in sync with whatever
-         the existing visualizer.js stream emits, without touching its
-         internals. listens to the same socket events, updates the hero. -->
-    <script>
-    (function () {
-        var lossEl = document.getElementById('loss-value');
-        var lastLoss = null;
-
-        function fmt(n) {
-            if (n === null || n === undefined || isNaN(n)) return '—';
-            if (n >= 100) return n.toFixed(1);
-            if (n >= 10)  return n.toFixed(2);
-            return n.toFixed(3);
-        }
-
-        function setLoss(n) {
-            if (n === null || n === undefined || isNaN(n)) return;
-            lossEl.textContent = fmt(n);
-            // brief rose flash if loss is rising — the only time the rose color
-            // is allowed to appear in the chrome.
-            if (lastLoss !== null && n > lastLoss * 1.02) {
-                lossEl.classList.add('is-rising');
-                setTimeout(function () { lossEl.classList.remove('is-rising'); }, 600);
-            }
-            lastLoss = n;
-        }
-
-        // Wait for io to exist (loaded from socketio script tag) and then
-        // attach our own listener. visualizer.js attaches its own listeners
-        // to the same events; both will fire.
-        function attach() {
-            if (typeof io !== 'function') {
-                return setTimeout(attach, 50);
-            }
-            // Reuse the same socket connection — io() returns a singleton
-            // for the default namespace.
-            var s = io();
-            s.on('training_update', function (data) {
-                if (data && typeof data.loss === 'number') setLoss(data.loss);
-            });
-            s.on('history_data', function (data) {
-                if (data && Array.isArray(data.loss_history) && data.loss_history.length) {
-                    setLoss(data.loss_history[data.loss_history.length - 1]);
-                }
-            });
-        }
-        attach();
-    })();
-    </script>
-
-    <script src="/static/visualizer.js?v=4"></script>
+    <script src="/static/visualizer.js?v=6"></script>
 </body>
 </html>
