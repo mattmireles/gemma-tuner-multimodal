@@ -471,6 +471,7 @@ class TrainingVisualizer:
         optimizer: Optional[torch.optim.Optimizer] = None,
         *,
         global_step: Optional[int] = None,
+        gradient_norm: Optional[float] = None,
     ):
         """
         Update visualizer with data from current training step.
@@ -484,6 +485,14 @@ class TrainingVisualizer:
             outputs: Model outputs (for attention/logits)
             optimizer: Optimizer (for gradient stats)
             global_step: HF Trainer ``state.global_step`` when known (preferred for UI)
+            gradient_norm: Pre-computed grad norm, e.g. what HF Trainer puts in
+                ``logs["grad_norm"]`` before zeroing grads. Callers reaching us
+                through ``TrainerCallback.on_log`` MUST pass this — by the time
+                ``on_log`` fires, ``optimizer.zero_grad()`` has already run and
+                walking ``model.parameters()`` here would see every ``p.grad``
+                as ``None``, returning a constant 0.0 for "signal strength".
+                When ``None`` we fall back to the self-compute path for older
+                call sites that still have live gradients.
         """
         self.step_count += 1
         current_time = time.time()
@@ -493,8 +502,13 @@ class TrainingVisualizer:
         self.loss_history.append(loss)
         self.lr_history.append(learning_rate)
 
-        # Calculate gradient norm
-        if self.model and optimizer:
+        # Prefer the pre-computed gradient norm (from HF Trainer's logs) because
+        # the self-compute path below only works when grads are still live on
+        # the model — which they are NOT during on_log callbacks. Walking
+        # parameters here after zero_grad just returns 0.0 forever.
+        if gradient_norm is not None:
+            self.grad_history.append(float(gradient_norm))
+        elif self.model and optimizer:
             total_norm = 0.0
             for p in self.model.parameters():
                 if p.grad is not None:
