@@ -582,14 +582,25 @@ def configure_training_parameters() -> Dict[str, Any]:
     """
     console.print("\n[bold]Step 5: Training Parameters[/bold]")
     # Learning rate
+    #
+    # Default is 2e-4 because this wizard only drives LoRA fine-tuning, where the
+    # standard learning rate range is 1e-4 to 5e-4 — you are updating a tiny adapter,
+    # not the base model weights, so the "a smaller number is safer" rule of thumb
+    # from full fine-tuning does not apply. 2e-4 matches the built-in
+    # [profile:sample-text] in config/config.ini.example so the happy-path smoke run
+    # actually moves loss on the bundled 16-sample dataset. 1e-5 (the old default)
+    # was borrowed from full-finetune lore and resulted in near-zero updates for
+    # LoRA — the model learned nothing in typical short runs.
     console.print(
-        "[dim]This is the most important hyperparameter. It controls how much the model learns from the data. A smaller number is safer. The default (1e-5) is a good starting point for fine-tuning.[/dim]"
+        "[dim]This is the most important hyperparameter. It controls how much the adapter learns from the data. "
+        "For LoRA, 1e-4 to 5e-4 is the standard range; the default (2e-4) is a good starting point. "
+        "Lower it toward 1e-4 if you see loss spikes; raise it toward 5e-4 for very small datasets.[/dim]"
     )
-    lr_str = questionary.text("What learning rate do you want to use?", default="1e-5", style=apple_style).ask()
+    lr_str = questionary.text("What learning rate do you want to use?", default="2e-4", style=apple_style).ask()
     try:
         learning_rate = float(lr_str)
     except Exception:
-        learning_rate = 1e-5
+        learning_rate = 2e-4
 
     # Number of epochs
     console.print(

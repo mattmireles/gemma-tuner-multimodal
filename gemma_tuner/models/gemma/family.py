@@ -54,10 +54,31 @@ def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
 
     Returns a fresh dict each call — **call once** in collator ``__init__`` (store on ``self._caps``),
     not per batch.
+
+    Capability keys:
+
+    - ``control_token`` (str): the **start-of-turn** marker used by the collator's fallback
+      masking path (:func:`gemma_tuner.models.common.collators.mask_gemma_prompt_tokens`).
+      Collators find the tokenized ``model`` role header as a subsequence after the *last*
+      occurrence of this token in the input. For Gemma 3n the marker is ``<start_of_turn>``;
+      for Gemma 4 the tokenizer renders an **asymmetric** pair — ``<|turn>`` (single token,
+      id 105) opens a turn and ``<turn|>`` (id 106) closes it — so the opener is what the
+      masking path keys off. **Do not** use ``<|turn|>`` (bars on both sides): that string
+      does not exist in the Gemma 4 tokenizer at all and encodes to a 4-token subword
+      sequence that never matches anything in the rendered chat.
+
+    - ``supports_assistant_mask`` (bool): whether ``tokenizer.apply_chat_template(
+      return_assistant_tokens_mask=True)`` produces a usable mask. Hugging Face requires
+      the Jinja chat template to wrap the assistant reply in a ``{% generation %}`` block;
+      otherwise it silently returns an all-zero mask *and* prints a noisy warning on every
+      batch. Gemma 3n's template has the block; Gemma 4's (as of transformers 5.5.0) does
+      not, so collators skip the primary path entirely for Gemma 4 and go straight to
+      :func:`mask_gemma_prompt_tokens`.
     """
     if family == GemmaFamily.GEMMA_3N:
         return {
             "control_token": "<start_of_turn>",
+            "supports_assistant_mask": True,
             "needs_clippable_patch": False,
             # Multimodal Gemma paths can omit these keys on some transformers versions; zeros match
             # input_ids shape (see transformers#45200). Same injection as Gemma 4 — harmless when unused.
@@ -65,10 +86,12 @@ def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
             "min_transformers_version": MIN_TRANSFORMERS_GEMMA3N,
         }
     return {
-        # Role boundary token only. Collators find the tokenized model-role header after the *last*
-        # <|turn|> (same idea as Gemma 3n: <start_of_turn> + header). Do not use "<|turn|>model" — that
-        # string is not one contiguous id span in real chat tokenization.
-        "control_token": "<|turn|>",
+        # Gemma 4 start-of-turn token: single id 105 in the real tokenizer, analog of
+        # 3n's <start_of_turn>. The matching close token is <turn|> (id 106) — do not
+        # confuse them. See ``supports_assistant_mask`` below for why the primary HF
+        # assistant-mask path is disabled for this family.
+        "control_token": "<|turn>",
+        "supports_assistant_mask": False,
         "needs_clippable_patch": True,
         "needs_mm_token_type_ids_injection": True,
         "min_transformers_version": MIN_TRANSFORMERS_GEMMA4,
