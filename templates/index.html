@@ -280,7 +280,27 @@
             padding-top: 10px;
         }
         .dx .panel-title {
+            margin-bottom: 4px;
+        }
+        /* A diagnostic panel's headline number — the single value that
+           says "this is the thing right now" before the eye drops to the
+           sparkline for the trajectory. Same monospace tabular-figures
+           register as the heartbeat, just smaller. */
+        .dx .dx-value {
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+            font-size: 22px;
+            line-height: 1;
+            letter-spacing: -0.01em;
+            color: var(--ink);
             margin-bottom: 6px;
+        }
+        .dx .dx-value .unit {
+            font-size: 0.5em;
+            color: var(--ink-3);
+            letter-spacing: 0.12em;
+            margin-left: 2px;
         }
         .dx canvas {
             flex: 1;
@@ -496,7 +516,10 @@
                 </div>
             </div>
 
-            <div class="panel spectrogram">
+            <!-- Audio panel is default-hidden. Auto-revealed by the JS when
+                 the first mel_spectrogram payload arrives; text-only runs
+                 never see it. The dock "audio" button still force-shows. -->
+            <div class="panel spectrogram" style="display: none;">
                 <div class="panel-title">listening</div>
                 <div class="panel-subtitle">audio it's processing right now</div>
                 <div class="panel-body">
@@ -507,14 +530,17 @@
             <div class="diagnostics">
                 <div class="dx">
                     <div class="panel-title">signal strength</div>
+                    <div class="dx-value num" id="gradient-value">—</div>
                     <canvas id="gradient-chart"></canvas>
                 </div>
                 <div class="dx">
                     <div class="panel-title">step size</div>
+                    <div class="dx-value num" id="lr-value">—</div>
                     <canvas id="lr-chart"></canvas>
                 </div>
                 <div class="dx">
                     <div class="panel-title">memory</div>
+                    <div class="dx-value num" id="memory-value">—<span class="unit"> gb</span></div>
                     <canvas id="memory-chart"></canvas>
                 </div>
             </div>
@@ -539,10 +565,10 @@
     </div>
 
     <script src="/static/viz/status.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-state.js?v=2"></script>
-    <script src="/static/viz/gemma-viz-charts.js?v=1"></script>
+    <script src="/static/viz/gemma-viz-state.js?v=4"></script>
+    <script src="/static/viz/gemma-viz-charts.js?v=3"></script>
     <script src="/static/viz/gemma-viz-scene.js?v=2"></script>
     <script src="/static/viz/gemma-viz-panels.js?v=1"></script>
-    <script src="/static/viz/gemma-viz-app.js?v=4"></script>
+    <script src="/static/viz/gemma-viz-app.js?v=5"></script>
 </body>
 </html>
