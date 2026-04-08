@@ -26,6 +26,7 @@ Visualization includes:
 """
 
 import logging
+import math
 import os
 
 # ---------------------------------------------------------------------------
@@ -43,7 +44,7 @@ import threading
 import time
 import webbrowser
 from collections import deque
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -157,10 +158,9 @@ class TrainingVisualizer:
         self.epoch = 0
         self.start_time = time.time()
         self.last_update_time = time.time()
-        self.update_frequency = 10  # Update visualization every N steps
-
-        # Model layer information for visualization
-        self.layer_info = self._extract_model_architecture() if model else {}
+        # Throttle for hypothetical per-batch hooks. The HF ``VisualizerTrainerCallback``
+        # already aligns with ``logging_steps`` — keep this at 1 so each callback push emits.
+        self.update_frequency = 1
 
         # Training state
         self.is_training = False
@@ -174,33 +174,128 @@ class TrainingVisualizer:
 
         if model:
             self._calculate_param_stats()
+        # Model layer information for visualization (needs param counts for galaxy fallback)
+        self.layer_info = self._extract_model_architecture() if model else {}
+        if model:
+            self.layer_info["total_params"] = int(self.total_params)
+            self.layer_info["trainable_params"] = int(self.trainable_params)
             self._register_hooks()
 
-    def _extract_model_architecture(self) -> Dict[str, Any]:
-        """Extract model architecture for visualization."""
-        if not self.model:
-            return {}
+    @staticmethod
+    def _walk_hf_configs(model: nn.Module) -> Iterator[Any]:
+        """Yield ``config`` objects found on ``model`` and common wrappers (PEFT, inner LM)."""
+        seen: set[int] = set()
+        stack: list[Any] = [model]
+        while stack:
+            m = stack.pop()
+            if m is None:
+                continue
+            mid = id(m)
+            if mid in seen:
+                continue
+            seen.add(mid)
+            cfg = getattr(m, "config", None)
+            if cfg is not None:
+                yield cfg
+            for attr in ("base_model", "model"):
+                child = getattr(m, attr, None)
+                if child is not None and not isinstance(child, dict):
+                    stack.append(child)
 
-        architecture = {
+    @classmethod
+    def _resolve_primary_config(cls, model: nn.Module) -> Any:
+        """Pick the best Hugging Face config for depth/hidden-size (multimodal + PEFT safe)."""
+        best = None
+        best_score = -1
+        for cfg in cls._walk_hf_configs(model):
+            score = 0
+            if getattr(cfg, "num_hidden_layers", None):
+                score += 12
+            if getattr(cfg, "hidden_size", None) or getattr(cfg, "d_model", None):
+                score += 5
+            if getattr(cfg, "text_config", None) is not None:
+                score += 3
+            if getattr(cfg, "num_attention_heads", None):
+                score += 2
+            if score > best_score:
+                best_score = score
+                best = cfg
+        return best
+
+    def _extract_model_architecture(self) -> Dict[str, Any]:
+        """Extract a JSON-serializable architecture summary for the 3D galaxy (any modality)."""
+        arch: Dict[str, Any] = {
             "encoder_layers": 0,
             "decoder_layers": 0,
             "attention_heads": 0,
             "hidden_size": 0,
             "vocab_size": 0,
+            "num_hidden_layers": 0,
+            "model_type": "unknown",
         }
+        if not self.model:
+            return arch
 
         try:
-            if hasattr(self.model, "config"):
-                config = self.model.config
-                architecture["encoder_layers"] = getattr(config, "encoder_layers", 12)
-                architecture["decoder_layers"] = getattr(config, "decoder_layers", 12)
-                architecture["attention_heads"] = getattr(config, "encoder_attention_heads", 12)
-                architecture["hidden_size"] = getattr(config, "d_model", 768)
-                architecture["vocab_size"] = getattr(config, "vocab_size", 51865)
-        except Exception as e:
-            print(f"Could not extract model architecture: {e}")
+            cfg = self._resolve_primary_config(self.model)
+            if cfg is None:
+                return arch
 
-        return architecture
+            arch["model_type"] = str(getattr(cfg, "model_type", None) or "unknown")
+
+            tc = getattr(cfg, "text_config", None)
+            src = tc if tc is not None else cfg
+
+            nh = getattr(src, "num_hidden_layers", None) or getattr(cfg, "num_hidden_layers", None)
+            if nh is not None:
+                arch["num_hidden_layers"] = int(nh)
+
+            hs = getattr(src, "hidden_size", None) or getattr(cfg, "hidden_size", None) or getattr(cfg, "d_model", None)
+            if hs is not None:
+                arch["hidden_size"] = int(hs)
+
+            heads = (
+                getattr(src, "num_attention_heads", None)
+                or getattr(cfg, "num_attention_heads", None)
+                or getattr(cfg, "encoder_attention_heads", None)
+            )
+            if heads is not None:
+                arch["attention_heads"] = int(heads)
+
+            vs = getattr(src, "vocab_size", None) or getattr(cfg, "vocab_size", None)
+            if vs is not None:
+                arch["vocab_size"] = int(vs)
+
+            enc = getattr(cfg, "num_encoder_layers", None) or getattr(cfg, "encoder_layers", None)
+            dec = getattr(cfg, "num_decoder_layers", None) or getattr(cfg, "decoder_layers", None)
+            if enc is not None:
+                arch["encoder_layers"] = int(enc)
+            if dec is not None:
+                arch["decoder_layers"] = int(dec)
+
+            # Decoder-only causal LM: map stack depth to decoder_layers for the UI
+            if arch["encoder_layers"] == 0 and arch["decoder_layers"] == 0 and arch["num_hidden_layers"] > 0:
+                arch["decoder_layers"] = arch["num_hidden_layers"]
+
+            if arch["num_hidden_layers"] == 0 and arch["encoder_layers"] + arch["decoder_layers"] > 0:
+                arch["num_hidden_layers"] = arch["encoder_layers"] + arch["decoder_layers"]
+
+            # Last-resort depth hint from parameter count (PEFT / odd wrappers)
+            if arch["num_hidden_layers"] == 0 and self.total_params > 0:
+                arch["num_hidden_layers"] = max(4, min(48, int(round(math.log10(max(self.total_params, 10)) * 8))))
+
+            # Sane defaults if HF omitted fields
+            if arch["hidden_size"] == 0:
+                arch["hidden_size"] = 2048
+            if arch["attention_heads"] == 0:
+                arch["attention_heads"] = 8
+            if arch["vocab_size"] == 0:
+                arch["vocab_size"] = 256_000
+
+        except Exception as e:
+            logger.debug("Architecture extract failed: %s", e)
+
+        return arch
 
     def _calculate_param_stats(self):
         """Calculate total and trainable parameters."""
@@ -272,6 +367,8 @@ class TrainingVisualizer:
         batch: Optional[Dict] = None,
         outputs: Optional[Any] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
+        *,
+        global_step: Optional[int] = None,
     ):
         """
         Update visualizer with data from current training step.
@@ -284,9 +381,11 @@ class TrainingVisualizer:
             batch: Input batch data (for audio visualization)
             outputs: Model outputs (for attention/logits)
             optimizer: Optimizer (for gradient stats)
+            global_step: HF Trainer ``state.global_step`` when known (preferred for UI)
         """
         self.step_count += 1
         current_time = time.time()
+        display_step = int(global_step) if global_step is not None else self.step_count
 
         # Update buffers
         self.loss_history.append(loss)
@@ -310,13 +409,13 @@ class TrainingVisualizer:
             memory_gb = torch.mps.current_allocated_memory() / 1024**3
         self.memory_history.append(memory_gb)
 
-        # Send update to frontend every N steps
+        # Send update to frontend every N internal calls (N=1 when HF callback throttles)
         if self.step_count % self.update_frequency == 0:
             # Guard against division by zero on very fast hardware where
             # current_time == self.last_update_time (< timer resolution).
             elapsed = max(current_time - self.last_update_time, 1e-6)
             event = build_training_event(
-                step=self.step_count,
+                step=display_step,
                 epoch=self.epoch or 0,
                 loss=loss,
                 gradient_norm=self.grad_history[-1] if self.grad_history else 0.0,

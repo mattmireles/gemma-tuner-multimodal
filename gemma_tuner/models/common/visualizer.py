@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from transformers import TrainerCallback
+
+logger = logging.getLogger(__name__)
 
 
 class VisualizerTrainerCallback(TrainerCallback):
@@ -33,8 +37,8 @@ class VisualizerTrainerCallback(TrainerCallback):
 
             init_visualizer(model, model.device)
             self._initialized = True
-        except Exception:
-            # If visualizer deps are missing, continue silently
+        except Exception as e:
+            logger.warning("Visualizer init failed (training continues without it): %s", e)
             self._initialized = False
 
     def on_epoch_begin(self, args, state, control, **kwargs):
@@ -104,9 +108,10 @@ class VisualizerTrainerCallback(TrainerCallback):
                     loss=float(loss) if loss is not None else 0.0,
                     learning_rate=float(lr),
                     optimizer=optimizer,
+                    global_step=int(state.global_step),
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Visualizer on_log push failed: %s", e)
 
     def push_training_step(self, *, loss: float, learning_rate: float, batch=None, outputs=None, optimizer=None):
         if not self._initialized:
@@ -123,5 +128,5 @@ class VisualizerTrainerCallback(TrainerCallback):
                     outputs=outputs,
                     optimizer=optimizer,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Visualizer push_training_step failed: %s", e)
