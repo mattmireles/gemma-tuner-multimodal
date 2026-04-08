@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 
 from gemma_tuner.visualization.events import build_training_event
+from gemma_tuner.visualization.payload import finalize_training_payload
 
 
 def test_visualizer_template_uses_local_assets_only():
@@ -37,7 +38,9 @@ def test_build_training_event_extracts_bounded_payload():
         architecture={"encoder_layers": 12},
     )
 
-    payload = event.as_payload()
+    payload = finalize_training_payload(event.as_payload())
+    assert payload["viz_schema_version"] == 1
+    assert "panels_status" in payload
     assert payload["step"] == 10
     assert len(payload["attention"]) == 20
     assert len(payload["attention"][0]) == 20
