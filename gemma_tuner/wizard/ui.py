@@ -216,11 +216,54 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
             filtered.append(m)
     available_models = filtered
 
-    # All Gemma models use LoRA fine-tuning
-    base_models = list(available_models)
+    # Group by family and size so the wizard list reads top-to-bottom as
+    # 3n-e2b → 3n-e4b → 4-e2b → 4-e4b, with base before instruct within each
+    # size. Without this, ordering depends on whatever order the user (or the
+    # wizard) happened to write [model:*] sections into config.ini, which is
+    # how the 3n e2b/e4b pair ended up split across the list by Gemma 4 entries.
+    def _model_sort_key(name: str) -> Tuple[int, int, int, str]:
+        # Family: 3n before 4 (3n-e2b-it is also flagged ⭐ Recommended below).
+        if "-3n-" in name:
+            family_rank = 0
+        elif "-4-" in name:
+            family_rank = 1
+        else:
+            family_rank = 2
+        # Size: e2b before e4b.
+        if "-e2b" in name:
+            size_rank = 0
+        elif "-e4b" in name:
+            size_rank = 1
+        else:
+            size_rank = 2
+        # Variant: base ("") before instruct ("-it"), matching the
+        # "primary targets" / "alternative starting point" comments in
+        # config/config.ini.example.
+        variant_rank = 1 if name.endswith("-it") else 0
+        return (family_rank, size_rank, variant_rank, name)
 
-    # Build model choices with memory and time estimates
+    # All Gemma models use LoRA fine-tuning
+    base_models = sorted(available_models, key=_model_sort_key)
+
+    # Pick the ⭐ Recommended model based on what the current env can actually run.
+    # We prefer gemma-4-e2b-it (newer, generally better quality at ~2B) but fall back
+    # to gemma-3n-e2b-it on the default `pip install -e .` pin so a fresh user does
+    # not get a "recommended" option that crashes in gate_gemma_model() because
+    # transformers < 5.5.0 (the min for Gemma 4).
+    try:
+        _tf_ver = Version(metadata.version("transformers"))
+    except metadata.PackageNotFoundError:
+        _tf_ver = Version("0")
+    _gemma4_ok = _tf_ver >= Version(MIN_TRANSFORMERS_GEMMA4)
+    recommended_model = "gemma-4-e2b-it" if _gemma4_ok else "gemma-3n-e2b-it"
+
+    # Build model choices with memory and time estimates.
+    #
+    # Track which choices correspond to Gemma 4 entries so the gate-fallback
+    # loop below can filter them out once the user declines the install prompt —
+    # without this, re-picking the same Gemma 4 model would re-prompt forever.
     choices = []
+    gemma4_model_names: set[str] = set()
     seen: set[str] = set()
     for model_name in base_models:
         display_name = model_name.replace("-lora", "")
@@ -246,21 +289,33 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
 
         memory_str = f"{required_memory:.1f}GB"
 
-        choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
+        # Distinguish base vs instruction-tuned variants visibly. The "-it" suffix
+        # alone is easy to miss at the end of a long line, which made base/instruct
+        # pairs (e.g. gemma-4-e2b vs gemma-4-e2b-it) look like duplicates because
+        # they have identical memory_gb and hours_100k in ModelSpecs.
+        variant_tag = "instruct" if display_name.endswith("-it") else "base"
+
+        choice_text = f"{display_name} ({specs['params']}, {variant_tag}) - ~{time_str}, {memory_str} memory"
 
         try:
             tf_ver = Version(metadata.version("transformers"))
-        except Exception:
+        except metadata.PackageNotFoundError:
             tf_ver = Version("0")
         hf_id = str(specs.get("hf_id") or "")
+        is_gemma4_entry = False
         try:
-            if detect_family(hf_id) == GemmaFamily.GEMMA_4 and tf_ver < Version(MIN_TRANSFORMERS_GEMMA4):
-                choice_text += " (requires Gemma 4 install: pip install -r requirements/requirements-gemma4.txt)"
+            if detect_family(hf_id) == GemmaFamily.GEMMA_4:
+                is_gemma4_entry = True
+                if tf_ver < Version(MIN_TRANSFORMERS_GEMMA4):
+                    choice_text += " (requires Gemma 4 install)"
         except RuntimeError:
             pass
+        if is_gemma4_entry:
+            gemma4_model_names.add(model_name)
 
-        # Default stack in this repo: Gemma 3n E2B instruct (see README)
-        if display_name == "gemma-3n-e2b-it":
+        # Mark whichever model is recommended for the current env (see
+        # recommended_model derivation above).
+        if display_name == recommended_model:
             choice_text += " ⭐ Recommended"
 
         choices.append(
@@ -276,25 +331,66 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
         # clean message. Using sys.exit(1) would bypass those handlers entirely.
         raise RuntimeError("No Gemma models found in config.ini. Check your configuration.")
 
-    selected_model = questionary.select(
-        "Which model do you want to fine-tune?", choices=choices, style=apple_style
-    ).ask()
+    # Loop on the model picker so that if the user lands on a Gemma 4 entry in
+    # an env that can't run Gemma 4 yet, we can offer to install the stack
+    # (offer_gemma4_install re-execs the wizard on success) and on decline send
+    # them back to the picker instead of crashing wizard_main with a stack trace.
+    from gemma_tuner.wizard.runner import offer_gemma4_install
 
-    # questionary returns None when stdin is not a TTY (piped/scripted input).
-    # Returning None signals cancellation to wizard_main.
-    if selected_model is None:
-        return None, {}
-
-    section = f"model:{selected_model}"
-    base_model_id = cfg.get(section, "base_model", fallback="").strip()
-    if not base_model_id:
-        raise RuntimeError(
-            f"Missing base_model in [{section}] in config.ini. Set base_model to the Hugging Face model id."
+    declined_gemma4_install = False
+    while True:
+        # After the user has declined the Gemma 4 install once in this wizard run,
+        # hide Gemma 4 entries from the picker so they cannot re-trigger the same
+        # prompt by picking the same model again.
+        active_choices = (
+            [c for c in choices if c["value"] not in gemma4_model_names] if declined_gemma4_install else choices
         )
-    # Fast-fail before training; finetune.main() runs the same gate again (no duplicate user prompts).
-    gate_gemma_model(base_model_id, entrypoint="finetune")
+        if not active_choices:
+            console.print(
+                "[red]No Gemma models available without the Gemma 4 stack. "
+                "Install it manually or re-run the wizard to retry the preflight.[/red]"
+            )
+            return None, {}
 
-    return selected_model, {}
+        selected_model = questionary.select(
+            "Which model do you want to fine-tune?", choices=active_choices, style=apple_style
+        ).ask()
+
+        # questionary returns None when stdin is not a TTY (piped/scripted input).
+        # Returning None signals cancellation to wizard_main.
+        if selected_model is None:
+            return None, {}
+
+        section = f"model:{selected_model}"
+        base_model_id = cfg.get(section, "base_model", fallback="").strip()
+        if not base_model_id:
+            raise RuntimeError(
+                f"Missing base_model in [{section}] in config.ini. Set base_model to the Hugging Face model id."
+            )
+        # Fast-fail before training; finetune.main() runs the same gate again
+        # (no duplicate user prompts). On Gemma 4 family + too-old transformers
+        # this raises RuntimeError; we intercept that case and offer to fix it.
+        try:
+            gate_gemma_model(base_model_id, entrypoint="finetune")
+        except RuntimeError as exc:
+            msg = str(exc)
+            try:
+                family = detect_family(base_model_id)
+            except RuntimeError:
+                family = None
+            if family == GemmaFamily.GEMMA_4 and "transformers" in msg.lower():
+                console.print(f"\n[yellow]{selected_model}[/yellow] needs the Gemma 4 transformers stack.")
+                # On success the wizard process is replaced via os.execv and
+                # never returns here. On decline/failure the function returns
+                # normally and we filter the Gemma 4 entries out of the picker
+                # so we do not loop through the same prompt again.
+                offer_gemma4_install(context=f"You picked [bold]{selected_model}[/bold] but Gemma 4 is not installed.")
+                declined_gemma4_install = True
+                console.print("[dim]Pick a Gemma 3n model instead, or cancel with Ctrl+C.[/dim]\n")
+                continue  # back to the model picker
+            raise
+
+        return selected_model, {}
 
 
 def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:

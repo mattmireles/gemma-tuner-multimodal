@@ -295,10 +295,23 @@ def detect_datasets() -> List[Dict[str, Any]]:
 
             # Look for CSV files (common dataset format)
             csv_files = list(subdir.glob("*.csv"))
+
+            # Audio: used both to surface pure-audio datasets and to label mixed
+            # csv+audio dirs accurately (e.g. Granary-style layouts where a
+            # transcripts.csv sits next to WAV files). We only emit one entry
+            # per dir; when both types coexist the CSV wins because downstream
+            # modality routing keys off the profile, not the wizard label.
+            audio_extensions = WizardConstants.AUDIO_EXTENSIONS
+            audio_files: List[Path] = []
+            for ext in audio_extensions:
+                audio_files.extend(subdir.glob(f"**/{ext}"))
+
             if csv_files:
                 is_sample = subdir.name == SAMPLE_DATASET_NAME
                 if is_sample:
                     description = "Bundled sample (text instruction tuning) — recommended first run"
+                elif audio_files:
+                    description = f"Local dataset with {len(csv_files)} CSV files and {len(audio_files)} audio files"
                 else:
                     description = f"Local dataset with {len(csv_files)} CSV files"
                 datasets.append(
@@ -311,13 +324,7 @@ def detect_datasets() -> List[Dict[str, Any]]:
                         "is_sample": is_sample,
                     }
                 )
-
-            # Audio: only if this folder is not already represented as CSV (one entry per dir).
-            audio_extensions = WizardConstants.AUDIO_EXTENSIONS
-            audio_files: List[Path] = []
-            for ext in audio_extensions:
-                audio_files.extend(subdir.glob(f"**/{ext}"))
-            if not csv_files and audio_files:
+            elif audio_files:
                 datasets.append(
                     {
                         "name": subdir.name,

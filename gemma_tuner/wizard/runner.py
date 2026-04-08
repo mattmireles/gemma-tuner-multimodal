@@ -98,9 +98,141 @@ def _ensure_sample_sections_present() -> None:
         config_ini=_CONFIG_INI,
         sample_dataset_name=SAMPLE_DATASET_NAME,
     ):
+        console.print(f"[dim]Added bundled [bold]{SAMPLE_DATASET_NAME}[/bold] dataset/profile to config.ini.[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# Gemma 4 dependency preflight
+# ---------------------------------------------------------------------------
+
+#: Packages the wizard installs when the user accepts the Gemma 4 preflight.
+#:
+#: Kept inline (rather than reading ``requirements/requirements-gemma4.txt`` off
+#: disk) so the preflight works identically in editable installs, wheel installs,
+#: and zipped application bundles where the requirements file may not be present.
+#: The canonical human-readable list lives at ``requirements/requirements-gemma4.txt``
+#: and must be kept in sync with this tuple.
+_GEMMA4_DEPS: tuple[str, ...] = ("transformers>=5.5.0", "peft>=0.18.1")
+
+
+def _is_gemma4_supported() -> bool:
+    """Return True iff the installed ``transformers`` is new enough for Gemma 4."""
+    from importlib import metadata
+
+    from packaging.version import Version
+
+    from gemma_tuner.models.gemma.family import MIN_TRANSFORMERS_GEMMA4
+
+    try:
+        return Version(metadata.version("transformers")) >= Version(MIN_TRANSFORMERS_GEMMA4)
+    except metadata.PackageNotFoundError:
+        return False
+
+
+def _gemma4_install_command() -> list[str]:
+    """The exact ``pip install`` command we run for the Gemma 4 stack.
+
+    Uses ``sys.executable -m pip`` so the install always lands in the same
+    interpreter that's running the wizard, even when the user invoked the
+    wizard via the ``gemma-macos-tuner`` console script (which can confuse a
+    bare ``pip``).
+    """
+    return [sys.executable, "-m", "pip", "install", *_GEMMA4_DEPS]
+
+
+def offer_gemma4_install(*, context: str) -> None:
+    """Ask the user whether to install the Gemma 4 stack, and do it if they accept.
+
+    Used in two places:
+    1. As an opt-in preflight at the start of ``wizard_main()`` so users can
+       upgrade *before* picking anything (re-exec costs nothing — no state lost).
+    2. As a recovery path inside ``select_model()`` when a user picks a Gemma 4
+       model without the stack installed.
+
+    On a successful install the wizard process is replaced via ``os.execv``, so
+    this function never returns in that case. On decline, install failure, or
+    non-interactive stdin the function returns normally and callers fall through
+    to their non-Gemma-4 path.
+
+    The ``context`` argument is the human-readable phrase shown in the prompt
+    so the same helper can power both the proactive preflight ("before you start")
+    and the reactive recovery ("you picked gemma-4-e2b-it but…").
+    """
+    from importlib import metadata
+
+    import questionary
+
+    from gemma_tuner.models.gemma.family import MIN_TRANSFORMERS_GEMMA4
+    from gemma_tuner.wizard.base import apple_style
+
+    try:
+        current_tf = metadata.version("transformers")
+    except metadata.PackageNotFoundError:
+        current_tf = "not installed"
+
+    console.print()
+    console.print(
+        f"[yellow]Gemma 4 needs transformers>={MIN_TRANSFORMERS_GEMMA4}; you have {current_tf}.[/yellow] {context}"
+    )
+    console.print(f"[dim]Install command: {' '.join(_gemma4_install_command())}[/dim]")
+
+    try:
+        confirmed = questionary.confirm("Install the Gemma 4 stack now?", default=True, style=apple_style).ask()
+    except EOFError:
+        # Non-interactive stdin can either return None (clean detach) or raise
+        # EOFError (closed/empty stream). Both mean "no human here to consent".
+        confirmed = None
+    # questionary returns None on non-TTY stdin (CI, piped input). Treat as decline.
+    if not confirmed:
+        return
+
+    console.print(
+        f"[green]Running:[/green] {' '.join(_gemma4_install_command())}\n"
+        "[dim]This may take a couple of minutes the first time.[/dim]"
+    )
+    try:
+        subprocess.run(_gemma4_install_command(), check=True)
+    except subprocess.CalledProcessError as exc:
         console.print(
-            f"[dim]Added bundled [bold]{SAMPLE_DATASET_NAME}[/bold] dataset/profile to config.ini.[/dim]"
+            f"[red]pip install failed (exit {exc.returncode}). "
+            f"Try running it manually:[/red]\n  {' '.join(_gemma4_install_command())}"
         )
+        return
+
+    console.print(
+        "[bold green]✓ Gemma 4 stack installed.[/bold green] "
+        "[dim]Restarting the wizard so the new transformers version is picked up…[/dim]\n"
+    )
+
+    # Re-exec the wizard with a clean Python process. We use ``python -m
+    # gemma_tuner.cli_typer`` rather than ``sys.argv[0]`` directly because the
+    # user may have launched us via the ``gemma-macos-tuner`` console script,
+    # whose argv[0] is not directly executable by ``os.execv(sys.executable, …)``.
+    # ``-m gemma_tuner.cli_typer`` always works regardless of entry point.
+    #
+    # We intentionally target ``cli_typer`` (not the legacy ``main`` module) so
+    # the restarted wizard does not print the deprecation banner that
+    # ``gemma_tuner.main`` shows on every invocation.
+    #
+    # Forward the original argv tail (``sys.argv[1:]``, normally ``["wizard"]``)
+    # so any CLI flags the user passed to ``gemma-macos-tuner wizard`` survive
+    # the re-exec. Today the wizard command takes no options, but forwarding
+    # argv keeps this correct if that ever changes.
+    forwarded_args = sys.argv[1:] if sys.argv[1:] else ["wizard"]
+    os.execv(sys.executable, [sys.executable, "-m", "gemma_tuner.cli_typer", *forwarded_args])
+
+
+def _preflight_gemma4_dependency() -> None:
+    """Optional preflight: offer to install the Gemma 4 stack before picks are made.
+
+    Skipped silently when:
+    - The current env already supports Gemma 4 (most common case after first run).
+    - stdin is non-interactive (CI / piped input) — questionary returns None and
+      ``offer_gemma4_install`` treats that as a decline.
+    """
+    if _is_gemma4_supported():
+        return
+    offer_gemma4_install(context="Install now to use Gemma 4 models, or skip to use Gemma 3n only.")
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +574,13 @@ def wizard_main():
         # Must run before show_welcome_screen / select_model so the rest of the
         # wizard can read [model:*] and [dataset:*] sections without crashing.
         _ensure_config_ini_exists()
+
+        # Optional preflight: offer to install the Gemma 4 transformers stack
+        # before any picks have been made. We do it here (rather than reactively
+        # inside select_model) so re-execing after install costs nothing — no
+        # user state is lost. Silently no-ops when the env already supports
+        # Gemma 4 or when stdin is non-interactive.
+        _preflight_gemma4_dependency()
 
         # Step 0: Elegant introduction with system profiling
         # Creates confidence through hardware verification and beautiful design

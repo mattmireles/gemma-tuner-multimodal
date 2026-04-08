@@ -24,8 +24,15 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  # Hugging Face ecosystem (tested compatible set)
-  "transformers>=4.46.0,<5.0.0",
+  # Hugging Face ecosystem (tested compatible set).
+  #
+  # transformers: deliberately left unbounded on the upper end so an editable
+  # install plays nicely with the Gemma 4 stack (``requirements-gemma4.txt``
+  # pulls ``transformers>=5.5.0``). Gemma 3n still works on 4.46+. If a future
+  # transformers release breaks us, pin here — but do NOT re-add ``<5.0.0``
+  # unless you're also reverting Gemma 4 support, because that upper bound
+  # will make pip downgrade transformers on every subsequent ``pip install -e .``.
+  "transformers>=4.46.0",
   "datasets>=4.0.0",
   "accelerate>=0.27.2",
   "evaluate>=0.4.1",

@@ -35,9 +35,16 @@ def _write_config_to_path(path: Path, cfg: configparser.ConfigParser) -> None:
 
     # Write with owner-only permissions (0o600) so GCP project IDs stored by
     # the wizard are not world-readable on shared systems.
+    #
+    # The mode bits passed to ``os.open`` only apply when ``O_CREAT`` actually
+    # creates a new file; they are ignored for a file that already exists
+    # (e.g. the user copied ``config.ini.example`` → ``config.ini`` manually).
+    # We therefore always follow the write with an explicit ``os.chmod`` so
+    # the permissions claim above holds for both fresh and pre-existing files.
     fd = _os.open(str(path), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
     with _os.fdopen(fd, "w") as f:
         cfg.write(f)
+    _os.chmod(str(path), 0o600)
 
 
 def _write_config(cfg: configparser.ConfigParser) -> None:
