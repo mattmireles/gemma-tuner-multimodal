@@ -264,11 +264,22 @@ def get_wizard_device_info() -> Dict[str, Any]:
     return device_info
 
 
+#: Name of the bundled happy-path sample dataset that ships with the repo.
+#: Lives at ``data/datasets/sample-text/`` and is referenced from
+#: ``config/config.ini.example``. Treated specially in the wizard so first-time
+#: users can immediately train on something real without supplying their own data.
+SAMPLE_DATASET_NAME = "sample-text"
+
+
 def detect_datasets() -> List[Dict[str, Any]]:
     """Auto-detect available datasets under data/datasets plus curated sources.
 
     We intentionally scan only the immediate children of `data/datasets` to avoid
     treating the parent `data/` directory or the `datasets/` folder itself as a dataset.
+
+    The bundled ``sample-text`` dataset (a tiny instruction-tuning CSV that ships
+    with the repo) is annotated with ``"is_sample": True`` and gets a friendlier
+    description so the wizard can surface it as the recommended first run.
     """
     datasets: List[Dict[str, Any]] = []
 
@@ -285,22 +296,28 @@ def detect_datasets() -> List[Dict[str, Any]]:
             # Look for CSV files (common dataset format)
             csv_files = list(subdir.glob("*.csv"))
             if csv_files:
+                is_sample = subdir.name == SAMPLE_DATASET_NAME
+                if is_sample:
+                    description = "Bundled sample (text instruction tuning) — recommended first run"
+                else:
+                    description = f"Local dataset with {len(csv_files)} CSV files"
                 datasets.append(
                     {
                         "name": subdir.name,
                         "type": "local_csv",
                         "path": str(subdir),
                         "files": len(csv_files),
-                        "description": f"Local dataset with {len(csv_files)} CSV files",
+                        "description": description,
+                        "is_sample": is_sample,
                     }
                 )
 
-            # Look for audio files recursively inside this dataset folder
+            # Audio: only if this folder is not already represented as CSV (one entry per dir).
             audio_extensions = WizardConstants.AUDIO_EXTENSIONS
             audio_files: List[Path] = []
             for ext in audio_extensions:
                 audio_files.extend(subdir.glob(f"**/{ext}"))
-            if audio_files:
+            if not csv_files and audio_files:
                 datasets.append(
                     {
                         "name": subdir.name,
