@@ -226,11 +226,16 @@ function animate() {
     }
 }
 
+V.initSocket = initSocket;
+V.handleTrainingUpdate = handleTrainingUpdate;
+V.initEventListeners = initEventListeners;
+V.updateStats = updateStats;
+V.loadHistoricalData = loadHistoricalData;
+V.animate = animate;
 
-
-window.addEventListener('DOMContentLoaded', () => {
+function boot() {
     console.log('🚀 Initializing Gemma Training Visualizer...');
-    
+
     V.initSocket();
     try {
         V.initCharts();
@@ -244,30 +249,18 @@ window.addEventListener('DOMContentLoaded', () => {
             console.error('3D visualizer init failed (charts still work):', e);
         }
     } else {
-        // Hide the whole panel card (title + body), not just the canvas slot,
-        // so we don't leave an orphaned title.
         const card = document.getElementById('neural-network-3d')?.closest('.panel');
         if (card) card.style.display = 'none';
     }
     V.initEventListeners();
-    
-    // Start animation loop
+
     animate();
-    
-    // Hide loading indicator
+
     setTimeout(() => {
-        document.getElementById('loading').style.display = 'none';
+        const loading = document.getElementById('loading');
+        if (loading) loading.style.display = 'none';
     }, 1000);
 
-    // Wire feature toggle buttons.
-    //
-    // The previous implementation was `window[stateVarName] = !window[...]`,
-    // which silently failed: top-level `let` bindings (V.enable3D, etc.) do not
-    // become window properties, so the toggles wrote to window while the rest
-    // of the code read the closure binding. Buttons appeared to do nothing.
-    //
-    // Fix: pass an explicit getter/setter pair so the click handler can read
-    // and write the actual let binding via closures.
     const toggle = (id, getter, setter, onToggle) => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -323,14 +316,13 @@ window.addEventListener('DOMContentLoaded', () => {
             if (card) card.style.display = on ? '' : 'none';
         }
     );
-});
+}
 
-V.initSocket = initSocket;
-V.handleTrainingUpdate = handleTrainingUpdate;
-V.initEventListeners = initEventListeners;
-V.updateStats = updateStats;
-V.loadHistoricalData = loadHistoricalData;
-V.animate = animate;
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+} else {
+    boot();
+}
 
 })(window.GemmaViz);
 
