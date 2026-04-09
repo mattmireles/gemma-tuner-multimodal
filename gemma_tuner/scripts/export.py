@@ -131,7 +131,7 @@ def export_model_dir(model_path_or_profile: str, model_revision: str | None = No
     # the exported directory is fully self-contained: any caller can do
     # AutoProcessor.from_pretrained(out_dir) without needing the original source.
     try:
-        processor = AutoProcessor.from_pretrained(processor_source)
+        processor = AutoProcessor.from_pretrained(processor_source, revision=model_revision)
         for meta_base in (source_path, source_path.parent):
             meta_path = meta_base / "metadata.json"
             if not meta_path.is_file():

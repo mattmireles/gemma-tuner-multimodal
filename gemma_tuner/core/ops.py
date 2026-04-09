@@ -264,7 +264,7 @@ def evaluate(profile_config: ProfileConfig, output_dir: str):
     return run_evaluation(profile_config, output_dir)
 
 
-def export(model_path_or_profile: str) -> None:
+def export(model_path_or_profile: str, model_revision: str | None = None) -> None:
     """
     Exports a trained Gemma model to a self-contained SafeTensors directory.
 
@@ -287,6 +287,8 @@ def export(model_path_or_profile: str) -> None:
     Args:
         model_path_or_profile (str): Local path to a model or adapter directory,
             or a HuggingFace Hub model id.
+        model_revision (str | None): Optional Hugging Face revision to pin for
+            reproducible export when loading a remote model.
 
     Side effects:
         - Creates {model_path_or_profile}-export/ containing model weights,
@@ -294,7 +296,7 @@ def export(model_path_or_profile: str) -> None:
     """
     from gemma_tuner.scripts.export import export_model_dir
 
-    export_model_dir(model_path_or_profile)
+    export_model_dir(model_path_or_profile, model_revision=model_revision)
 
 
 def blacklist(profile_config: ProfileConfig, run_dir: str) -> None:
