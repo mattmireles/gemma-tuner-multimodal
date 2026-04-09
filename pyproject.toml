@@ -118,6 +118,7 @@ ignore = ["F841", "E741", "E501", "E402"]
 "gemma_tuner/core/config.py" = ["E501"]
 "gemma_tuner/core/inference.py" = ["E501"]
 "gemma_tuner/models/common/visualizer.py" = ["E501", "E741"]
+"tools/eval_gemma_asr.py" = ["I001"]
 "gemma_tuner/wizard/config.py" = ["E501"]
 "gemma_tuner/wizard/estimator.py" = ["E501"]
 # I001: import sort order is intentionally violated — bootstrap must run
