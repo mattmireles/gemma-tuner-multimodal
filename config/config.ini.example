@@ -126,6 +126,9 @@ target_modules = q_proj,k_proj,v_proj,o_proj
 # ----------------------------------------------------------------------------
 [profile:my-lora-run]
 model = gemma-3n-e2b-it
+# Optional: pin to a specific HuggingFace revision for reproducibility.
+# model_revision = abc123def456  # commit hash or git ref
+
 dataset = my-dataset
 train_split = train
 validation_split = validation

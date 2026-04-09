@@ -18,8 +18,14 @@ from gemma_tuner.scripts.export import export_model_dir
 def main():
     parser = argparse.ArgumentParser(description="Merge and export a Gemma LoRA adapter to SafeTensors")
     parser.add_argument("adapter_dir", help="Path to a PEFT adapter directory (contains adapter_config.json)")
+    parser.add_argument(
+        "--revision",
+        dest="model_revision",
+        default=None,
+        help="Optional specific base-model revision to pin during export",
+    )
     args = parser.parse_args()
-    export_model_dir(args.adapter_dir)
+    export_model_dir(args.adapter_dir, model_revision=args.model_revision)
 
 
 if __name__ == "__main__":
