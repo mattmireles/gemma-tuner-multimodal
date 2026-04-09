@@ -13,7 +13,9 @@ Called by:
 """
 
 import configparser
+import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -22,12 +24,13 @@ from typing import Any, Dict
 
 # Rich for beautiful terminal UI
 # --- Cross-module wizard imports ---------------------------------------------------
-# Import shared UI singletons from base
-from gemma_tuner.wizard.base import (
-    console,
-)
+from gemma_tuner.wizard.base import SAMPLE_DATASET_NAME, console
 from gemma_tuner.wizard.config import generate_profile_config
-from gemma_tuner.wizard.config_store import _read_config
+from gemma_tuner.wizard.config_store import (
+    _CONFIG_INI,
+    _read_config,
+    ensure_bundled_sample_config_sections,
+)
 from gemma_tuner.wizard.estimator import configure_method_specifics, estimate_training_time
 from gemma_tuner.wizard.ui import (
     configure_image_columns,
@@ -40,6 +43,244 @@ from gemma_tuner.wizard.ui import (
     show_confirmation_screen,
     show_welcome_screen,
 )
+
+# ---------------------------------------------------------------------------
+# bootstrap helpers
+# ---------------------------------------------------------------------------
+
+
+def _ensure_config_ini_exists() -> None:
+    """Make sure ``config/config.ini`` is present and contains the sample sections.
+
+    Two scenarios both need to "just work":
+
+    1. **Fresh checkout** — the user has never run the wizard. ``config.ini`` does
+       not exist (it is gitignored because the wizard writes local paths and GCP
+       project IDs into it). Without bootstrapping, the model selection step would
+       fail with "No Gemma models found in config.ini" before the user could do
+       anything. Fix: copy ``config.ini.example`` over.
+
+    2. **Pre-existing user config** — the user already has a ``config.ini`` from
+       before the bundled sample existed. Their file has ``[model:*]`` sections
+       but no ``[dataset:sample-text]`` / ``[profile:sample-text]``. If they pick
+       the sample in the dataset selection step, ``generate_profile_config()``
+       would crash because ``load_model_dataset_config()`` requires the dataset
+       section. Fix: idempotently inject the two sections when the sample
+       directory exists on disk but the sections are missing from config.
+
+    Both repairs are no-ops when nothing needs to change.
+    """
+    if not _CONFIG_INI.exists():
+        example_path = _CONFIG_INI.with_name("config.ini.example")
+        if example_path.exists():
+            _CONFIG_INI.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(example_path), str(_CONFIG_INI))
+            console.print(
+                f"[green]Created [bold]{_CONFIG_INI.relative_to(_CONFIG_INI.parent.parent)}[/bold] "
+                f"from [bold]config.ini.example[/bold].[/green]"
+            )
+            console.print(
+                "[dim]This file is gitignored — edit it freely. The wizard will also write "
+                "to it (e.g. BigQuery project IDs).[/dim]\n"
+            )
+        # If even the example is missing the checkout is broken; let the
+        # downstream "no models" error fire so the user gets a clear signal.
+
+    _ensure_sample_sections_present()
+
+
+def _ensure_sample_sections_present() -> None:
+    """Add ``[dataset:sample-text]`` / ``[profile:sample-text]`` if the sample exists on disk.
+
+    Delegates to :func:`ensure_bundled_sample_config_sections` (single source of truth:
+    ``config.ini.example``).
+    """
+    if ensure_bundled_sample_config_sections(
+        config_ini=_CONFIG_INI,
+        sample_dataset_name=SAMPLE_DATASET_NAME,
+    ):
+        console.print(f"[dim]Added bundled [bold]{SAMPLE_DATASET_NAME}[/bold] dataset/profile to config.ini.[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# Gemma 4 dependency preflight
+# ---------------------------------------------------------------------------
+
+#: Packages the wizard installs when the user accepts the Gemma 4 preflight.
+#:
+#: Kept inline (rather than reading ``requirements/requirements-gemma4.txt`` off
+#: disk) so the preflight works identically in editable installs, wheel installs,
+#: and zipped application bundles where the requirements file may not be present.
+#: The canonical human-readable list lives at ``requirements/requirements-gemma4.txt``
+#: and must be kept in sync with this tuple.
+_GEMMA4_DEPS: tuple[str, ...] = ("transformers>=5.5.0", "peft>=0.18.1")
+
+
+def _is_gemma4_supported() -> bool:
+    """Return True iff the installed ``transformers`` is new enough for Gemma 4."""
+    from importlib import metadata
+
+    from packaging.version import Version
+
+    from gemma_tuner.models.gemma.family import MIN_TRANSFORMERS_GEMMA4
+
+    try:
+        return Version(metadata.version("transformers")) >= Version(MIN_TRANSFORMERS_GEMMA4)
+    except metadata.PackageNotFoundError:
+        return False
+
+
+def _gemma4_install_command() -> list[str]:
+    """The exact ``pip install`` command we run for the Gemma 4 stack.
+
+    Uses ``sys.executable -m pip`` so the install always lands in the same
+    interpreter that's running the wizard, even when the user invoked the
+    wizard via the ``gemma-macos-tuner`` console script (which can confuse a
+    bare ``pip``).
+    """
+    return [sys.executable, "-m", "pip", "install", *_GEMMA4_DEPS]
+
+
+def offer_gemma4_install(*, context: str) -> None:
+    """Ask the user whether to install the Gemma 4 stack, and do it if they accept.
+
+    Used in two places:
+    1. As an opt-in preflight at the start of ``wizard_main()`` so users can
+       upgrade *before* picking anything (re-exec costs nothing — no state lost).
+    2. As a recovery path inside ``select_model()`` when a user picks a Gemma 4
+       model without the stack installed.
+
+    On a successful install the wizard process is replaced via ``os.execv``, so
+    this function never returns in that case. On decline, install failure, or
+    non-interactive stdin the function returns normally and callers fall through
+    to their non-Gemma-4 path.
+
+    The ``context`` argument is the human-readable phrase shown in the prompt
+    so the same helper can power both the proactive preflight ("before you start")
+    and the reactive recovery ("you picked gemma-4-e2b-it but…").
+    """
+    from importlib import metadata
+
+    import questionary
+
+    from gemma_tuner.models.gemma.family import MIN_TRANSFORMERS_GEMMA4
+    from gemma_tuner.wizard.base import apple_style
+
+    try:
+        current_tf = metadata.version("transformers")
+    except metadata.PackageNotFoundError:
+        current_tf = "not installed"
+
+    console.print()
+    console.print(
+        f"[yellow]Gemma 4 needs transformers>={MIN_TRANSFORMERS_GEMMA4}; you have {current_tf}.[/yellow] {context}"
+    )
+    console.print(f"[dim]Install command: {' '.join(_gemma4_install_command())}[/dim]")
+
+    try:
+        confirmed = questionary.confirm("Install the Gemma 4 stack now?", default=True, style=apple_style).ask()
+    except EOFError:
+        # Non-interactive stdin can either return None (clean detach) or raise
+        # EOFError (closed/empty stream). Both mean "no human here to consent".
+        confirmed = None
+    # questionary returns None on non-TTY stdin (CI, piped input). Treat as decline.
+    if not confirmed:
+        return
+
+    console.print(
+        f"[green]Running:[/green] {' '.join(_gemma4_install_command())}\n"
+        "[dim]This may take a couple of minutes the first time.[/dim]"
+    )
+    try:
+        subprocess.run(_gemma4_install_command(), check=True)
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            f"[red]pip install failed (exit {exc.returncode}). "
+            f"Try running it manually:[/red]\n  {' '.join(_gemma4_install_command())}"
+        )
+        return
+
+    console.print(
+        "[bold green]✓ Gemma 4 stack installed.[/bold green] "
+        "[dim]Restarting the wizard so the new transformers version is picked up…[/dim]\n"
+    )
+
+    # Re-exec the wizard with a clean Python process. We use ``python -m
+    # gemma_tuner.cli_typer`` rather than ``sys.argv[0]`` directly because the
+    # user may have launched us via the ``gemma-macos-tuner`` console script,
+    # whose argv[0] is not directly executable by ``os.execv(sys.executable, …)``.
+    # ``-m gemma_tuner.cli_typer`` always works regardless of entry point.
+    #
+    # We intentionally target ``cli_typer`` (canonical module) rather than
+    # ``gemma_tuner.main`` (thin compatibility shim around the same app).
+    #
+    # Forward the original argv tail (``sys.argv[1:]``, normally ``["wizard"]``)
+    # so any CLI flags the user passed to ``gemma-macos-tuner wizard`` survive
+    # the re-exec. Today the wizard command takes no options, but forwarding
+    # argv keeps this correct if that ever changes.
+    forwarded_args = sys.argv[1:] if sys.argv[1:] else ["wizard"]
+    os.execv(sys.executable, [sys.executable, "-m", "gemma_tuner.cli_typer", *forwarded_args])
+
+
+def _preflight_gemma4_dependency() -> None:
+    """Optional preflight: offer to install the Gemma 4 stack before picks are made.
+
+    Skipped silently when:
+    - The current env already supports Gemma 4 (most common case after first run).
+    - stdin is non-interactive (CI / piped input) — questionary returns None and
+      ``offer_gemma4_install`` treats that as a decline.
+    """
+    if _is_gemma4_supported():
+        return
+    offer_gemma4_install(context="Install now to use Gemma 4 models, or skip to use Gemma 3n only.")
+
+
+# ---------------------------------------------------------------------------
+# Training visualizer (optional [viz] extra)
+# ---------------------------------------------------------------------------
+
+#: Packages needed for the live training dashboard (Flask + Socket.IO).
+#: Must match ``[project.optional-dependencies].viz`` in ``pyproject.toml``.
+_VIZ_DEPS: tuple[str, ...] = (
+    "flask>=2.3.0,<3.0.0",
+    "flask-socketio>=5.3.0,<6.0.0",
+    "python-socketio>=5.9.0,<6.0.0",
+)
+
+
+def _viz_dependencies_installed() -> bool:
+    return importlib.util.find_spec("flask") is not None and importlib.util.find_spec("flask_socketio") is not None
+
+
+def _viz_install_command() -> list[str]:
+    return [sys.executable, "-m", "pip", "install", *_VIZ_DEPS]
+
+
+def ensure_viz_dependencies_installed(method_config: Dict[str, Any]) -> None:
+    """Install viz extras when the user opted in; disable ``visualize`` if install fails.
+
+    Uses ``sys.executable -m pip`` so packages land in the same interpreter as the
+    wizard (including the ``gemma-macos-tuner`` console script). No process restart
+    is required; training runs in a subprocess that sees the new installs.
+    """
+    if not method_config.get("visualize"):
+        return
+    if _viz_dependencies_installed():
+        return
+    console.print("\n[dim]Installing visualization server dependencies (Flask, Socket.IO)…[/dim]")
+    console.print(f"[dim]{' '.join(_viz_install_command())}[/dim]\n")
+    try:
+        subprocess.run(_viz_install_command(), check=True)
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            f"[red]Could not install visualization dependencies (exit {exc.returncode}). "
+            f"Training will continue without the dashboard.[/red]\n"
+            f"[dim]Manual install: {' '.join(_viz_install_command())}[/dim]"
+        )
+        method_config["visualize"] = False
+        return
+    console.print("[green]✓ Visualization dependencies installed.[/green]")
+
 
 # ---------------------------------------------------------------------------
 # execute_training
@@ -210,7 +451,7 @@ def execute_training(profile_config: Dict[str, Any]):
             [
                 sys.executable,
                 "-m",
-                "gemma_tuner.main",  # Legacy Typer entry (repo root main.py was removed)
+                "gemma_tuner.main",  # Shim; same as ``python -m gemma_tuner.cli_typer``
                 "finetune",  # Training operation
                 profile_name,  # Generated wizard profile
                 "--config",  # Custom configuration file
@@ -376,6 +617,18 @@ def wizard_main():
         Completion: "✅ Training completed successfully! Model saved in output/"
     """
     try:
+        # Bootstrap config.ini from the committed example on first run.
+        # Must run before show_welcome_screen / select_model so the rest of the
+        # wizard can read [model:*] and [dataset:*] sections without crashing.
+        _ensure_config_ini_exists()
+
+        # Optional preflight: offer to install the Gemma 4 transformers stack
+        # before any picks have been made. We do it here (rather than reactively
+        # inside select_model) so re-execing after install costs nothing — no
+        # user state is lost. Silently no-ops when the env already supports
+        # Gemma 4 or when stdin is non-interactive.
+        _preflight_gemma4_dependency()
+
         # Step 0: Elegant introduction with system profiling
         # Creates confidence through hardware verification and beautiful design
         show_welcome_screen()
