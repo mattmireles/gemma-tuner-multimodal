@@ -79,19 +79,42 @@ def apply_device_defaults(profile_config: ProfileConfig | dict[str, Any]) -> Non
     """
     Apply device-specific configuration defaults in-place.
 
-    Called by config loading after profile_config is assembled. Overrides dtype
-    and attn_implementation for MPS compatibility, and warns about unsupported
-    mixed-precision settings on Apple Silicon.
+    Called by config loading after profile_config is assembled. Fills in
+    MPS-friendly ``dtype`` and ``attn_implementation`` defaults *only when the
+    profile (or ``[group:*]`` inheritance) did not already set them*, and
+    warns about unsupported mixed-precision settings on Apple Silicon. The
+    function name is "...defaults" — it is not supposed to stomp explicit
+    caller choices, but historically it did both. Using ``setdefault`` here
+    makes the implementation match the documented contract.
     """
     device = get_device()
     if device.type == "mps":
-        if profile_config.get("dtype") != "float32":
-            logger.warning("Overriding dtype to 'float32' for MPS compatibility.")
+        # Respect an explicit profile/group value; only fill in a default
+        # when unset. ``dtype`` is still self-correcting downstream: Gemma
+        # finetune re-probes bfloat16 support on MPS and bumps the value
+        # back to ``bfloat16`` when available (see finetune.py's
+        # ``_test_mps_bfloat16_support`` + dtype reconciliation).
+        existing_dtype = profile_config.get("dtype")
+        if not existing_dtype:
+            logger.info("apply_device_defaults: defaulting dtype to 'float32' on MPS (unset in profile).")
             profile_config["dtype"] = "float32"
+        elif existing_dtype != "float32":
+            logger.info(
+                "apply_device_defaults: keeping explicit dtype=%r (not overriding on MPS).",
+                existing_dtype,
+            )
 
-        if profile_config.get("attn_implementation") != "eager":
-            logger.warning("Overriding attn_implementation to 'eager' for MPS compatibility.")
+        existing_attn = profile_config.get("attn_implementation")
+        if not existing_attn:
+            logger.info(
+                "apply_device_defaults: defaulting attn_implementation to 'eager' on MPS (unset in profile)."
+            )
             profile_config["attn_implementation"] = "eager"
+        elif existing_attn != "eager":
+            logger.info(
+                "apply_device_defaults: keeping explicit attn_implementation=%r (not overriding on MPS).",
+                existing_attn,
+            )
 
         if profile_config.get("gradient_checkpointing"):
             logger.warning(

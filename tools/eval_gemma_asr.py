@@ -17,6 +17,16 @@ Usage:
 
 from __future__ import annotations
 
+# IMPORTANT: bootstrap must import before torch so that
+# ``PYTORCH_MPS_HIGH_WATERMARK_RATIO`` and ``PYTORCH_MPS_LOW_WATERMARK_RATIO``
+# are both set (with ``low < high``) before the MPS allocator initialises.
+# Without this, PyTorch 2.11 on a fresh MPS environment can compute a
+# low-watermark ratio of ``1.4`` (greater than 1 = illegal) and abort
+# ``model.to("mps")`` with ``RuntimeError: invalid low watermark ratio 1.4``.
+# ``gemma_tuner/cli_typer.py`` imports bootstrap first for the same reason;
+# standalone tool scripts must do the same.
+import gemma_tuner.core.bootstrap  # noqa: F401  # side-effect: MPS env setup
+
 import argparse
 import csv
 import time
