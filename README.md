@@ -16,7 +16,7 @@
 
 ## Watch your model learn
 
-![Real-time training visualizer: loss curve, attention heatmap, gradient signal, memory, and token predictions — updating live as training runs on Apple Silicon](README/assets/training-visualizer.png)
+![Real-time training visualizer: loss curve, attention heatmap, gradient signal, memory, and token predictions — updating live as training runs on Apple Silicon](README/assets/training-visualizer.gif)
 
 Loss curve. Attention heatmap. Gradient signal strength. Memory pressure. Token-by-token predictions — all updating in real time, in your browser, while the model trains on your Mac. No TensorBoard. No notebook. One flag in your config, one URL in your terminal.
 
