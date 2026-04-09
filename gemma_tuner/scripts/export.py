@@ -35,6 +35,7 @@ from gemma_tuner.models.common.collators import apply_image_token_budget_to_proc
 from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import get_device
+from gemma_tuner.utils.integrity import create_integrity_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,20 @@ def export_model_dir(model_path_or_profile: str, model_revision: str | None = No
     logger.info("  Device : %s", device)
     logger.info("  Dtype  : %s", torch_dtype)
     logger.info("  Params : %s", f"{sum(p.numel() for p in model.parameters()):,}")
+
+    # Create integrity manifest for exported model
+    try:
+        create_integrity_manifest(
+            out_dir,
+            metadata={
+                "source": str(model_path_or_profile),
+                "dtype": str(torch_dtype),
+                "device": str(device),
+                "is_lora_adapter": adapter_config_path.exists(),
+            },
+        )
+    except Exception as e:
+        logger.warning("Failed to create integrity manifest (non-fatal): %s", e)
 
     return out_dir
 
