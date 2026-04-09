@@ -374,14 +374,18 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     assert_entrypoint_support("finetune", family)
     logger.info("Gemma family: %s for model_id=%s", family.value, model_id)
 
+    model_revision = profile_config.get("model_revision")
+    if model_revision:
+        logger.info(f"Using pinned revision: {model_revision}")
+
     processor = None
     text_tokenizer = None
     if modality == "text":
         logger.info(f"Loading tokenizer (text modality): {model_id}")
-        text_tokenizer = AutoTokenizer.from_pretrained(model_id)
+        text_tokenizer = AutoTokenizer.from_pretrained(model_id, revision=model_revision)
     else:
         logger.info(f"Loading processor ({modality} modality): {model_id}")
-        processor = AutoProcessor.from_pretrained(model_id)
+        processor = AutoProcessor.from_pretrained(model_id, revision=model_revision)
         if modality == "image":
             _itb = int(profile_config.get("image_token_budget", 280))
             apply_image_token_budget_to_processor(processor, _itb)
@@ -416,6 +420,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         family=family,
         torch_dtype=torch_dtype,
         attn_implementation=attn_impl,
+        revision=model_revision,
     )
 
     # LoRA configuration

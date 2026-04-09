@@ -47,6 +47,7 @@ def load_base_model_for_gemma(
     family: GemmaFamily,
     torch_dtype: torch.dtype,
     attn_implementation: str,
+    revision: str | None = None,
 ) -> Any:
     """Load base weights using the Auto class that matches ``config.architectures``."""
     if family == GemmaFamily.GEMMA_4:
@@ -55,29 +56,36 @@ def load_base_model_for_gemma(
         apply_clippable_linear_patch()
 
     try:
-        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        config_kwargs = {"trust_remote_code": True}
+        if revision:
+            config_kwargs["revision"] = revision
+        config = AutoConfig.from_pretrained(model_id, **config_kwargs)
     except Exception as e:
         logger.warning(
             "Could not load AutoConfig for %s (%s); using AutoModelForCausalLM.",
             model_id,
             e,
         )
-        return AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch_dtype,
-            attn_implementation=attn_implementation,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-        )
+        load_kwargs = {
+            "torch_dtype": torch_dtype,
+            "attn_implementation": attn_implementation,
+            "low_cpu_mem_usage": True,
+            "trust_remote_code": True,
+        }
+        if revision:
+            load_kwargs["revision"] = revision
+        return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
 
     if not config_is_multimodal_gemma_like(config):
-        return AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch_dtype,
-            attn_implementation=attn_implementation,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-        )
+        load_kwargs = {
+            "torch_dtype": torch_dtype,
+            "attn_implementation": attn_implementation,
+            "low_cpu_mem_usage": True,
+            "trust_remote_code": True,
+        }
+        if revision:
+            load_kwargs["revision"] = revision
+        return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
 
     multimodal_lm: Any = None
     try:
@@ -95,13 +103,15 @@ def load_base_model_for_gemma(
     last_err: Optional[Exception] = None
     for loader_cls in loaders:
         try:
-            model = loader_cls.from_pretrained(
-                model_id,
-                torch_dtype=torch_dtype,
-                attn_implementation=attn_implementation,
-                low_cpu_mem_usage=True,
-                trust_remote_code=True,
-            )
+            load_kwargs = {
+                "torch_dtype": torch_dtype,
+                "attn_implementation": attn_implementation,
+                "low_cpu_mem_usage": True,
+                "trust_remote_code": True,
+            }
+            if revision:
+                load_kwargs["revision"] = revision
+            model = loader_cls.from_pretrained(model_id, **load_kwargs)
             logger.info("Loaded multimodal base model %s via %s", model_id, loader_cls.__name__)
             return model
         except Exception as e:
