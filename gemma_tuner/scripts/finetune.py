@@ -54,7 +54,6 @@ class ModelDetectionConstants:
     # Visualization Server Configuration
     VISUALIZATION_HOST = "127.0.0.1"
     VISUALIZATION_PORT = 8080
-    VISUALIZATION_OPEN_BROWSER = False
 
 
 def main(profile_config: "ProfileConfig", output_dir: str):
@@ -124,7 +123,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             start_visualization_server(
                 host=ModelDetectionConstants.VISUALIZATION_HOST,
                 port=ModelDetectionConstants.VISUALIZATION_PORT,
-                open_browser=ModelDetectionConstants.VISUALIZATION_OPEN_BROWSER,
+                # Match wizard / CLI UX: user opted into visualization — open the dashboard.
+                open_browser=True,
             )
             logger.info(
                 f"Visualization server started at "

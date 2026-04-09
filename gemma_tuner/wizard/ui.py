@@ -148,12 +148,12 @@ def select_finetuning_kind() -> Optional[Dict[str, Any]]:
     console.print("\n[bold]Step 1: What kind of fine-tuning?[/bold]")
     choices = [
         {
-            "name": "Speech-to-text (audio + transcript)",
-            "value": {"modality": "audio", "text_sub_mode": "instruction"},
-        },
-        {
             "name": "Instruction tuning (text — prompt + response columns)",
             "value": {"modality": "text", "text_sub_mode": "instruction"},
+        },
+        {
+            "name": "Speech-to-text (audio + transcript)",
+            "value": {"modality": "audio", "text_sub_mode": "instruction"},
         },
         {
             "name": "Continued pretraining / style (text — single text column)",
@@ -216,11 +216,54 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
             filtered.append(m)
     available_models = filtered
 
-    # All Gemma models use LoRA fine-tuning
-    base_models = list(available_models)
+    # Group by family and size so the wizard list reads top-to-bottom as
+    # 3n-e2b → 3n-e4b → 4-e2b → 4-e4b, with base before instruct within each
+    # size. Without this, ordering depends on whatever order the user (or the
+    # wizard) happened to write [model:*] sections into config.ini, which is
+    # how the 3n e2b/e4b pair ended up split across the list by Gemma 4 entries.
+    def _model_sort_key(name: str) -> Tuple[int, int, int, str]:
+        # Family: 3n before 4 (3n-e2b-it is also flagged ⭐ Recommended below).
+        if "-3n-" in name:
+            family_rank = 0
+        elif "-4-" in name:
+            family_rank = 1
+        else:
+            family_rank = 2
+        # Size: e2b before e4b.
+        if "-e2b" in name:
+            size_rank = 0
+        elif "-e4b" in name:
+            size_rank = 1
+        else:
+            size_rank = 2
+        # Variant: base ("") before instruct ("-it"), matching the
+        # "primary targets" / "alternative starting point" comments in
+        # config/config.ini.example.
+        variant_rank = 1 if name.endswith("-it") else 0
+        return (family_rank, size_rank, variant_rank, name)
 
-    # Build model choices with memory and time estimates
+    # All Gemma models use LoRA fine-tuning
+    base_models = sorted(available_models, key=_model_sort_key)
+
+    # Pick the ⭐ Recommended model based on what the current env can actually run.
+    # We prefer gemma-4-e2b-it (newer, generally better quality at ~2B) but fall back
+    # to gemma-3n-e2b-it on the default `pip install -e .` pin so a fresh user does
+    # not get a "recommended" option that crashes in gate_gemma_model() because
+    # transformers < 5.5.0 (the min for Gemma 4).
+    try:
+        _tf_ver = Version(metadata.version("transformers"))
+    except metadata.PackageNotFoundError:
+        _tf_ver = Version("0")
+    _gemma4_ok = _tf_ver >= Version(MIN_TRANSFORMERS_GEMMA4)
+    recommended_model = "gemma-4-e2b-it" if _gemma4_ok else "gemma-3n-e2b-it"
+
+    # Build model choices with memory and time estimates.
+    #
+    # Track which choices correspond to Gemma 4 entries so the gate-fallback
+    # loop below can filter them out once the user declines the install prompt —
+    # without this, re-picking the same Gemma 4 model would re-prompt forever.
     choices = []
+    gemma4_model_names: set[str] = set()
     seen: set[str] = set()
     for model_name in base_models:
         display_name = model_name.replace("-lora", "")
@@ -246,21 +289,33 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
 
         memory_str = f"{required_memory:.1f}GB"
 
-        choice_text = f"{display_name} ({specs['params']}) - ~{time_str}, {memory_str} memory"
+        # Distinguish base vs instruction-tuned variants visibly. The "-it" suffix
+        # alone is easy to miss at the end of a long line, which made base/instruct
+        # pairs (e.g. gemma-4-e2b vs gemma-4-e2b-it) look like duplicates because
+        # they have identical memory_gb and hours_100k in ModelSpecs.
+        variant_tag = "instruct" if display_name.endswith("-it") else "base"
+
+        choice_text = f"{display_name} ({specs['params']}, {variant_tag}) - ~{time_str}, {memory_str} memory"
 
         try:
             tf_ver = Version(metadata.version("transformers"))
-        except Exception:
+        except metadata.PackageNotFoundError:
             tf_ver = Version("0")
         hf_id = str(specs.get("hf_id") or "")
+        is_gemma4_entry = False
         try:
-            if detect_family(hf_id) == GemmaFamily.GEMMA_4 and tf_ver < Version(MIN_TRANSFORMERS_GEMMA4):
-                choice_text += " (requires Gemma 4 install: pip install -r requirements/requirements-gemma4.txt)"
+            if detect_family(hf_id) == GemmaFamily.GEMMA_4:
+                is_gemma4_entry = True
+                if tf_ver < Version(MIN_TRANSFORMERS_GEMMA4):
+                    choice_text += " (requires Gemma 4 install)"
         except RuntimeError:
             pass
+        if is_gemma4_entry:
+            gemma4_model_names.add(model_name)
 
-        # Default stack in this repo: Gemma 3n E2B instruct (see README)
-        if display_name == "gemma-3n-e2b-it":
+        # Mark whichever model is recommended for the current env (see
+        # recommended_model derivation above).
+        if display_name == recommended_model:
             choice_text += " ⭐ Recommended"
 
         choices.append(
@@ -276,25 +331,66 @@ def select_model(method: Dict[str, Any], family: str | None = None) -> Tuple[Opt
         # clean message. Using sys.exit(1) would bypass those handlers entirely.
         raise RuntimeError("No Gemma models found in config.ini. Check your configuration.")
 
-    selected_model = questionary.select(
-        "Which model do you want to fine-tune?", choices=choices, style=apple_style
-    ).ask()
+    # Loop on the model picker so that if the user lands on a Gemma 4 entry in
+    # an env that can't run Gemma 4 yet, we can offer to install the stack
+    # (offer_gemma4_install re-execs the wizard on success) and on decline send
+    # them back to the picker instead of crashing wizard_main with a stack trace.
+    from gemma_tuner.wizard.runner import offer_gemma4_install
 
-    # questionary returns None when stdin is not a TTY (piped/scripted input).
-    # Returning None signals cancellation to wizard_main.
-    if selected_model is None:
-        return None, {}
-
-    section = f"model:{selected_model}"
-    base_model_id = cfg.get(section, "base_model", fallback="").strip()
-    if not base_model_id:
-        raise RuntimeError(
-            f"Missing base_model in [{section}] in config.ini. Set base_model to the Hugging Face model id."
+    declined_gemma4_install = False
+    while True:
+        # After the user has declined the Gemma 4 install once in this wizard run,
+        # hide Gemma 4 entries from the picker so they cannot re-trigger the same
+        # prompt by picking the same model again.
+        active_choices = (
+            [c for c in choices if c["value"] not in gemma4_model_names] if declined_gemma4_install else choices
         )
-    # Fast-fail before training; finetune.main() runs the same gate again (no duplicate user prompts).
-    gate_gemma_model(base_model_id, entrypoint="finetune")
+        if not active_choices:
+            console.print(
+                "[red]No Gemma models available without the Gemma 4 stack. "
+                "Install it manually or re-run the wizard to retry the preflight.[/red]"
+            )
+            return None, {}
 
-    return selected_model, {}
+        selected_model = questionary.select(
+            "Which model do you want to fine-tune?", choices=active_choices, style=apple_style
+        ).ask()
+
+        # questionary returns None when stdin is not a TTY (piped/scripted input).
+        # Returning None signals cancellation to wizard_main.
+        if selected_model is None:
+            return None, {}
+
+        section = f"model:{selected_model}"
+        base_model_id = cfg.get(section, "base_model", fallback="").strip()
+        if not base_model_id:
+            raise RuntimeError(
+                f"Missing base_model in [{section}] in config.ini. Set base_model to the Hugging Face model id."
+            )
+        # Fast-fail before training; finetune.main() runs the same gate again
+        # (no duplicate user prompts). On Gemma 4 family + too-old transformers
+        # this raises RuntimeError; we intercept that case and offer to fix it.
+        try:
+            gate_gemma_model(base_model_id, entrypoint="finetune")
+        except RuntimeError as exc:
+            msg = str(exc)
+            try:
+                family = detect_family(base_model_id)
+            except RuntimeError:
+                family = None
+            if family == GemmaFamily.GEMMA_4 and "transformers" in msg.lower():
+                console.print(f"\n[yellow]{selected_model}[/yellow] needs the Gemma 4 transformers stack.")
+                # On success the wizard process is replaced via os.execv and
+                # never returns here. On decline/failure the function returns
+                # normally and we filter the Gemma 4 entries out of the picker
+                # so we do not loop through the same prompt again.
+                offer_gemma4_install(context=f"You picked [bold]{selected_model}[/bold] but Gemma 4 is not installed.")
+                declined_gemma4_install = True
+                console.print("[dim]Pick a Gemma 3n model instead, or cancel with Ctrl+C.[/dim]\n")
+                continue  # back to the model picker
+            raise
+
+        return selected_model, {}
 
 
 def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -309,11 +405,37 @@ def select_dataset(method: Dict[str, Any], finetuning: Optional[Dict[str, Any]] 
 
     datasets = detect_datasets()
 
+    # Surface the bundled text sample at the top of the local-dataset list so
+    # first-time users see "try this first" before scrolling. The sample only has
+    # prompt/response columns (no audio_path, no image_path), so we only promote
+    # it — and only show it at all — when the user picked text instruction tuning
+    # in Step 1. Showing it for audio or image would lead to a guaranteed runtime
+    # error during training.
+    sample_promoted: list[Dict[str, Any]] = []
+    other_local: list[Dict[str, Any]] = []
+    other_virtual: list[Dict[str, Any]] = []
+    text_sub_mode = str(finetuning.get("text_sub_mode", "instruction")).lower()
+    sample_compatible = modality == "text" and text_sub_mode == "instruction"
+    for dataset in datasets:
+        if dataset.get("is_sample"):
+            if sample_compatible:
+                sample_promoted.append(dataset)
+            # Skip the sample entirely for non-text modalities — it has no
+            # audio_path / image_path column and would crash training.
+            continue
+        if dataset.get("type") in ("local_csv", "local_audio"):
+            other_local.append(dataset)
+        else:
+            other_virtual.append(dataset)
+    datasets = sample_promoted + other_local + other_virtual
+
     choices = []
     for dataset in datasets:
         if modality in ("text", "image") and dataset.get("type") in ("bigquery_import", "granary_setup"):
             continue
-        if dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
+        if dataset.get("is_sample"):
+            choice_text = f"✨ {dataset['name']} — {dataset['description']}"
+        elif dataset["type"] == "local_csv" or dataset["type"] == "local_audio":
             choice_text = f"📁 {dataset['name']} - {dataset['description']}"
         else:
             choice_text = f"⚙️ {dataset['description']}"
@@ -460,14 +582,25 @@ def configure_training_parameters() -> Dict[str, Any]:
     """
     console.print("\n[bold]Step 5: Training Parameters[/bold]")
     # Learning rate
+    #
+    # Default is 2e-4 because this wizard only drives LoRA fine-tuning, where the
+    # standard learning rate range is 1e-4 to 5e-4 — you are updating a tiny adapter,
+    # not the base model weights, so the "a smaller number is safer" rule of thumb
+    # from full fine-tuning does not apply. 2e-4 matches the built-in
+    # [profile:sample-text] in config/config.ini.example so the happy-path smoke run
+    # actually moves loss on the bundled 16-sample dataset. 1e-5 (the old default)
+    # was borrowed from full-finetune lore and resulted in near-zero updates for
+    # LoRA — the model learned nothing in typical short runs.
     console.print(
-        "[dim]This is the most important hyperparameter. It controls how much the model learns from the data. A smaller number is safer. The default (1e-5) is a good starting point for fine-tuning.[/dim]"
+        "[dim]This is the most important hyperparameter. It controls how much the adapter learns from the data. "
+        "For LoRA, 1e-4 to 5e-4 is the standard range; the default (2e-4) is a good starting point. "
+        "Lower it toward 1e-4 if you see loss spikes; raise it toward 5e-4 for very small datasets.[/dim]"
     )
-    lr_str = questionary.text("What learning rate do you want to use?", default="1e-5", style=apple_style).ask()
+    lr_str = questionary.text("What learning rate do you want to use?", default="2e-4", style=apple_style).ask()
     try:
         learning_rate = float(lr_str)
     except Exception:
-        learning_rate = 1e-5
+        learning_rate = 2e-4
 
     # Number of epochs
     console.print(
@@ -598,6 +731,11 @@ def show_confirmation_screen(
     method_config["visualize"] = enable_viz
 
     if enable_viz:
+        from gemma_tuner.wizard.runner import ensure_viz_dependencies_installed
+
+        ensure_viz_dependencies_installed(method_config)
+
+    if method_config.get("visualize"):
         console.print("[green]✨ Visualization will open in your browser when training starts![/green]")
 
     # Confirmation prompt. None means non-interactive stdin — treat as cancellation.

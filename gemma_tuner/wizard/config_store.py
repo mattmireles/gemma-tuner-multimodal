@@ -20,20 +20,82 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _CONFIG_INI = _PROJECT_ROOT / "config" / "config.ini"
 
 
-def _read_config() -> configparser.ConfigParser:
+def _read_config_path(path: Path) -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
-    cfg.read(str(_CONFIG_INI))
+    cfg.read(str(path))
     return cfg
 
 
-def _write_config(cfg: configparser.ConfigParser) -> None:
+def _read_config() -> configparser.ConfigParser:
+    return _read_config_path(_CONFIG_INI)
+
+
+def _write_config_to_path(path: Path, cfg: configparser.ConfigParser) -> None:
     import os as _os
 
     # Write with owner-only permissions (0o600) so GCP project IDs stored by
     # the wizard are not world-readable on shared systems.
-    fd = _os.open(str(_CONFIG_INI), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+    #
+    # The mode bits passed to ``os.open`` only apply when ``O_CREAT`` actually
+    # creates a new file; they are ignored for a file that already exists
+    # (e.g. the user copied ``config.ini.example`` → ``config.ini`` manually).
+    # We therefore always follow the write with an explicit ``os.chmod`` so
+    # the permissions claim above holds for both fresh and pre-existing files.
+    fd = _os.open(str(path), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
     with _os.fdopen(fd, "w") as f:
         cfg.write(f)
+    _os.chmod(str(path), 0o600)
+
+
+def _write_config(cfg: configparser.ConfigParser) -> None:
+    _write_config_to_path(_CONFIG_INI, cfg)
+
+
+def ensure_bundled_sample_config_sections(
+    *,
+    config_ini: Path,
+    sample_dataset_name: str,
+) -> bool:
+    """Copy ``[dataset:*]`` / ``[profile:*]`` for the bundled sample from ``config.ini.example``.
+
+    Used when ``data/datasets/<name>/`` exists but the user's ``config.ini`` predates
+    those sections. Returns ``True`` if ``config_ini`` was written.
+    """
+    repo_root = config_ini.parent.parent
+    sample_dir = repo_root / "data" / "datasets" / sample_dataset_name
+    if not sample_dir.exists() or not config_ini.exists():
+        return False
+
+    example_path = config_ini.with_name("config.ini.example")
+    example_cfg = configparser.ConfigParser()
+    if example_path.exists():
+        example_cfg.read(str(example_path))
+
+    cfg = _read_config_path(config_ini)
+    dataset_section = f"dataset:{sample_dataset_name}"
+    profile_section = f"profile:{sample_dataset_name}"
+    changed = False
+
+    if not cfg.has_section(dataset_section):
+        cfg.add_section(dataset_section)
+        if example_cfg.has_section(dataset_section):
+            for key, value in example_cfg.items(dataset_section):
+                cfg.set(dataset_section, key, value)
+        else:
+            cfg.set(dataset_section, "source", sample_dataset_name)
+            cfg.set(dataset_section, "train_split", "train")
+            cfg.set(dataset_section, "validation_split", "validation")
+        changed = True
+
+    if not cfg.has_section(profile_section) and example_cfg.has_section(profile_section):
+        cfg.add_section(profile_section)
+        for key, value in example_cfg.items(profile_section):
+            cfg.set(profile_section, key, value)
+        changed = True
+
+    if changed:
+        _write_config_to_path(config_ini, cfg)
+    return changed
 
 
 def _add_dataset_to_config(dataset_name: str, text_column: str) -> None:

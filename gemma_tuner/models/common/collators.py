@@ -160,15 +160,16 @@ def validate_bos_tokens_present(encoded: Dict[str, torch.Tensor], tokenizer) -> 
 
 
 def _control_token_subsequence_ids(tokenizer, control_token: str) -> List[int]:
-    """Token ids for the turn-boundary marker (e.g. ``<start_of_turn>`` or ``<|turn|>``).
+    """Token ids for the start-of-turn marker (e.g. ``<start_of_turn>`` or ``<|turn>``).
 
-    Gemma 4 uses ``<|turn|>`` per turn; the assistant span is found separately by searching for
-    the tokenized ``model`` role header after the **last** boundary (see :func:`mask_gemma_prompt_tokens`).
+    Gemma 4 uses ``<|turn>`` (id 105 in the real tokenizer) as the start-of-turn token.
+    The assistant span is then found separately by searching for the tokenized ``model``
+    role header after the **last** boundary (see :func:`mask_gemma_prompt_tokens`).
     """
     if control_token == "<start_of_turn>" and getattr(tokenizer, "start_of_turn_token_id", None) is not None:
         return [int(tokenizer.start_of_turn_token_id)]
     # Optional fast path if a future tokenizer exposes a dedicated id (encode still works otherwise).
-    if control_token == "<|turn|>" and getattr(tokenizer, "turn_token_id", None) is not None:
+    if control_token == "<|turn>" and getattr(tokenizer, "turn_token_id", None) is not None:
         return [int(tokenizer.turn_token_id)]
     try:
         ids = tokenizer.encode(control_token, add_special_tokens=False)
@@ -622,15 +623,25 @@ class DataCollatorGemmaText:
             truncation=True,
             max_length=self.max_length,
         )
-        try:
-            encoded = self.tokenizer.apply_chat_template(
-                messages_batch,
-                return_assistant_tokens_mask=True,
-                **tmpl_kwargs,
-            )
-        except ValueError as e:
-            if "assistant" not in str(e).lower() and "return_assistant_tokens_mask" not in str(e):
-                raise
+        # Gemma 4's shipped chat template does not wrap assistant replies in the Jinja
+        # ``{% generation %}`` block that Hugging Face needs to build assistant spans.
+        # Asking for ``return_assistant_tokens_mask=True`` still "succeeds" but returns
+        # an all-zero mask *and* prints a noisy per-batch HF warning. Skip the request
+        # entirely for families flagged as unsupported so the collator goes straight to
+        # the :func:`mask_gemma_prompt_tokens` fallback without any warning noise.
+        use_primary_mask = bool(self._caps.get("supports_assistant_mask", True))
+        if use_primary_mask:
+            try:
+                encoded = self.tokenizer.apply_chat_template(
+                    messages_batch,
+                    return_assistant_tokens_mask=True,
+                    **tmpl_kwargs,
+                )
+            except ValueError as e:
+                if "assistant" not in str(e).lower() and "return_assistant_tokens_mask" not in str(e):
+                    raise
+                encoded = self.tokenizer.apply_chat_template(messages_batch, **tmpl_kwargs)
+        else:
             encoded = self.tokenizer.apply_chat_template(messages_batch, **tmpl_kwargs)
 
         if self._caps["needs_mm_token_type_ids_injection"]:
@@ -640,10 +651,12 @@ class DataCollatorGemmaText:
         labels = input_ids.clone()
         ignore_id = GemmaTrainingConstants.IGNORE_TOKEN_ID
         am = encoded.get("assistant_masks")
-        # Hugging Face can return assistant_masks with shape matching input_ids but all zeros when the
-        # chat template lacks `{% generation %}` (see tokenizer warning). Using `labels[am == 0]`
-        # would then mask every position. Per-row: use assistant_masks only when it marks at least
-        # one supervised token; otherwise fall back to mask_gemma_prompt_tokens.
+        # Hugging Face can still return assistant_masks with shape matching input_ids but
+        # all zeros even when we asked for it (chat template missing ``{% generation %}``).
+        # Using ``labels[am == 0]`` would then mask every position. Per-row: use
+        # assistant_masks only when it marks at least one supervised token; otherwise
+        # fall back to mask_gemma_prompt_tokens. (Paranoia belt-and-suspenders — when
+        # ``supports_assistant_mask`` is False we never asked, so ``am`` is None here.)
         if isinstance(am, torch.Tensor) and am.shape == input_ids.shape:
             degenerate_rows: List[int] = []
             for i in range(input_ids.size(0)):

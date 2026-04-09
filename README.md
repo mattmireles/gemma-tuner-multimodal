@@ -5,12 +5,22 @@
 **Fine-tune Gemma on text, images, *and* audio — on your Mac, on data that doesn't fit on your Mac.**
 
 - 🖼️ **Image + text LoRA** — captioning and VQA on local CSV.
-- 🎙️ **Audio + text LoRA** — the only Apple-Silicon-native path that does this.
+- 🎙️ **Audio + text LoRA** — Apple-Silicon-native, no CUDA required.
 - 📝 **Text-only LoRA** — instruction or completion on CSV.
 - ☁️ **Stream from GCS / BigQuery** — train on terabytes without filling your SSD.
 - 🍎 **Runs on Apple Silicon** — MPS-native, no NVIDIA box required.
 
 **Source:** [github.com/mattmireles/gemma-tuner-multimodal](https://github.com/mattmireles/gemma-tuner-multimodal) (public).
+
+---
+
+## Watch your model learn
+
+![Real-time training visualizer: loss curve, attention heatmap, gradient signal, memory, and token predictions — updating live as training runs on Apple Silicon](README/assets/training-visualizer.png)
+
+Loss curve. Attention heatmap. Gradient signal strength. Memory pressure. Token-by-token predictions — all updating in real time, in your browser, while the model trains on your Mac. No TensorBoard. No notebook. One flag in your config, one URL in your terminal.
+
+→ [Setup takes 30 seconds](#training-visualizer)
 
 ---
 
@@ -25,13 +35,13 @@
 | **Stream training data from cloud** | ✅ | ❌ | ❌ | ⚠️ partial |
 | No NVIDIA GPU required | ✅ | ✅ | ❌ | ❌ |
 
-If you want to fine-tune Gemma on **text, images, or audio** without renting an H100 or copying a terabyte of data to your laptop, this is the only toolkit that does all three modalities on Apple Silicon.
+Fine-tune Gemma on **text, images, or audio** without renting an H100 or copying a terabyte of data to your laptop. All three modalities run on Apple Silicon.
 
 **Text-only fine-tuning** (instruction or completion on CSV) is supported: set `modality = text` in your profile and use local CSV splits under `data/datasets/<name>/`. See [Text-only fine-tuning](#text-only-fine-tuning) below.
 
 **Image + text fine-tuning** (captioning or VQA on local CSV) uses `modality = image`, `image_sub_mode`, and `image_token_budget`; see [Image fine-tuning](#image-fine-tuning) below. v1 is **local CSV only** (same constraint as text-only).
 
-Under the hood: Hugging Face Gemma checkpoints + PEFT LoRA, supervised fine-tuning in [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py), exported as a merged HF / SafeTensors tree by [`gemma_tuner/scripts/export.py`](gemma_tuner/scripts/export.py). For Core ML conversion and GGUF inference tooling, see [`README/guides/README.md`](README/guides/README.md) — this repo's *training* path is Gemma-only by design.
+**How it works:** Hugging Face Gemma checkpoints + PEFT LoRA, supervised fine-tuning in [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py), exported as a merged HF / SafeTensors tree by [`gemma_tuner/scripts/export.py`](gemma_tuner/scripts/export.py). For Core ML conversion and GGUF inference tooling, see [`README/guides/README.md`](README/guides/README.md) — this repo's *training* path is Gemma-only by design.
 
 **Deeper reading:** [`README/guides/README.md`](README/guides/README.md) · [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md)
 
@@ -69,11 +79,11 @@ Wizard time and memory hints come from [`gemma_tuner/wizard/base.py`](gemma_tune
 
 ---
 
-## Architecture (what actually calls what)
+## Architecture
 
 | Piece | Role |
 | --- | --- |
-| [`gemma_tuner/cli_typer.py`](gemma_tuner/cli_typer.py) | Canonical CLI (`gemma-macos-tuner`). Imports `core.bootstrap` early so MPS env vars exist before Torch wakes up. |
+| [`gemma_tuner/cli_typer.py`](gemma_tuner/cli_typer.py) | Canonical CLI (`gemma-macos-tuner`). Imports `core.bootstrap` early so MPS env vars are set before Torch is loaded. |
 | [`gemma_tuner/core/ops.py`](gemma_tuner/core/ops.py) | Dispatches prepare → `scripts.prepare_data`, finetune → `scripts.finetune`, evaluate → `scripts.evaluate`, export → `scripts.export`. |
 | [`gemma_tuner/scripts/finetune.py`](gemma_tuner/scripts/finetune.py) | **Router**: only models whose name contains `gemma` → [`gemma_tuner/models/gemma/finetune.py`](gemma_tuner/models/gemma/finetune.py). |
 | [`gemma_tuner/utils/device.py`](gemma_tuner/utils/device.py) | MPS → CUDA → CPU selection, sync helpers, memory hints. |
@@ -99,45 +109,43 @@ output/
 
 | | |
 | --- | --- |
-| **Python** | **3.10+** (matches `pyproject.toml`; 3.8 is a fond memory) |
-| **macOS** | 12.3+ for MPS; use **native arm64** Python—not Rosetta |
-| **RAM** | 16 GB workable for small Gemma runs; more is calmer |
+| **Python** | **3.10+** (matches `pyproject.toml`) |
+| **macOS** | 12.3+ for MPS; use **native arm64** Python, not Rosetta |
+| **RAM** | 16 GB minimum for the smaller Gemma runs; 32 GB+ recommended |
 | **CUDA** | Optional; install the CUDA build of PyTorch that matches your driver |
 
 ---
 
 ## Installation
 
-### 1. Create a virtual environment (do this first)
+### 1. Create a Python 3.10+ virtual environment
 
-macOS’s built-in Python is 3.9 — too old. This project requires **Python 3.10+**.
-Homebrew has a newer one; install it if you haven’t:
+macOS's built-in Python is 3.9, which is too old. Install a newer one with Homebrew:
 
 ```bash
 brew install python@3.12
 ```
 
-Then create a virtual environment (this also gives you `pip` — macOS doesn’t ship it standalone):
+Then create and activate a virtual environment:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-Your prompt changes to `(.venv) …`. Every command below assumes the venv is active.
-To reactivate in a new terminal: `source .venv/bin/activate`.
+Every command below assumes the venv is active. To reactivate in a new terminal:
+`source .venv/bin/activate`.
 
-### 2. Prove you are on arm64 (Mac)
+### 2. Confirm you are on arm64 (Apple Silicon)
 
 ```bash
 python -c "import platform; print(platform.machine())"
-# arm64  ← good
-# x86_64 ← wrong Python; fix before blaming MPS
+# arm64  -> good
+# x86_64 -> Python is running under Rosetta; install a native arm64 Python and recreate the venv
 ```
 
-If you see `x86_64`, your Python is running under Rosetta. Install a native arm64 Python
-from [python.org](https://www.python.org/downloads/macos/) or via Homebrew (`brew install python@3.12`),
-then recreate the venv.
+A native arm64 Python is available from [python.org](https://www.python.org/downloads/macos/)
+or Homebrew (`brew install python@3.12`).
 
 ### 3. Install PyTorch
 
@@ -151,41 +159,132 @@ pip install torch torchaudio
 pip install -e .
 ```
 
-### 4b. Gemma 4 (optional)
+### 5. Authenticate with Hugging Face
 
-The default dependency pin is tested for **Gemma 3n** on Transformers 4.x. To train or load **Gemma 4** checkpoints you need a newer Transformers line (see [`README/plans/gemma4-upgrade.md`](README/plans/gemma4-upgrade.md)):
+Gemma weights are gated. Accept the license on the
+[model card](https://huggingface.co/google/gemma-3n-E2B-it), then either log in or
+export a token:
+
+```bash
+huggingface-cli login
+# or:  export HF_TOKEN=hf_...
+```
+
+### 6. Gemma 4 (optional)
+
+The base install (`pip install -e .`) pins Transformers ≥5.5 — both **Gemma 3n** and **Gemma 4** families work out of the box. Gemma 4 checkpoints need a slightly newer PEFT:
 
 ```bash
 pip install -r requirements/requirements-gemma4.txt
 ```
 
-Use a **separate virtual environment** if you want to keep a Gemma 3n-only env and a Gemma 4 env side by side.
+`finetune` and `export` are family-aware. A few non-training commands (`gemma_generate`, multimodal probing, ASR eval) still reject Gemma 4 ids until those code paths are upgraded.
 
-**Gemma 3n vs Gemma 4 elsewhere:** `pip install -e .` is enough for Gemma 3n everywhere (including `finetune`). Gemma 4 **training** needs `requirements/requirements-gemma4.txt`. Several **non-training** commands (`gemma_generate`, dataset-prep validation used for multimodal probing, ASR eval, etc.) still **reject Gemma 4** model ids with an explicit error until those code paths are upgraded; **`export`** uses the same family-aware loader as `finetune`. Otherwise use a Gemma 3n id or run `finetune` for Gemma 4.
-
-### 5. Run the wizard
+### 7. Run the wizard
 
 ```bash
 gemma-macos-tuner wizard
 ```
 
-The wizard walks you through model selection, dataset config, and training — answering questions and writing `config/config.ini` for you.
+The wizard is the primary UI: it picks the model, walks you through dataset and
+hyperparameter selection, and starts training. On first run it creates
+`config/config.ini` for you from the committed
+[`config/config.ini.example`](config/config.ini.example) template (the live config
+is gitignored because the wizard writes local paths and GCP project IDs into it).
 
-> **Before the wizard downloads model weights**, you need a Hugging Face account with access to Gemma.
-> Accept the license on the [model card](https://huggingface.co/google/gemma-3n-E2B-it), then authenticate:
-> ```bash
-> huggingface-cli login
-> ```
-> Or set `HF_TOKEN` in your environment.
+If a command fails, run `gemma-macos-tuner system-check` first to surface
+environment issues.
 
-If something seems broken, run `gemma-macos-tuner system-check` first.
+---
+
+## Zero to training in 90 seconds
+
+The repo ships a 16-row instruction-tuning dataset at [`data/datasets/sample-text/`](data/datasets/sample-text/) — translations, summaries, trivia, haiku, JSON conversion. Small enough to finish in under a minute. Large enough to prove the full pipeline works: data loading, tokenization, LoRA, checkpointing, export.
+
+```bash
+gemma-macos-tuner wizard
+```
+
+Pick **Instruction tuning → gemma-3n-e2b-it → sample-text**, accept the defaults, and watch it train. First run downloads ~5 GB of base weights from Hugging Face (step 5 above must be done). Every run after that starts in seconds.
+
+Or skip the wizard entirely:
+
+```bash
+gemma-macos-tuner finetune sample-text
+```
+
+Once the sample run finishes, drop your own CSV under `data/datasets/<your-name>/` and run the wizard again — it picks up new datasets automatically.
+
+---
+
+## What kind of data do I need?
+
+All training data is **CSV** under `data/datasets/<name>/`, with one row per
+example and a header row. The required columns depend on the modality. Each
+dataset directory holds at least:
+
+```text
+data/datasets/<name>/
+├── train.csv
+└── validation.csv
+```
+
+There is no JSONL / Parquet / Hugging Face dataset format requirement — just CSV.
+The column **names** are configurable via `prompt_column`, `text_column`, and
+`image_path_column` in your profile; the names below are the defaults used by
+[`config/config.ini.example`](config/config.ini.example).
+
+### Text instruction (`modality = text`, `text_sub_mode = instruction`)
+
+```csv
+id,prompt,response
+1,Translate to French: Good morning.,Bonjour.
+2,What is the capital of Japan?,Tokyo.
+```
+
+The prompt is masked from the loss; the model only learns to generate `response`.
+This is what the bundled `sample-text` dataset uses.
+
+### Text completion (`modality = text`, `text_sub_mode = completion`)
+
+```csv
+id,text
+1,"Once upon a time, in a small village by the sea, ..."
+```
+
+A single text column; the full sequence is trained (no prompt mask). Useful for
+domain pretraining-style adaptation.
+
+### Image + text (`modality = image`)
+
+```csv
+id,image_path,caption
+1,images/receipt_001.jpg,"Total: $42.18, paid in cash"
+2,images/receipt_002.jpg,"Subtotal $19.99, tax $1.60, total $21.59"
+```
+
+`image_path` is resolved relative to the dataset directory (or an absolute path).
+For VQA, set `image_sub_mode = vqa` and use `image_path,question,answer` columns.
+See [Image fine-tuning](#image-fine-tuning) for details.
+
+### Audio + text (`modality = audio`, the default)
+
+```csv
+id,audio_path,text,language,duration
+1,audio/sample_001.wav,"the quick brown fox jumps over the lazy dog",en,2.4
+```
+
+`audio_path` points at decoded WAV files (16 kHz mono recommended). The
+`gemma-macos-tuner prepare` command will fetch and decode audio for you if you
+provide an `audio_url` column instead. See [`README/Datasets.md`](README/Datasets.md)
+for the full schema and the GCS / BigQuery streaming variants.
 
 ---
 
 ## CLI cheat sheet
 
 ```bash
-# Dataset prep (profile names come from config.ini)
+# Dataset prep (profile names come from config/config.ini)
 gemma-macos-tuner prepare <dataset-profile>
 
 # Train (model in profile must be a Gemma id / local path with "gemma" in the string)
@@ -196,6 +295,10 @@ gemma-macos-tuner evaluate <profile-or-run>
 
 # Export merged HF/SafeTensors tree (LoRA merged when adapter_config.json is present)
 gemma-macos-tuner export <run-dir-or-profile>
+
+# Exported models and completed runs include a .integrity.json manifest for
+# corruption/drift detection. Verification is intentionally strict about
+# unexpected extra tracked files. This is integrity only, not signing/authenticity.
 
 # Blacklist generation from errors
 gemma-macos-tuner blacklist <profile>
@@ -280,7 +383,7 @@ image_token_budget = 560
 
 ## Gemma 3n / Gemma 4 on Apple Silicon
 
-End-to-end notes live in [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md). Multimodal Gemma 4 + MPS field guide: [`README/guides/apple-silicon/gemma4-guide.md`](README/guides/apple-silicon/gemma4-guide.md). Short version:
+End-to-end notes live in [`README/specifications/Gemma3n.md`](README/specifications/Gemma3n.md). Multimodal Gemma 4 + MPS field guide: [`README/guides/apple-silicon/gemma4-guide.md`](README/guides/apple-silicon/gemma4-guide.md). Common commands:
 
 ```bash
 python -m gemma_tuner.scripts.gemma_preflight
@@ -298,7 +401,7 @@ python tools/eval_gemma_asr.py \
   --limit 200
 ```
 
-**MPS reality check:** prefer bf16 when supported; attention is forced to `eager` for stability; do not leave `PYTORCH_ENABLE_MPS_FALLBACK=1` on in production (it hides silent CPU fallbacks).
+**MPS notes:** prefer bf16 when supported; attention is forced to `eager` for stability; unset `PYTORCH_ENABLE_MPS_FALLBACK=1` after debugging — leaving it on hides silent CPU fallbacks.
 
 ---
 
@@ -318,9 +421,28 @@ data_patches/{source}/
 
 ---
 
-## Training visualizer (optional)
+## Training visualizer
 
-Install `viz` extras, set `visualize=true` in the profile, open the URL the trainer prints (default bind `127.0.0.1`, port starting at 8080). If Flask isn’t installed, training continues without drama.
+Six live panels in your browser while the model trains:
+
+| Panel | What it shows |
+| --- | --- |
+| **Loss curve** | Per-step loss over time — the single most important number in training |
+| **Attention heatmap** | Where the model is looking across the input, layer by layer |
+| **Signal strength** | Gradient norm — are the updates meaningful or vanishing? |
+| **Step size** | Learning rate at each step (schedule + warmup visible at a glance) |
+| **Memory** | GPU/MPS memory in GB — catch pressure before it becomes a crash |
+| **Token predictions** | Top-5 next-token probabilities — watch the model's guesses sharpen in real time |
+
+**Setup:**
+
+```bash
+pip install -e ".[viz]"
+```
+
+Then set `visualize = true` in your profile and run training. The trainer prints a URL (default `127.0.0.1:8080`). Open it. That's it.
+
+If Flask isn't installed, training still runs — the visualizer is skipped silently. No dependency, no breakage.
 
 ---
 
@@ -336,7 +458,7 @@ Large-corpus workflows: `gemma-macos-tuner prepare-granary <profile>` and stream
 # Debug only—surfaces unsupported ops by falling back to CPU (slow)
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
-# Cap MPS allocator appetite (try 0.7–0.9)
+# Cap MPS allocator high-water mark (try 0.7–0.9)
 export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.8
 ```
 
@@ -347,12 +469,6 @@ Preprocessing worker count and dataloader settings are controlled from `config/c
 ## CI & tests
 
 Workflows under [`.github/workflows/`](.github/workflows/): lint (`ruff`), fast tests (`pytest -k "not slow"`), macOS smoke. Regenerate lockfiles with `pip-compile` when you change `pyproject.toml`—see comments in [`requirements/requirements.txt`](requirements/requirements.txt).
-
----
-
-## Experiment index
-
-Runs update `output/experiments.csv` and optional SQLite—handy SQL examples are still valid; swap profile names for whatever you actually train.
 
 ---
 
@@ -377,10 +493,12 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md). Prefer extending `cli_typer.
 
 ## Acknowledgments
 
-Google’s Gemma team, Hugging Face Transformers & PEFT, PyTorch MPS maintainers—and everyone who filed an issue after watching Activity Monitor turn red.
+Google's Gemma team, Hugging Face Transformers & PEFT, and the PyTorch MPS maintainers.
 
 ---
 
 ## License
+
+If your data lives in a bucket and your GPU lives in your lap, this was built for you.
 
 Released under the [MIT License](LICENSE).
