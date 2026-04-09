@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from gemma_tuner.models.gemma import finetune as gemma_finetune
 from gemma_tuner.utils.integrity import (
     INTEGRITY_MANIFEST_FILENAME,
     _compute_file_hash,
@@ -307,6 +308,36 @@ class TestQuickIntegrityCheck:
             result = quick_integrity_check(tmpdir)
 
             assert result is False
+
+
+class TestTrainingArtifactFinalization:
+    """Tests for the training artifact finalization order."""
+
+    def test_writes_train_results_before_manifest(self, monkeypatch, tmp_path):
+        """The manifest should be created only after train_results.json exists."""
+        call_order: list[str] = []
+
+        def fake_persist(output_dir, trainer=None, train_result=None, modality="audio"):
+            call_order.append("persist")
+            Path(output_dir, "train_results.json").write_text("{}")
+
+        def fake_manifest(output_dir, metadata=None):
+            call_order.append("manifest")
+            assert Path(output_dir, "train_results.json").is_file()
+            return str(Path(output_dir, INTEGRITY_MANIFEST_FILENAME))
+
+        monkeypatch.setattr(gemma_finetune, "persist_training_results", fake_persist)
+        monkeypatch.setattr(gemma_finetune, "create_integrity_manifest", fake_manifest)
+
+        gemma_finetune._finalize_training_artifacts(
+            str(tmp_path),
+            trainer=object(),
+            train_result=object(),
+            modality="audio",
+            integrity_metadata={"model_id": "google/gemma"},
+        )
+
+        assert call_order == ["persist", "manifest"]
 
 
 if __name__ == "__main__":

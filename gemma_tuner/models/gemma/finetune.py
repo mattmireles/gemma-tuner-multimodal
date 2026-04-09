@@ -206,6 +206,23 @@ def resolve_training_torch_compile(device: torch.device, profile_config: dict[st
     return requested
 
 
+def _finalize_training_artifacts(
+    output_dir: str,
+    *,
+    trainer: Trainer,
+    train_result: Any,
+    modality: str,
+    integrity_metadata: dict[str, Any],
+) -> None:
+    """Write post-training artifacts in the order integrity verification expects."""
+    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
+
+    try:
+        create_integrity_manifest(output_dir, metadata=integrity_metadata)
+    except Exception as e:
+        logger.warning("Failed to create integrity manifest (non-fatal): %s", e)
+
+
 def _discover_candidate_target_modules(model) -> List[str]:
     """Scan model modules to find which default LoRA target heads exist in the model.
 
@@ -734,23 +751,18 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         except Exception as e:
             logger.debug("broadcast_training_finished failed (non-fatal): %s", e)
 
-    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
-
-    # Create the manifest after all standard training artifacts are written.
-    # If we hash the directory before train_results.json lands, integrity
-    # verification immediately flags that file as an unexpected extra.
-    try:
-        create_integrity_manifest(
-            output_dir,
-            metadata={
-                "model_id": model_id,
-                "dtype": str(torch_dtype),
-                "device": str(device),
-                "modality": modality,
-            },
-        )
-    except Exception as e:
-        logger.warning("Failed to create integrity manifest (non-fatal): %s", e)
+    _finalize_training_artifacts(
+        output_dir,
+        trainer=trainer,
+        train_result=train_result,
+        modality=modality,
+        integrity_metadata={
+            "model_id": model_id,
+            "dtype": str(torch_dtype),
+            "device": str(device),
+            "modality": modality,
+        },
+    )
 
     empty_cache()
     return {"train_metrics": getattr(train_result, "metrics", {})}

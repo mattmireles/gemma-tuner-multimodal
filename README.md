@@ -296,6 +296,10 @@ gemma-macos-tuner evaluate <profile-or-run>
 # Export merged HF/SafeTensors tree (LoRA merged when adapter_config.json is present)
 gemma-macos-tuner export <run-dir-or-profile>
 
+# Exported models and completed runs include a .integrity.json manifest for
+# corruption/drift detection. Verification is intentionally strict about
+# unexpected extra tracked files. This is integrity only, not signing/authenticity.
+
 # Blacklist generation from errors
 gemma-macos-tuner blacklist <profile>
 
