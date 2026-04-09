@@ -106,9 +106,7 @@ def apply_device_defaults(profile_config: ProfileConfig | dict[str, Any]) -> Non
 
         existing_attn = profile_config.get("attn_implementation")
         if not existing_attn:
-            logger.info(
-                "apply_device_defaults: defaulting attn_implementation to 'eager' on MPS (unset in profile)."
-            )
+            logger.info("apply_device_defaults: defaulting attn_implementation to 'eager' on MPS (unset in profile).")
             profile_config["attn_implementation"] = "eager"
         elif existing_attn != "eager":
             logger.info(
