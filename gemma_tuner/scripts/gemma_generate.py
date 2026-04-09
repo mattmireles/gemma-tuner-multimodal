@@ -151,6 +151,15 @@ class GemmaInferenceConstants:
     }
 
 
+def render_generation_prompts(processor, messages_batch):
+    """Render prompts for generation with the assistant turn primed."""
+    return processor.apply_chat_template(
+        messages_batch,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
 def main(model_id: str, adapter_path: str, wav_path: str):
     """
     Performs audio transcription using fine-tuned Gemma 3n multimodal model.
@@ -299,11 +308,7 @@ def main(model_id: str, adapter_path: str, wav_path: str):
     # Process multimodal inputs through AutoProcessor
     # This handles audio feature extraction and text tokenization
     # Pass explicit sampling_rate so the processor knows the audio's sample rate
-    prompts = processor.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-    )
+    prompts = render_generation_prompts(processor, messages)
     enc = processor(
         text=prompts,
         audio=[audio],

@@ -73,6 +73,20 @@ def build_messages(transcript_hint: Optional[str] = None) -> List[Dict]:
     ]
 
 
+def render_generation_prompts(processor, messages_batch: List[List[Dict]]) -> List[str]:
+    """Render prompts for generation, including the assistant turn opener.
+
+    Generation-time chat rendering differs from training-time rendering: we need
+    the assistant header so ``model.generate()`` continues inside the assistant
+    turn instead of continuing the user turn or emitting a fresh role prefix.
+    """
+    return processor.apply_chat_template(
+        messages_batch,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gemma ASR evaluation (WER/CER)")
     ap.add_argument("--csv", required=True, help="Validation CSV with audio_path and reference text")
@@ -140,11 +154,7 @@ def main() -> int:
             audio = load_audio_local_or_gcs(audio_path, sampling_rate=sr)
 
             messages = build_messages()
-            prompts = processor.apply_chat_template(
-                [messages],
-                tokenize=False,
-                add_generation_prompt=False,
-            )
+            prompts = render_generation_prompts(processor, [messages])
             enc = processor(
                 text=prompts,
                 audio=[audio],
