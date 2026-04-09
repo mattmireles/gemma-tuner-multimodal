@@ -1,8 +1,9 @@
 # -----------------------------------------------------------------
 # requirements.txt — derived from pyproject.toml [project.dependencies]
 #
-# Optional Gemma 4 stack (transformers 5.5+): install after the base tree with
+# Extra Gemma 4 / PEFT pins (optional): install after the base tree with
 #   pip install -r requirements/requirements-gemma4.txt
+# Base transformers is already >=5.5.0 in pyproject.toml.
 #
 # pyproject.toml is the single source of truth for dependency bounds.
 # To regenerate a pinned lockfile from this, run:
@@ -13,8 +14,8 @@
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121  (CUDA)
 # -----------------------------------------------------------------
 
-# Hugging Face ecosystem
-transformers>=4.46.0,<5.0.0
+# Hugging Face ecosystem (must match pyproject.toml [project.dependencies])
+transformers>=5.5.0
 datasets>=4.0.0
 accelerate>=0.27.2
 evaluate>=0.4.1
@@ -24,6 +25,10 @@ peft>=0.9.0
 librosa>=0.10.0,<0.11.0
 soundfile>=0.12.0,<0.13.0
 scikit-learn>=1.2.0
+
+# Images + Gemma 3n vision tower (TimmWrapperModel); must match pyproject.toml
+Pillow>=10.0.0
+timm>=1.0.0
 
 # Utilities
 numpy>=1.26.4

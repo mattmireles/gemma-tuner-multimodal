@@ -148,7 +148,13 @@ class _FakeLongPromptTokenizer:
 
 
 class _FakeGemma4AllZeroAssistantMask:
-    """HF can return assistant_masks with correct shape but all zeros (no {% generation %} in template)."""
+    """HF can return assistant_masks with correct shape but all zeros (no {% generation %} in template).
+
+    Also mimics the real Gemma 4 tokenizer behavior: ``<|turn>`` (the actual start-of-turn
+    marker) is a single token (id 50), while ``<|turn|>`` (an older incorrect guess) tokenizes
+    into a 4-token subword sequence that matches nothing in real inputs. Tests that pass the
+    wrong marker will silently fall back to no-masking and can be caught by asserting warnings.
+    """
 
     bos_token_id = 1
 
@@ -172,8 +178,14 @@ class _FakeGemma4AllZeroAssistantMask:
         return out
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
-        if text == "<|turn|>":
+        if text == "<|turn>":
             return [50]
+        if text == "<|turn|>":
+            # Matches real Gemma 4 tokenizer behavior — this string is NOT a special
+            # token and tokenizes to a 4-subword sequence that never matches anything
+            # in the rendered chat. Kept in the fake so regression tests can catch a
+            # return to the old (wrong) marker.
+            return [900, 901, 902, 903]
         if text == "model\n":
             return [20, 21]
         if text == "model":
@@ -215,7 +227,16 @@ def test_instruction_gemma4_injects_mm_token_type_ids():
 
 
 def test_instruction_gemma4_degenerate_all_zero_assistant_masks_uses_fallback():
-    """When assistant_masks is present but all zeros, do not mask every token (-100 everywhere)."""
+    """Belt-and-suspenders: even if a (hypothetical) HF version returns all-zero assistant_masks
+    for Gemma 4, the collator must fall through to :func:`mask_gemma_prompt_tokens` and produce
+    correct labels.
+
+    Under normal operation the ``supports_assistant_mask=False`` capability causes the collator
+    to never ask for ``return_assistant_tokens_mask=True`` in the first place, so ``assistant_masks``
+    is absent from the encoded output. This test exercises the defensive branch where the key
+    *is* present but degenerate — guarding against a future tokenizer release that volunteers
+    an all-zero mask even without the flag.
+    """
     tok = _FakeGemma4AllZeroAssistantMask()
     collator = DataCollatorGemmaText(
         tok,
@@ -234,14 +255,27 @@ def test_instruction_gemma4_degenerate_all_zero_assistant_masks_uses_fallback():
     assert (labels[0, :7] == ignore).all()
 
 
-def test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header():
-    """Gemma 4: boundary is <|turn|>; assistant content follows tokenized model role header."""
+def test_instruction_gemma4_skips_primary_assistant_mask_path():
+    """Gemma 4's chat template lacks ``{% generation %}``, so the collator must not ask HF
+    for ``return_assistant_tokens_mask=True`` at all — doing so prints a noisy per-batch warning
+    and returns all-zeros anyway. Verify the collator calls ``apply_chat_template`` without that
+    kwarg for Gemma 4.
+    """
 
-    class _Tok:
+    captured_kwargs: list[dict] = []
+
+    class _SpyTokenizer:
         bos_token_id = 1
 
+        def apply_chat_template(self, messages_batch, **kwargs):
+            captured_kwargs.append(dict(kwargs))
+            # Return a minimal encoded dict sufficient for the collator to proceed.
+            input_ids = torch.tensor([[1, 50, 7, 50, 20, 21, 100, 101]], dtype=torch.long)
+            attention_mask = torch.ones_like(input_ids)
+            return {"input_ids": input_ids, "attention_mask": attention_mask}
+
         def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
-            if text == "<|turn|>":
+            if text == "<|turn>":
                 return [50]
             if text == "model\n":
                 return [20, 21]
@@ -249,8 +283,96 @@ def test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header():
                 return [20]
             return [99]
 
+    tok = _SpyTokenizer()
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        family=GemmaFamily.GEMMA_4,
+        prompt_column="prompt",
+        max_length=128,
+        sub_mode="instruction",
+        # Disable pre-measurement so the spy only captures the final encoding call.
+        instruction_truncation="none",
+    )
+    collator([{"prompt": "p", "response": "Hello"}])
+    assert len(captured_kwargs) == 1
+    assert "return_assistant_tokens_mask" not in captured_kwargs[0], (
+        "Gemma 4 must NOT request return_assistant_tokens_mask (chat template lacks the "
+        "`{% generation %}` block; HF would return all-zeros + warn every batch)."
+    )
+
+
+def test_instruction_gemma3n_still_uses_primary_assistant_mask_path():
+    """Gemma 3n's template *does* have ``{% generation %}``, so the collator should keep
+    using ``return_assistant_tokens_mask=True`` for this family.
+    """
+
+    captured_kwargs: list[dict] = []
+
+    class _SpyTokenizer:
+        bos_token_id = 1
+
+        def apply_chat_template(self, messages_batch, **kwargs):
+            captured_kwargs.append(dict(kwargs))
+            input_ids = torch.tensor([[1, 7, 9, 7, 20, 21, 100, 101]], dtype=torch.long)
+            attention_mask = torch.ones_like(input_ids)
+            out = {"input_ids": input_ids, "attention_mask": attention_mask}
+            if kwargs.get("return_assistant_tokens_mask"):
+                # Mark the last two positions as supervised (Gemma 3n's HF path works).
+                am = torch.zeros_like(input_ids)
+                am[0, -2:] = 1
+                out["assistant_masks"] = am
+            return out
+
+        def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+            if text == "<start_of_turn>":
+                return [7]
+            if text == "model\n":
+                return [20, 21]
+            if text == "model":
+                return [20]
+            return [99]
+
+    tok = _SpyTokenizer()
+    collator = DataCollatorGemmaText(
+        tok,
+        text_column="response",
+        family=GemmaFamily.GEMMA_3N,
+        prompt_column="prompt",
+        max_length=128,
+        sub_mode="instruction",
+        instruction_truncation="none",
+    )
+    collator([{"prompt": "p", "response": "Hello"}])
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0].get("return_assistant_tokens_mask") is True, (
+        "Gemma 3n must continue to use the primary assistant_masks path."
+    )
+
+
+def test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header():
+    """Gemma 4: boundary is ``<|turn>`` (single token); assistant content follows tokenized model role header."""
+
+    class _Tok:
+        bos_token_id = 1
+
+        def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+            # Real Gemma 4 tokenizer: <|turn> is a single token id; <|turn|> is not a
+            # special token and tokenizes to a 4-subword sequence. We mirror that split
+            # so a regression to the wrong marker string would break this test instead
+            # of silently passing.
+            if text == "<|turn>":
+                return [50]
+            if text == "<|turn|>":
+                return [900, 901, 902, 903]
+            if text == "model\n":
+                return [20, 21]
+            if text == "model":
+                return [20]
+            return [99]
+
     tok = _Tok()
-    # Two <|turn|> markers; last begins assistant turn; model\n then response tokens.
+    # Two <|turn> markers; last begins assistant turn; model\n then response tokens.
     input_ids = torch.tensor([[1, 50, 7, 8, 50, 20, 21, 100, 101]], dtype=torch.long)
     labels = input_ids.clone()
     warned: list[bool] = [False]
@@ -259,13 +381,57 @@ def test_mask_gemma_prompt_tokens_gemma4_uses_turn_marker_then_model_header():
         input_ids,
         tok,
         warned,
-        control_token="<|turn|>",
+        control_token="<|turn>",
     )
     assert warned[0] is False
     ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
     assert (labels[0, :7] == ignore).all()
     assert labels[0, 7].item() == 100
     assert labels[0, 8].item() == 101
+
+
+def test_mask_gemma_prompt_tokens_gemma4_wrong_marker_warns_and_leaves_labels_unmasked():
+    """Regression guard: passing the incorrect ``<|turn|>`` marker must NOT silently match.
+
+    If someone reverts `family.py` to the old (wrong) ``<|turn|>`` string, the real Gemma 4
+    tokenizer encodes it to a 4-subword sequence that never appears in the rendered chat,
+    so the subsequence search finds nothing, a warning fires, and masking is skipped.
+    """
+
+    class _Tok:
+        bos_token_id = 1
+
+        def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+            if text == "<|turn>":
+                return [50]
+            if text == "<|turn|>":
+                return [900, 901, 902, 903]
+            if text == "model\n":
+                return [20, 21]
+            if text == "model":
+                return [20]
+            return [99]
+
+        def convert_tokens_to_ids(self, token: str) -> int:
+            # Mirror HF behavior for non-special tokens: return unk_token_id (here 3).
+            return 3
+
+        unk_token_id = 3
+
+    tok = _Tok()
+    input_ids = torch.tensor([[1, 50, 7, 8, 50, 20, 21, 100, 101]], dtype=torch.long)
+    labels = input_ids.clone()
+    warned: list[bool] = [False]
+    mask_gemma_prompt_tokens(
+        labels,
+        input_ids,
+        tok,
+        warned,
+        control_token="<|turn|>",  # WRONG marker on purpose
+    )
+    assert warned[0] is True, "wrong marker should trigger the skip-masking warning"
+    # Labels should be unchanged (no tokens masked) because the marker never matched.
+    assert torch.equal(labels, input_ids)
 
 
 def test_find_subsequence_ids():

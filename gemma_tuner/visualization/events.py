@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -58,40 +61,86 @@ def build_training_event(
     )
 
 
+def _get_attentions_tuple(outputs: Optional[Any]):
+    if not outputs:
+        return None
+    if hasattr(outputs, "attentions"):
+        return outputs.attentions
+    if isinstance(outputs, dict) and "attentions" in outputs:
+        return outputs["attentions"]
+    return None
+
+
 def _extract_attention(outputs: Optional[Any]) -> Optional[list[list[float]]]:
-    if not outputs or not hasattr(outputs, "attentions") or not outputs.attentions:
+    try:
+        att = _get_attentions_tuple(outputs)
+        if not att:
+            return None
+        last_attention = att[-1]
+        if last_attention is None:
+            return None
+        # Expect (batch, heads, q, k); some stacks return 3D — mean only when 4D.
+        t = last_attention
+        if t.dim() == 4:
+            t = t.mean(dim=1)
+        elif t.dim() != 3:
+            return None
+        avg_attention = t.detach().cpu().numpy()
+        return avg_attention[0, :20, :20].tolist()
+    except Exception as e:
+        logger.debug("Viz attention extract skipped: %s", e)
         return None
-    last_attention = outputs.attentions[-1]
-    if last_attention is None:
+
+
+def _extract_logits_last(outputs: Optional[Any]):
+    if not outputs:
         return None
-    avg_attention = last_attention.mean(dim=1).detach().cpu().numpy()
-    return avg_attention[0, :20, :20].tolist()
+    logits = getattr(outputs, "logits", None)
+    if logits is None and isinstance(outputs, dict):
+        logits = outputs.get("logits")
+    if logits is None:
+        return None
+    return logits[:, -1, :]
 
 
 def _extract_token_probs(outputs: Optional[Any]) -> Optional[dict[str, list[float] | list[int]]]:
-    if not outputs or not hasattr(outputs, "logits"):
+    try:
+        logits = _extract_logits_last(outputs)
+        if logits is None or logits.numel() == 0:
+            return None
+        probs = torch.softmax(logits, dim=-1)
+        top5 = torch.topk(probs[0], k=min(5, int(probs[0].shape[-1])))
+        return {
+            "values": top5.values.detach().cpu().numpy().tolist(),
+            "indices": top5.indices.detach().cpu().numpy().tolist(),
+        }
+    except Exception as e:
+        logger.debug("Viz token_probs extract skipped: %s", e)
         return None
-    logits = outputs.logits[:, -1, :]
-    probs = torch.softmax(logits, dim=-1)
-    top5 = torch.topk(probs[0], k=min(5, probs[0].shape[-1]))
-    return {
-        "values": top5.values.detach().cpu().numpy().tolist(),
-        "indices": top5.indices.detach().cpu().numpy().tolist(),
-    }
 
 
 def _extract_audio_features(batch: Optional[dict[str, Any]]) -> Optional[list[list[float]]]:
     if not batch:
         return None
-    # Gemma 3n batches use "audio_values"; some HF ASR pipelines use "input_features".
-    # Try both keys so this function works for all model families.
-    raw = batch.get("input_features")
-    if raw is None:
-        raw = batch.get("audio_values")
-    if raw is None:
+    try:
+        # Gemma 3n batches use "audio_values"; some HF ASR pipelines use "input_features".
+        raw = batch.get("input_features")
+        if raw is None:
+            raw = batch.get("audio_values")
+        if raw is not None:
+            mel = raw[0].detach().cpu().numpy()
+            return mel[::10, ::10].tolist()
+        # Image batches: reuse the "listening" panel as a coarse grayscale preview.
+        pv = batch.get("pixel_values")
+        if pv is not None:
+            x = pv[0].detach().cpu().float()
+            if x.dim() == 3:
+                x = x.mean(dim=0)
+            return x[::8, ::8].detach().cpu().numpy().tolist()
         return None
-    mel = raw[0].detach().cpu().numpy()
-    return mel[::10, ::10].tolist()
+    except Exception as e:
+        logger.debug("Viz mel/image preview extract skipped: %s", e)
+        return None
 
 
 def _extract_optimizer_stats(optimizer: Optional[torch.optim.Optimizer]) -> Optional[dict[str, float]]:

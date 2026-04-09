@@ -29,7 +29,7 @@ gemma-macos-tuner evaluate profile_name
 """
 
 # Package version and metadata
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Gemma macOS Tuner"
 __description__ = "Scripts package for Gemma model fine-tuning and evaluation"
 

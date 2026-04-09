@@ -26,6 +26,7 @@ Visualization includes:
 """
 
 import logging
+import math
 import os
 
 # ---------------------------------------------------------------------------
@@ -38,12 +39,13 @@ import os
 # the initialized pair.
 # ---------------------------------------------------------------------------
 import os as _os
+import queue
 import secrets as _secrets
 import threading
 import time
 import webbrowser
 from collections import deque
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -52,6 +54,11 @@ from flask_socketio import SocketIO, emit
 
 from gemma_tuner.visualization.assets import LOCAL_ASSET_PATHS
 from gemma_tuner.visualization.events import build_training_event
+from gemma_tuner.visualization.payload import (
+    finalize_control_payload,
+    finalize_initial_state_payload,
+    finalize_training_payload,
+)
 
 app: Optional[Flask] = None
 socketio: Optional[SocketIO] = None
@@ -61,8 +68,103 @@ logger = logging.getLogger(__name__)
 # concurrent calls to ``_get_app()`` from different threads are safe.
 _init_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Socket.IO broadcast queue — training thread enqueues; one worker emits.
+# Avoids threading/context surprises with direct socketio.emit from trainers.
+# ---------------------------------------------------------------------------
+_emit_queue: Optional[queue.Queue] = None
+_emit_worker_started = False
+_emit_worker_lock = threading.Lock()
+_emit_stats: Dict[str, Any] = {
+    "emits": 0,
+    "last_step": None,
+    "last_emit_ts": None,
+    "last_error": None,
+    "queue_high": 0,
+}
+_emit_log_last_ts = 0.0
 
-def _get_app(cors_origin: Optional[str] = None) -> tuple:
+
+def _emit_worker_loop() -> None:
+    global app, socketio, _emit_stats
+    assert _emit_queue is not None
+    while True:
+        name, payload = _emit_queue.get()
+        try:
+            if app is None or socketio is None:
+                continue
+            # Omit ``to=`` — that broadcasts to all clients. Do not pass
+            # ``broadcast=`` here: Flask-SocketIO 5 forwards to python-socketio
+            # ``Server.emit``, which does not accept that kwarg and would raise.
+            with app.app_context():
+                socketio.emit(name, payload, namespace="/")
+            _emit_stats["emits"] = int(_emit_stats.get("emits", 0)) + 1
+            if _emit_queue is not None:
+                d = _emit_queue.qsize()
+                _emit_stats["queue_high"] = max(int(_emit_stats.get("queue_high", 0)), d)
+            if name == "training_update" and "step" in payload:
+                _emit_stats["last_step"] = payload.get("step")
+                _emit_stats["last_emit_ts"] = time.time()
+                _throttled_emit_info_log(payload)
+        except Exception as e:
+            _emit_stats["last_error"] = str(e)
+            logger.debug("Viz emit worker failed: %s", e)
+
+
+def _throttled_emit_info_log(payload: Dict[str, Any]) -> None:
+    global _emit_log_last_ts
+    now = time.time()
+    if now - _emit_log_last_ts < 5.0:
+        return
+    _emit_log_last_ts = now
+    logger.info(
+        "Viz training_update step=%s loss=%s",
+        payload.get("step"),
+        payload.get("loss"),
+    )
+
+
+def _ensure_emit_worker() -> None:
+    global _emit_queue, _emit_worker_started
+    with _emit_worker_lock:
+        if _emit_worker_started:
+            return
+        _emit_queue = queue.Queue()
+        t = threading.Thread(target=_emit_worker_loop, daemon=True, name="gemma-viz-emit")
+        t.start()
+        _emit_worker_started = True
+
+
+def _enqueue_broadcast(event_name: str, payload: Dict[str, Any]) -> None:
+    """Queue a broadcast emit (safe from the training thread)."""
+    _ensure_emit_worker()
+    if _emit_queue is None:
+        return
+    try:
+        _emit_queue.put((event_name, payload))
+    except Exception as e:
+        logger.debug("Viz enqueue failed: %s", e)
+
+
+def get_emit_stats() -> Dict[str, Any]:
+    """Diagnostics for /healthz."""
+    out = dict(_emit_stats)
+    if _emit_queue is not None:
+        out["queue_depth"] = _emit_queue.qsize()
+    return out
+
+
+def broadcast_training_finished() -> None:
+    """Tell connected dashboards that training finished (adapter saved)."""
+    from gemma_tuner.visualization.payload import finalize_control_payload
+
+    _enqueue_broadcast(
+        "training_update",
+        finalize_control_payload({"event": "training_finished"}),
+    )
+
+
+def _get_app(cors_origin: Optional[Union[str, List[str]]] = None) -> tuple:
     """
     Return the ``(app, socketio)`` pair, creating them on first call.
 
@@ -78,9 +180,10 @@ def _get_app(cors_origin: Optional[str] = None) -> tuple:
     - The ``if __name__ == "__main__"`` test-mode block
 
     Args:
-        cors_origin: CORS allowed origin string, e.g.
-            ``"http://127.0.0.1:8080"``.  Defaults to
-            ``"http://127.0.0.1:8080"`` when not supplied.
+        cors_origin: CORS allowed origin(s). Browsers treat ``http://127.0.0.1``
+            and ``http://localhost`` as **different** origins; pass both (or a
+            list) so Socket.IO works whether the user opens either URL.
+            Defaults to 127.0.0.1 and localhost on port 8080 when not supplied.
 
     Returns:
         Tuple of ``(Flask app, SocketIO instance)``.
@@ -108,15 +211,17 @@ def _get_app(cors_origin: Optional[str] = None) -> tuple:
         app.config["SECRET_KEY"] = _os.environ.get("VIZ_SECRET_KEY") or _secrets.token_hex(32)
 
         if cors_origin is None:
-            cors_origin = "http://127.0.0.1:8080"
+            cors_allowed: List[str] = ["http://127.0.0.1:8080", "http://localhost:8080"]
+        elif isinstance(cors_origin, str):
+            cors_allowed = [cors_origin]
+        else:
+            cors_allowed = list(cors_origin)
 
-        # CORS restricted to the specific localhost origin the server will
-        # actually serve on.  Never use cors_allowed_origins="*": any
-        # webpage the user has open could then connect and exfiltrate live
-        # training telemetry.
-        socketio = SocketIO(app, cors_allowed_origins=cors_origin, async_mode="threading")
+        # CORS restricted to explicit localhost origins. Never use "*".
+        socketio = SocketIO(app, cors_allowed_origins=cors_allowed, async_mode="threading")
 
         _register_routes()
+        _ensure_emit_worker()
         return app, socketio
 
 
@@ -155,10 +260,9 @@ class TrainingVisualizer:
         self.epoch = 0
         self.start_time = time.time()
         self.last_update_time = time.time()
-        self.update_frequency = 10  # Update visualization every N steps
-
-        # Model layer information for visualization
-        self.layer_info = self._extract_model_architecture() if model else {}
+        # Throttle for hypothetical per-batch hooks. The HF ``VisualizerTrainerCallback``
+        # already aligns with ``logging_steps`` — keep this at 1 so each callback push emits.
+        self.update_frequency = 1
 
         # Training state
         self.is_training = False
@@ -172,33 +276,128 @@ class TrainingVisualizer:
 
         if model:
             self._calculate_param_stats()
+        # Model layer information for visualization (needs param counts for galaxy fallback)
+        self.layer_info = self._extract_model_architecture() if model else {}
+        if model:
+            self.layer_info["total_params"] = int(self.total_params)
+            self.layer_info["trainable_params"] = int(self.trainable_params)
             self._register_hooks()
 
-    def _extract_model_architecture(self) -> Dict[str, Any]:
-        """Extract model architecture for visualization."""
-        if not self.model:
-            return {}
+    @staticmethod
+    def _walk_hf_configs(model: nn.Module) -> Iterator[Any]:
+        """Yield ``config`` objects found on ``model`` and common wrappers (PEFT, inner LM)."""
+        seen: set[int] = set()
+        stack: list[Any] = [model]
+        while stack:
+            m = stack.pop()
+            if m is None:
+                continue
+            mid = id(m)
+            if mid in seen:
+                continue
+            seen.add(mid)
+            cfg = getattr(m, "config", None)
+            if cfg is not None:
+                yield cfg
+            for attr in ("base_model", "model"):
+                child = getattr(m, attr, None)
+                if child is not None and not isinstance(child, dict):
+                    stack.append(child)
 
-        architecture = {
+    @classmethod
+    def _resolve_primary_config(cls, model: nn.Module) -> Any:
+        """Pick the best Hugging Face config for depth/hidden-size (multimodal + PEFT safe)."""
+        best = None
+        best_score = -1
+        for cfg in cls._walk_hf_configs(model):
+            score = 0
+            if getattr(cfg, "num_hidden_layers", None):
+                score += 12
+            if getattr(cfg, "hidden_size", None) or getattr(cfg, "d_model", None):
+                score += 5
+            if getattr(cfg, "text_config", None) is not None:
+                score += 3
+            if getattr(cfg, "num_attention_heads", None):
+                score += 2
+            if score > best_score:
+                best_score = score
+                best = cfg
+        return best
+
+    def _extract_model_architecture(self) -> Dict[str, Any]:
+        """Extract a JSON-serializable architecture summary for the 3D galaxy (any modality)."""
+        arch: Dict[str, Any] = {
             "encoder_layers": 0,
             "decoder_layers": 0,
             "attention_heads": 0,
             "hidden_size": 0,
             "vocab_size": 0,
+            "num_hidden_layers": 0,
+            "model_type": "unknown",
         }
+        if not self.model:
+            return arch
 
         try:
-            if hasattr(self.model, "config"):
-                config = self.model.config
-                architecture["encoder_layers"] = getattr(config, "encoder_layers", 12)
-                architecture["decoder_layers"] = getattr(config, "decoder_layers", 12)
-                architecture["attention_heads"] = getattr(config, "encoder_attention_heads", 12)
-                architecture["hidden_size"] = getattr(config, "d_model", 768)
-                architecture["vocab_size"] = getattr(config, "vocab_size", 51865)
-        except Exception as e:
-            print(f"Could not extract model architecture: {e}")
+            cfg = self._resolve_primary_config(self.model)
+            if cfg is None:
+                return arch
 
-        return architecture
+            arch["model_type"] = str(getattr(cfg, "model_type", None) or "unknown")
+
+            tc = getattr(cfg, "text_config", None)
+            src = tc if tc is not None else cfg
+
+            nh = getattr(src, "num_hidden_layers", None) or getattr(cfg, "num_hidden_layers", None)
+            if nh is not None:
+                arch["num_hidden_layers"] = int(nh)
+
+            hs = getattr(src, "hidden_size", None) or getattr(cfg, "hidden_size", None) or getattr(cfg, "d_model", None)
+            if hs is not None:
+                arch["hidden_size"] = int(hs)
+
+            heads = (
+                getattr(src, "num_attention_heads", None)
+                or getattr(cfg, "num_attention_heads", None)
+                or getattr(cfg, "encoder_attention_heads", None)
+            )
+            if heads is not None:
+                arch["attention_heads"] = int(heads)
+
+            vs = getattr(src, "vocab_size", None) or getattr(cfg, "vocab_size", None)
+            if vs is not None:
+                arch["vocab_size"] = int(vs)
+
+            enc = getattr(cfg, "num_encoder_layers", None) or getattr(cfg, "encoder_layers", None)
+            dec = getattr(cfg, "num_decoder_layers", None) or getattr(cfg, "decoder_layers", None)
+            if enc is not None:
+                arch["encoder_layers"] = int(enc)
+            if dec is not None:
+                arch["decoder_layers"] = int(dec)
+
+            # Decoder-only causal LM: map stack depth to decoder_layers for the UI
+            if arch["encoder_layers"] == 0 and arch["decoder_layers"] == 0 and arch["num_hidden_layers"] > 0:
+                arch["decoder_layers"] = arch["num_hidden_layers"]
+
+            if arch["num_hidden_layers"] == 0 and arch["encoder_layers"] + arch["decoder_layers"] > 0:
+                arch["num_hidden_layers"] = arch["encoder_layers"] + arch["decoder_layers"]
+
+            # Last-resort depth hint from parameter count (PEFT / odd wrappers)
+            if arch["num_hidden_layers"] == 0 and self.total_params > 0:
+                arch["num_hidden_layers"] = max(4, min(48, int(round(math.log10(max(self.total_params, 10)) * 8))))
+
+            # Sane defaults if HF omitted fields
+            if arch["hidden_size"] == 0:
+                arch["hidden_size"] = 2048
+            if arch["attention_heads"] == 0:
+                arch["attention_heads"] = 8
+            if arch["vocab_size"] == 0:
+                arch["vocab_size"] = 256_000
+
+        except Exception as e:
+            logger.debug("Architecture extract failed: %s", e)
+
+        return arch
 
     def _calculate_param_stats(self):
         """Calculate total and trainable parameters."""
@@ -270,6 +469,9 @@ class TrainingVisualizer:
         batch: Optional[Dict] = None,
         outputs: Optional[Any] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
+        *,
+        global_step: Optional[int] = None,
+        gradient_norm: Optional[float] = None,
     ):
         """
         Update visualizer with data from current training step.
@@ -282,16 +484,31 @@ class TrainingVisualizer:
             batch: Input batch data (for audio visualization)
             outputs: Model outputs (for attention/logits)
             optimizer: Optimizer (for gradient stats)
+            global_step: HF Trainer ``state.global_step`` when known (preferred for UI)
+            gradient_norm: Pre-computed grad norm, e.g. what HF Trainer puts in
+                ``logs["grad_norm"]`` before zeroing grads. Callers reaching us
+                through ``TrainerCallback.on_log`` MUST pass this — by the time
+                ``on_log`` fires, ``optimizer.zero_grad()`` has already run and
+                walking ``model.parameters()`` here would see every ``p.grad``
+                as ``None``, returning a constant 0.0 for "signal strength".
+                When ``None`` we fall back to the self-compute path for older
+                call sites that still have live gradients.
         """
         self.step_count += 1
         current_time = time.time()
+        display_step = int(global_step) if global_step is not None else self.step_count
 
         # Update buffers
         self.loss_history.append(loss)
         self.lr_history.append(learning_rate)
 
-        # Calculate gradient norm
-        if self.model and optimizer:
+        # Prefer the pre-computed gradient norm (from HF Trainer's logs) because
+        # the self-compute path below only works when grads are still live on
+        # the model — which they are NOT during on_log callbacks. Walking
+        # parameters here after zero_grad just returns 0.0 forever.
+        if gradient_norm is not None:
+            self.grad_history.append(float(gradient_norm))
+        elif self.model and optimizer:
             total_norm = 0.0
             for p in self.model.parameters():
                 if p.grad is not None:
@@ -308,13 +525,13 @@ class TrainingVisualizer:
             memory_gb = torch.mps.current_allocated_memory() / 1024**3
         self.memory_history.append(memory_gb)
 
-        # Send update to frontend every N steps
+        # Send update to frontend every N internal calls (N=1 when HF callback throttles)
         if self.step_count % self.update_frequency == 0:
             # Guard against division by zero on very fast hardware where
             # current_time == self.last_update_time (< timer resolution).
             elapsed = max(current_time - self.last_update_time, 1e-6)
             event = build_training_event(
-                step=self.step_count,
+                step=display_step,
                 epoch=self.epoch or 0,
                 loss=loss,
                 gradient_norm=self.grad_history[-1] if self.grad_history else 0.0,
@@ -327,24 +544,31 @@ class TrainingVisualizer:
                 total_time=current_time - self.start_time,
                 architecture=self.layer_info,
             )
-            self._emit_update(event.as_payload())
+            raw = event.as_payload()
+            if "step" in raw and "loss" in raw:
+                payload = finalize_training_payload(raw)
+            else:
+                payload = finalize_control_payload(raw)
+            self._emit_update(payload)
             self.last_update_time = current_time
 
     def _emit_update(self, data: Dict[str, Any]):
-        """Emit update to all connected clients."""
+        """Queue a broadcast training_update (serialized on the viz worker thread)."""
         try:
-            self.socketio.emit("training_update", data)
+            _enqueue_broadcast("training_update", data)
         except Exception as e:
-            logger.debug(f"Visualizer emit failed: {e}")
+            logger.debug("Visualizer enqueue failed: %s", e)
 
     def update_epoch(self, epoch: int):
         """Update current epoch number."""
         self.epoch = epoch
-        self._emit_update({"epoch": epoch, "event": "epoch_change"})
+        self._emit_update(finalize_control_payload({"epoch": epoch, "event": "epoch_change"}))
 
     def update_validation(self, val_loss: float, val_metrics: Dict[str, float]):
         """Update validation metrics."""
-        self._emit_update({"event": "validation", "val_loss": val_loss, "val_metrics": val_metrics})
+        self._emit_update(
+            finalize_control_payload({"event": "validation", "val_loss": val_loss, "val_metrics": val_metrics})
+        )
 
     def set_training_state(self, is_training: bool):
         """
@@ -365,7 +589,7 @@ class TrainingVisualizer:
             is_training (bool): True if training, False if evaluating
         """
         self.is_training = is_training
-        self._emit_update({"event": "training_state", "is_training": is_training})
+        self._emit_update(finalize_control_payload({"event": "training_state", "is_training": is_training}))
 
 
 # Global visualizer instance
@@ -401,7 +625,32 @@ def init_visualizer(model: nn.Module, device: torch.device) -> TrainingVisualize
     if visualizer is not None:
         visualizer.shutdown()
     visualizer = TrainingVisualizer(model, device)
+    _broadcast_initial_state_to_clients()
     return visualizer
+
+
+def _broadcast_initial_state_to_clients() -> None:
+    """Notify connected Socket.IO clients after the global visualizer is ready.
+
+    Browsers often connect when the Flask server starts, before ``train()`` runs;
+    ``handle_connect`` may have run while ``visualizer`` was still ``None``.
+    """
+    global visualizer, socketio
+    if visualizer is None or socketio is None:
+        return
+    try:
+        payload = finalize_initial_state_payload(
+            {
+                "architecture": visualizer.layer_info,
+                "total_params": visualizer.total_params,
+                "trainable_params": visualizer.trainable_params,
+                "device": str(visualizer.device),
+                "is_training": visualizer.is_training,
+            }
+        )
+        _enqueue_broadcast("initial_state", payload)
+    except Exception as e:
+        logger.debug("Visualizer initial_state broadcast failed: %s", e)
 
 
 def get_visualizer() -> Optional[TrainingVisualizer]:
@@ -455,6 +704,13 @@ def _register_routes():
         """
         return render_template("index.html", asset_paths=LOCAL_ASSET_PATHS)
 
+    @app.route("/healthz")
+    def healthz():
+        """Liveness + viz emit diagnostics for operators and the status banner."""
+        from flask import jsonify
+
+        return jsonify({"ok": True, "viz": get_emit_stats()})
+
     @app.route("/static/<path:path>")
     def send_static(path):
         """
@@ -477,7 +733,7 @@ def _register_routes():
             - Path traversal prevention handled by Flask
             - Only serves files from designated static directory
         """
-        return send_from_directory("static", path)
+        return send_from_directory(app.static_folder, path)
 
     # SocketIO events
     @socketio.on("connect")
@@ -513,13 +769,15 @@ def _register_routes():
             # Send initial state to new client
             emit(
                 "initial_state",
-                {
-                    "architecture": visualizer.layer_info,
-                    "total_params": visualizer.total_params,
-                    "trainable_params": visualizer.trainable_params,
-                    "device": str(visualizer.device),
-                    "is_training": visualizer.is_training,
-                },
+                finalize_initial_state_payload(
+                    {
+                        "architecture": visualizer.layer_info,
+                        "total_params": visualizer.total_params,
+                        "trainable_params": visualizer.trainable_params,
+                        "device": str(visualizer.device),
+                        "is_training": visualizer.is_training,
+                    }
+                ),
             )
 
     @socketio.on("disconnect")
@@ -583,12 +841,14 @@ def _register_routes():
         if visualizer:
             emit(
                 "history_data",
-                {
-                    "loss_history": list(visualizer.loss_history),
-                    "grad_history": list(visualizer.grad_history),
-                    "lr_history": list(visualizer.lr_history),
-                    "memory_history": list(visualizer.memory_history),
-                },
+                finalize_control_payload(
+                    {
+                        "loss_history": list(visualizer.loss_history),
+                        "grad_history": list(visualizer.grad_history),
+                        "lr_history": list(visualizer.lr_history),
+                        "memory_history": list(visualizer.memory_history),
+                    }
+                ),
             )
 
 
@@ -690,8 +950,10 @@ def start_visualization_server(host="127.0.0.1", port=VisualizationConstants.DEF
     # Initialize app/socketio with CORS origin matching the actual port the
     # server will bind to.  This fixes the bug where CORS was hardcoded to
     # port 8080 even when the server fell back to a different port.
-    cors_origin = f"http://{host}:{port}"
-    _app, _sio = _get_app(cors_origin=cors_origin)
+    # ``localhost`` and ``127.0.0.1`` are different browser origins — allow both
+    # so Socket.IO connects whether the user opened either URL.
+    cors_origins = [f"http://127.0.0.1:{port}", f"http://localhost:{port}"]
+    _app, _sio = _get_app(cors_origin=cors_origins)
 
     def run_server():
         """
@@ -734,7 +996,7 @@ if __name__ == "__main__":
     #   Werkzeug to the network).
     # debug=False: never expose Werkzeug's interactive debugger, which
     #   provides an unauthenticated Python REPL.
-    _app, _sio = _get_app(cors_origin="http://127.0.0.1:8080")
+    _app, _sio = _get_app(cors_origin=["http://127.0.0.1:8080", "http://localhost:8080"])
     print("Starting Gemma Training Visualizer in test mode...")
-    print("Open http://localhost:8080 in your browser")
+    print("Open http://127.0.0.1:8080 or http://localhost:8080 in your browser")
     _sio.run(_app, host="127.0.0.1", port=8080, debug=False, allow_unsafe_werkzeug=True)
