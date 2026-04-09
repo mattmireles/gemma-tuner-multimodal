@@ -734,7 +734,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         except Exception as e:
             logger.debug("broadcast_training_finished failed (non-fatal): %s", e)
 
-    # Create integrity manifest for reproducibility and corruption detection
+    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
+
+    # Create the manifest after all standard training artifacts are written.
+    # If we hash the directory before train_results.json lands, integrity
+    # verification immediately flags that file as an unexpected extra.
     try:
         create_integrity_manifest(
             output_dir,
@@ -747,8 +751,6 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         )
     except Exception as e:
         logger.warning("Failed to create integrity manifest (non-fatal): %s", e)
-
-    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
 
     empty_cache()
     return {"train_metrics": getattr(train_result, "metrics", {})}

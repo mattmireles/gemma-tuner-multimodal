@@ -6,7 +6,6 @@ to detect corruption during save/load operations and ensure reproducibility.
 Called by:
 - models/gemma/finetune.py after training completes
 - scripts/export.py after model export
-- core/runs.py for run directory integrity tracking
 
 Design rationale:
 - SHA256 for file-level integrity (standard, available in stdlib)
@@ -159,7 +158,6 @@ def create_integrity_manifest(
     Called by:
     - finetune.py after training completes
     - export.py after model export
-    - runs.py for run directory integrity tracking
     """
     directory = os.path.abspath(directory)
 
@@ -283,6 +281,7 @@ def verify_directory_integrity(
 def _get_timestamp() -> str:
     """Return ISO format timestamp."""
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 
