@@ -68,9 +68,18 @@ def test_assert_entrypoint_support_allows_finetune():
     assert_entrypoint_support("finetune", GemmaFamily.GEMMA_4) is None
 
 
+def test_assert_entrypoint_support_allows_eval_gemma_asr():
+    assert_entrypoint_support("eval_gemma_asr", GemmaFamily.GEMMA_4) is None
+
+
 def test_gate_gemma_model_export_gemma4():
     with patch("gemma_tuner.models.gemma.family._installed_transformers_version", return_value="5.5.0"):
         assert gate_gemma_model("google/gemma-4-E2B-it", entrypoint="export") == GemmaFamily.GEMMA_4
+
+
+def test_gate_gemma_model_eval_gemma_asr_gemma4():
+    with patch("gemma_tuner.models.gemma.family._installed_transformers_version", return_value="5.5.0"):
+        assert gate_gemma_model("google/gemma-4-E2B-it", entrypoint="eval_gemma_asr") == GemmaFamily.GEMMA_4
 
 
 def test_gate_gemma_model_finetune_gemma4():
@@ -81,4 +90,5 @@ def test_gate_gemma_model_finetune_gemma4():
 def test_unsupported_entrypoints_cover_plan():
     assert "gemma_generate" in GEMMA4_UNSUPPORTED_ENTRYPOINTS
     assert "export" not in GEMMA4_UNSUPPORTED_ENTRYPOINTS
+    assert "eval_gemma_asr" not in GEMMA4_UNSUPPORTED_ENTRYPOINTS
     assert "finetune" not in GEMMA4_UNSUPPORTED_ENTRYPOINTS

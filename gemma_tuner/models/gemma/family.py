@@ -119,14 +119,13 @@ def assert_family_supported(family: GemmaFamily) -> None:
 
 
 # Entrypoints that still use ``AutoModelForCausalLM``-only paths; Gemma 4 is rejected until upgraded.
-# ``export`` uses :func:`gemma_tuner.models.gemma.base_model_loader.load_base_model_for_gemma` (same as finetune).
+# ``export`` and ``eval_gemma_asr`` now use :func:`gemma_tuner.models.gemma.base_model_loader.load_base_model_for_gemma`.
 GEMMA4_UNSUPPORTED_ENTRYPOINTS: FrozenSet[str] = frozenset(
     {
         "gemma_generate",
         "gemma_profiler",
         "gemma_dataset_prep",
         "inference_common",
-        "eval_gemma_asr",
     }
 )
 
