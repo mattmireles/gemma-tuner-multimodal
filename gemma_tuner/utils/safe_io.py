@@ -10,8 +10,8 @@ Security considerations:
 - Path traversal attempts are detected and blocked
 
 Called by:
-- Any module requiring safe deserialization of model weights or config files
-- Future extensions that need to load external checkpoint files
+- utils/dataset_prep.py for local audio path validation
+- Future extensions that need safer checkpoint/config loading
 
 Design rationale:
 - Explicit safe defaults over implicit trust
@@ -98,9 +98,7 @@ def safe_torch_load(
     except RuntimeError as e:
         if "weights_only" in str(e) or "torch.load" in str(e):
             logger.error(
-                "Failed to load checkpoint with weights_only=%s. "
-                "The checkpoint may contain non-tensor data. "
-                "Error: %s",
+                "Failed to load checkpoint with weights_only=%s. The checkpoint may contain non-tensor data. Error: %s",
                 weights_only,
                 e,
             )
@@ -164,13 +162,9 @@ def safe_pickle_load(f: str | os.PathLike | bytes) -> Any:
         def find_class(self, module: str, name: str) -> Any:
             """Override to only allow safe classes."""
             if module not in self.SAFE_MODULES:
-                raise pickle.UnpicklingError(
-                    f"Blocked unpickling of non-whitelisted module: {module}.{name}"
-                )
+                raise pickle.UnpicklingError(f"Blocked unpickling of non-whitelisted module: {module}.{name}")
             if name not in self.SAFE_TYPES:
-                raise pickle.UnpicklingError(
-                    f"Blocked unpickling of non-whitelisted type: {module}.{name}"
-                )
+                raise pickle.UnpicklingError(f"Blocked unpickling of non-whitelisted type: {module}.{name}")
             return super().find_class(module, name)
 
     if isinstance(f, (str, os.PathLike)):
@@ -190,7 +184,10 @@ def validate_safe_path(
     """Validate that a path is safe (no traversal, proper symlinks).
 
     Checks that the resolved path stays within base_dir (if specified)
-    and doesn't use symlink tricks for traversal attacks.
+    and doesn't use symlink tricks for traversal attacks. When no base_dir
+    is provided, the function still normalizes the path and applies the
+    symlink policy, but it does not confine absolute paths to the current
+    working directory.
 
     Args:
         path: Input path to validate
@@ -207,7 +204,7 @@ def validate_safe_path(
 
     Security notes:
         - Resolves all .. components to prevent directory traversal
-        - Checks final resolved path is within base_dir
+        - Checks final resolved path is within base_dir when one is provided
         - Symlinks are followed and validated to prevent symlink attacks
         - Used by audio loading and file access utilities
 
@@ -222,43 +219,44 @@ def validate_safe_path(
             base_dir="/data"
         )  # Returns Path("/data/audio/file.wav")
     """
-    # Resolve base directory
-    if base_dir:
-        base_path = Path(base_dir).resolve()
-    else:
-        base_path = Path.cwd()
+    base_path = Path(base_dir).resolve() if base_dir else None
+    resolution_root = base_path or Path.cwd().resolve()
 
     input_path = Path(path)
 
-    # Resolve relative paths against base_dir (not cwd)
-    if not input_path.is_absolute():
-        input_path = base_path / input_path
+    # Resolve relative paths against the explicit base_dir when provided,
+    # otherwise preserve the existing cwd-relative behavior for callers that
+    # already pass local relative paths.
+    candidate_path = input_path if input_path.is_absolute() else resolution_root / input_path
 
-    # Check for symlinks in path components (only within base_dir)
-    if not allow_symlinks and input_path.is_relative_to(base_path):
-        current = base_path
-        parts = input_path.relative_to(base_path).parts
+    current = Path(candidate_path.anchor) if candidate_path.is_absolute() else Path()
+    parts = candidate_path.parts[1:] if candidate_path.is_absolute() else candidate_path.parts
 
-        for part in parts:
-            current = current / part
-            if current.is_symlink():
-                raise ValueError(
-                    f"Symlink detected in path (symlinks disallowed): {current}"
-                )
+    # When a confinement root is provided, reject symlinks inside that controlled
+    # subtree. Without a base_dir we only reject a symlinked final path, because
+    # absolute system paths may legitimately traverse OS-level symlink prefixes
+    # such as /var -> /private/var on macOS.
+    if not allow_symlinks:
+        if base_path is not None and candidate_path.is_relative_to(base_path):
+            for part in parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ValueError(f"Symlink detected in path (symlinks disallowed): {current}")
+        elif candidate_path.is_symlink():
+            raise ValueError(f"Symlink detected in path (symlinks disallowed): {candidate_path}")
 
     # Resolve the full path
     try:
-        resolved = input_path.resolve()
+        resolved = candidate_path.resolve()
     except RuntimeError as e:
         raise RuntimeError(f"Failed to resolve path {path}: {e}") from e
 
     # Check for symlink loops
-    if allow_symlinks:
+    if allow_symlinks and base_path is not None and candidate_path.is_relative_to(base_path):
         symlink_count = 0
-        current_check = base_path
-        check_parts = input_path.relative_to(base_path).parts if input_path.is_relative_to(base_path) else input_path.parts
+        current_check = Path(candidate_path.anchor) if candidate_path.is_absolute() else Path()
 
-        for part in check_parts:
+        for part in parts:
             current_check = current_check / part
             while current_check.is_symlink() and symlink_count < max_symlinks:
                 symlink_count += 1
@@ -266,17 +264,14 @@ def validate_safe_path(
                 current_check = target if target.is_absolute() else current_check.parent / target
 
         if symlink_count >= max_symlinks:
-            raise RuntimeError(
-                f"Too many symlinks (> {max_symlinks}) in path: {path}"
-            )
+            raise RuntimeError(f"Too many symlinks (> {max_symlinks}) in path: {path}")
 
-    # Verify within base directory
-    try:
-        resolved.relative_to(base_path)
-    except ValueError:
-        raise ValueError(
-            f"Path traversal detected: {path} resolves to {resolved} "
-            f"which is outside base directory {base_path}"
-        )
+    if base_path is not None:
+        try:
+            resolved.relative_to(base_path)
+        except ValueError:
+            raise ValueError(
+                f"Path traversal detected: {path} resolves to {resolved} which is outside base directory {base_path}"
+            ) from None
 
     return resolved

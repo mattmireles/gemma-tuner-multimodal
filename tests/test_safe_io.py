@@ -105,6 +105,16 @@ class TestValidateSafePath:
             finally:
                 os.chdir(original_cwd)
 
+    def test_absolute_path_without_base_dir_is_allowed(self):
+        """Absolute paths should not be confined to cwd when no base_dir is set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir, "test.txt")
+            test_file.write_text("test")
+
+            result = validate_safe_path(str(test_file))
+
+            assert result == test_file.resolve()
+
     def test_nested_path(self):
         """Should handle nested directory paths."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -150,21 +160,17 @@ class TestSafePickleLoad:
         finally:
             os.unlink(temp_path)
 
-    def test_blocks_custom_classes(self):
-        """Should block loading of custom class instances."""
-        # Create a pickle with a non-whitelisted class by importing io and creating manually
-        import io
-        import struct
+    def test_blocks_non_whitelisted_classes(self):
+        """Should block loading objects outside the restricted allowlist."""
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            pickle.dump(Path("/tmp/blocked"), f)
+            temp_path = f.name
 
-        # Create a pickle containing a set (which is safe)
-        safe_data = {1, 2, 3}
-        buffer = io.BytesIO()
-        pickle.dump(safe_data, buffer)
-        buffer.seek(0)
-
-        # This should work (set is in SAFE_TYPES)
-        result = safe_pickle_load(buffer)
-        assert result == {1, 2, 3}
+        try:
+            with pytest.raises(pickle.UnpicklingError, match="non-whitelisted"):
+                safe_pickle_load(temp_path)
+        finally:
+            os.unlink(temp_path)
 
     def test_blocks_code_execution(self):
         """Should block pickle payloads that execute code."""

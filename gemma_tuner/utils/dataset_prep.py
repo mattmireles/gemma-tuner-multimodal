@@ -8,6 +8,7 @@ silent synthetic silence).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Optional, Tuple
 
 import librosa
@@ -161,8 +162,15 @@ def load_audio_local_or_gcs(
 
     # Local file path
     try:
-        # Validate path to prevent directory traversal attacks
-        safe_path = validate_safe_path(path_or_audio, allow_symlinks=False)
+        # Relative paths are confined to the current working directory, which
+        # preserves the repo's prepared-CSV convention while still rejecting
+        # traversal out of that tree. Absolute paths remain supported for
+        # documented workflows such as Granary manifests.
+        safe_path = validate_safe_path(
+            path_or_audio,
+            base_dir=str(Path.cwd()) if not Path(path_or_audio).is_absolute() else None,
+            allow_symlinks=False,
+        )
         audio = librosa.load(str(safe_path), sr=sampling_rate)[0]
         return _clip_audio_float32(audio)
     except ValueError as e:
