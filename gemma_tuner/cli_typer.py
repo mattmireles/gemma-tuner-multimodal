@@ -447,7 +447,10 @@ def evaluate(
 
 
 @app.command()
-def export(model_path_or_profile: str = typer.Argument(..., help="Model path or HF id to export")):
+def export(
+    model_path_or_profile: str = typer.Argument(..., help="Model path or HF id to export"),
+    revision: Optional[str] = typer.Option(None, "--revision", help="Optional Hugging Face revision to pin"),
+):
     """Export a model to a portable HF/SafeTensors directory.
 
     Called by:
@@ -458,8 +461,9 @@ def export(model_path_or_profile: str = typer.Argument(..., help="Model path or 
 
     Args:
         model_path_or_profile: Local model directory or Hugging Face model id
+        revision: Optional Hugging Face revision (commit hash, tag, or branch)
     """
-    ops.export(model_path_or_profile)
+    ops.export(model_path_or_profile, model_revision=revision)
 
 
 @app.command()
