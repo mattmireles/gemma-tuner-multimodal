@@ -84,6 +84,8 @@ from gemma_tuner.models.common.collators import (
 from gemma_tuner.models.common.metrics import build_wer_metrics
 from gemma_tuner.models.common.results import persist_training_results
 from gemma_tuner.models.common.utils import install_kw_filter
+from gemma_tuner.models.common.visualizer import VisualizerTrainerCallback
+from gemma_tuner.models.common.viz_trainer import GemmaVizTrainer
 from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.constants import (
     GemmaTrainingConstants,
@@ -96,6 +98,7 @@ from gemma_tuner.models.gemma.family import (
 )
 from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
 from gemma_tuner.utils.device import empty_cache, get_device, to_bool
+from gemma_tuner.utils.integrity import create_integrity_manifest
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
 # The canonical class lives in models/common/collators.py; the local duplicate was
@@ -201,6 +204,23 @@ def resolve_training_torch_compile(device: torch.device, profile_config: dict[st
             )
         return False
     return requested
+
+
+def _finalize_training_artifacts(
+    output_dir: str,
+    *,
+    trainer: Trainer,
+    train_result: Any,
+    modality: str,
+    integrity_metadata: dict[str, Any],
+) -> None:
+    """Write post-training artifacts in the order integrity verification expects."""
+    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
+
+    try:
+        create_integrity_manifest(output_dir, metadata=integrity_metadata)
+    except Exception as e:
+        logger.warning("Failed to create integrity manifest (non-fatal): %s", e)
 
 
 def _discover_candidate_target_modules(model) -> List[str]:
@@ -372,14 +392,18 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     assert_entrypoint_support("finetune", family)
     logger.info("Gemma family: %s for model_id=%s", family.value, model_id)
 
+    model_revision = profile_config.get("model_revision")
+    if model_revision:
+        logger.info(f"Using pinned revision: {model_revision}")
+
     processor = None
     text_tokenizer = None
     if modality == "text":
         logger.info(f"Loading tokenizer (text modality): {model_id}")
-        text_tokenizer = AutoTokenizer.from_pretrained(model_id)
+        text_tokenizer = AutoTokenizer.from_pretrained(model_id, revision=model_revision)
     else:
         logger.info(f"Loading processor ({modality} modality): {model_id}")
-        processor = AutoProcessor.from_pretrained(model_id)
+        processor = AutoProcessor.from_pretrained(model_id, revision=model_revision)
         if modality == "image":
             _itb = int(profile_config.get("image_token_budget", 280))
             apply_image_token_budget_to_processor(processor, _itb)
@@ -414,6 +438,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         family=family,
         torch_dtype=torch_dtype,
         attn_implementation=attn_impl,
+        revision=model_revision,
     )
 
     # LoRA configuration
@@ -646,6 +671,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         except Exception as e:
             logger.warning("enable_input_require_grads() failed (continuing): %s", e)
 
+    _do_viz = bool(profile_config.get("visualize"))
+    _logging_steps = int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS))
+    if _do_viz:
+        # HF only calls TrainerCallback.on_log on the logging_steps schedule; the
+        # dashboard follows that cadence. Force 1 so the visualizer updates every
+        # optimizer step while viz is on (profile logging_steps is ignored).
+        _logging_steps = 1
+        logger.info("Visualization: logging_steps=1 (dashboard updates every training step).")
+
     train_kw = dict(
         output_dir=output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
@@ -655,7 +689,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         learning_rate=learning_rate,
         bf16=use_bf16,
         gradient_checkpointing=gradient_checkpointing,
-        logging_steps=int(profile_config.get("logging_steps", GemmaTrainingConstants.DEFAULT_LOGGING_STEPS)),
+        logging_steps=_logging_steps,
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
         eval_strategy=effective_eval_strategy,
         report_to=[],
@@ -674,7 +708,16 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     # Seed for reproducibility
     set_seed(args.seed)
 
-    trainer = Trainer(
+    trainer_callbacks: List[Any] = []
+    if _do_viz:
+        trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _logging_steps)))
+
+    trainer_cls = GemmaVizTrainer if _do_viz else Trainer
+    trainer_kwargs: dict[str, Any] = {}
+    if _do_viz:
+        trainer_kwargs["visualize"] = True
+
+    trainer = trainer_cls(
         model=model,
         args=args,
         train_dataset=train_ds,
@@ -682,14 +725,44 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         data_collator=data_collator,
         compute_metrics=compute_metrics_fn,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+        callbacks=trainer_callbacks,
+        **trainer_kwargs,
     )
+
+    if _do_viz:
+        for cb in trainer_callbacks:
+            if isinstance(cb, VisualizerTrainerCallback):
+                cb.bind_trainer(trainer)
+        if gradient_checkpointing:
+            logger.info(
+                "Visualization: gradient checkpointing is on; some models omit attention tensors "
+                "when checkpointing — attention heatmaps may stay empty unless the stack returns them."
+            )
 
     logger.info("Starting Gemma LoRA training...")
     train_result = trainer.train()
     logger.info("Training complete. Saving adapter...")
     trainer.save_model()
+    if _do_viz:
+        try:
+            from gemma_tuner.visualizer import broadcast_training_finished
 
-    persist_training_results(output_dir, trainer=trainer, train_result=train_result, modality=modality)
+            broadcast_training_finished()
+        except Exception as e:
+            logger.debug("broadcast_training_finished failed (non-fatal): %s", e)
+
+    _finalize_training_artifacts(
+        output_dir,
+        trainer=trainer,
+        train_result=train_result,
+        modality=modality,
+        integrity_metadata={
+            "model_id": model_id,
+            "dtype": str(torch_dtype),
+            "device": str(device),
+            "modality": modality,
+        },
+    )
 
     empty_cache()
     return {"train_metrics": getattr(train_result, "metrics", {})}

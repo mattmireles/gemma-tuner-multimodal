@@ -35,6 +35,7 @@ from gemma_tuner.models.common.collators import apply_image_token_budget_to_proc
 from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.family import gate_gemma_model
 from gemma_tuner.utils.device import get_device
+from gemma_tuner.utils.integrity import create_integrity_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ logger = logging.getLogger(__name__)
 _ADAPTER_CONFIG_FILENAME = "adapter_config.json"
 
 
-def export_model_dir(model_path_or_profile: str) -> str:
+def export_model_dir(model_path_or_profile: str, model_revision: str | None = None) -> str:
     """Export a trained Gemma model (full or LoRA adapter) to a SafeTensors directory.
 
     Auto-detects whether the source is a LoRA adapter directory or a full model
@@ -56,6 +57,7 @@ def export_model_dir(model_path_or_profile: str) -> str:
 
     Args:
         model_path_or_profile: Local directory path or HuggingFace model id.
+        model_revision: Optional specific model revision (commit hash) to load for reproducibility.
 
     Returns:
         str: Path to the exported model directory.
@@ -83,11 +85,14 @@ def export_model_dir(model_path_or_profile: str) -> str:
         logger.info("Loading base model: %s", base_model_id)
         family = gate_gemma_model(base_model_id, entrypoint="export")
 
+        if model_revision:
+            logger.info("Using pinned revision for export: %s", model_revision)
         base_model = load_base_model_for_gemma(
             base_model_id,
             family=family,
             torch_dtype=torch_dtype,
             attn_implementation="eager",
+            revision=model_revision,
         )
 
         # PeftModel loads the adapter weights on top of the base model, then
@@ -108,11 +113,14 @@ def export_model_dir(model_path_or_profile: str) -> str:
         # --- Full model path or HuggingFace Hub id ---
         logger.info("Loading full model: %s", model_path_or_profile)
         family = gate_gemma_model(str(model_path_or_profile), entrypoint="export")
+        if model_revision:
+            logger.info("Using pinned revision for export: %s", model_revision)
         model = load_base_model_for_gemma(
             str(model_path_or_profile),
             family=family,
             torch_dtype=torch_dtype,
             attn_implementation="eager",
+            revision=model_revision,
         )
         processor_source = model_path_or_profile
 
@@ -124,7 +132,7 @@ def export_model_dir(model_path_or_profile: str) -> str:
     # the exported directory is fully self-contained: any caller can do
     # AutoProcessor.from_pretrained(out_dir) without needing the original source.
     try:
-        processor = AutoProcessor.from_pretrained(processor_source)
+        processor = AutoProcessor.from_pretrained(processor_source, revision=model_revision)
         for meta_base in (source_path, source_path.parent):
             meta_path = meta_base / "metadata.json"
             if not meta_path.is_file():
@@ -156,6 +164,20 @@ def export_model_dir(model_path_or_profile: str) -> str:
     logger.info("  Dtype  : %s", torch_dtype)
     logger.info("  Params : %s", f"{sum(p.numel() for p in model.parameters()):,}")
 
+    # Create integrity manifest for exported model
+    try:
+        create_integrity_manifest(
+            out_dir,
+            metadata={
+                "source": str(model_path_or_profile),
+                "dtype": str(torch_dtype),
+                "device": str(device),
+                "is_lora_adapter": adapter_config_path.exists(),
+            },
+        )
+    except Exception as e:
+        logger.warning("Failed to create integrity manifest (non-fatal): %s", e)
+
     return out_dir
 
 
@@ -164,5 +186,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Export a model to HF/SafeTensors directory")
     parser.add_argument("model", help="Path or model id to export")
+    parser.add_argument(
+        "--revision",
+        dest="model_revision",
+        default=None,
+        help="Specific model revision (commit hash) to load for reproducible export",
+    )
     args = parser.parse_args()
-    export_model_dir(args.model)
+    export_model_dir(args.model, model_revision=args.model_revision)

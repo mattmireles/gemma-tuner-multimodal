@@ -3,544 +3,580 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎆 Gemma Training Visualizer - Watch AI Learn</title>
-    
-    <!-- Socket.IO for real-time communication -->
+    <title>gemma · training</title>
+
     <script src="{{ asset_paths.socketio }}"></script>
-    
-    <!-- Three.js for 3D graphics -->
     <script src="{{ asset_paths.threejs }}"></script>
-    
-    <!-- Chart.js for 2D plots -->
     <script src="{{ asset_paths.chartjs }}"></script>
-    
-    <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="{{ asset_paths.fontawesome_css }}">
-    
+
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        /* ---------------------------------------------------------------
+           gemma training visualizer
+           a window onto a model learning. black room, one warm light.
+           --------------------------------------------------------------- */
+
+        :root {
+            --bg:        #000000;
+            --ink:       #F5F5F0;   /* warm off-white, primary text */
+            --ink-2:     #8A8A85;   /* secondary */
+            --ink-3:     #3A3A38;   /* tertiary, gridlines, hairlines */
+            --amber:     #FFB000;   /* the one signature color */
+            --amber-dim: rgba(255, 176, 0, 0.55);
+            --amber-glow:rgba(255, 176, 0, 0.08);
+            --rose:      #FF4D6D;   /* reserved for danger states only */
+
+            --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                    "Helvetica Neue", system-ui, sans-serif;
+            --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo,
+                    Consolas, monospace;
         }
-        
-        body {
-            background: #000000;
-            color: #FFFFFF;
-            font-family: 'Courier New', monospace;
-            overflow-x: hidden;
-            position: relative;
-        }
-        
-        /* Animated background particles */
-        #particles-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
             height: 100%;
-            z-index: -1;
-            opacity: 0.6;
-        }
-        
-        /* Header */
-        .header {
-            text-align: center;
-            padding: 15px;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            border-bottom: 2px solid transparent;
-            border-image: linear-gradient(90deg, #FF00CC, #9933CC, #0099FF) 1;
-            position: relative;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--sans);
+            font-weight: 400;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
             overflow: hidden;
         }
-        
-        .header h1 {
-            font-size: 2em;
-            margin: 10px 0;
-            position: relative;
-            display: inline-block;
+
+        /* Tabular figures everywhere a number can change. */
+        .num {
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
         }
-        
-        /* Glow effect behind the text */
-        .header h1::before {
-            content: '🎆 Gemma Training Visualizer 🎆';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -1;
-            background: linear-gradient(135deg, #FF00CC, #9933CC, #0099FF);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            filter: blur(20px);
-            opacity: 0.8;
-            animation: glow 2s ease-in-out infinite alternate;
-        }
-        
-        /* The actual text on top */
-        .header h1 span {
-            position: relative;
-            background: linear-gradient(135deg, #FF00CC, #9933CC, #0099FF);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            z-index: 1;
-        }
-        
-        @keyframes glow {
-            from { 
-                filter: blur(20px);
-                transform: scale(1);
-            }
-            to { 
-                filter: blur(30px);
-                transform: scale(1.05);
-            }
-        }
-        
-        .stats-bar {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 8px;
-            font-size: 0.85em;
-            flex-wrap: wrap;
-        }
-        
-        .stat {
-            padding: 4px 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 15px;
-            transition: all 0.3s;
-        }
-        
-        .stat:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.05);
-        }
-        
-        .stat-value {
-            font-weight: bold;
-            color: #FF00CC;
-            text-shadow: 0 0 5px rgba(255, 0, 204, 0.5);
-        }
-        
-        /* Main dashboard grid - constrained to viewport */
-        .dashboard {
+
+        /* The legacy FPS counter is kept (the JS writes to it) but hidden.
+           A serious instrument does not advertise its frame rate. */
+        .fps-counter { display: none; }
+        #fps-value { display: none; }
+
+        /* ---------------------------------------------------------------
+           layout — single viewport, no scroll, four bands of life
+           --------------------------------------------------------------- */
+
+        .stage {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            grid-template-rows: repeat(3, 1fr); /* Evenly distribute height */
-            gap: 10px;
-            padding: 10px;
-            max-width: 100vw;
-            height: calc(100vh - 140px); /* Account for header */
-            margin: 0 auto;
-            overflow: hidden; /* No scrolling - everything fits */
+            grid-template-rows: auto auto 1fr auto;
+            height: 100vh;
+            padding: 28px 36px 24px;
+            gap: 18px;
         }
-        
-        .viz-panel {
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 8px;
-            backdrop-filter: blur(10px);
-            position: relative;
-            min-height: 0; /* Allow shrinking */
-            transition: all 0.3s;
-            overflow: hidden;
+
+        /* ---- band 1: wordmark + meta ---- */
+
+        .topbar {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--ink-3);
+            padding-bottom: 14px;
+        }
+
+        .wordmark {
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.18em;
+            text-transform: lowercase;
+            color: var(--ink-2);
+        }
+        .wordmark .dot {
+            color: var(--amber);
+            margin: 0 0.5em;
+        }
+
+        .meta {
+            display: flex;
+            gap: 28px;
+            font-size: 12px;
+            color: var(--ink-2);
+            letter-spacing: 0.04em;
+        }
+        .meta .label {
+            text-transform: lowercase;
+            margin-right: 8px;
+            color: var(--ink-3);
+        }
+        .meta .num {
+            color: var(--ink);
+            font-size: 12px;
+        }
+
+        /* ---- band 2: hero — the heartbeat ---- */
+
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(280px, 1fr) 2fr;
+            gap: 36px;
+            align-items: end;
+            padding-top: 8px;
+        }
+
+        .heartbeat {
             display: flex;
             flex-direction: column;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            justify-content: flex-end;
+            min-height: 0;
         }
-        
-        .viz-panel:hover {
-            border: 1px solid transparent;
-            border-image: linear-gradient(135deg, #FF00CC, #9933CC, #0099FF) 1;
-            box-shadow: 0 0 30px rgba(255, 0, 204, 0.3);
-            transform: translateY(-5px);
+
+        .heartbeat .loss-value {
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+            font-size: clamp(72px, 11vw, 168px);
+            line-height: 0.92;
+            letter-spacing: -0.04em;
+            font-weight: 300;
+            color: var(--ink);
+            transition: color 220ms ease;
         }
-        
-        .panel-title {
-            font-size: 1.1em;
-            margin-bottom: 8px;
-            color: #FFFFFF;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
+        .heartbeat .loss-value.is-rising {
+            color: var(--rose);
         }
-        
-        .panel-title i {
-            background: linear-gradient(135deg, #FF00CC, #0099FF);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+        .heartbeat .loss-label {
+            margin-top: 4px;
+            font-size: 11px;
+            letter-spacing: 0.18em;
+            text-transform: lowercase;
+            color: var(--ink-3);
         }
-        
-        /* 3D Neural Network Container */
-        #neural-network-3d {
-            width: 100%;
+        .heartbeat .caption {
+            margin-top: 22px;
+            font-size: 22px;
+            font-weight: 300;
+            letter-spacing: -0.005em;
+            color: var(--ink);
+        }
+        .heartbeat .caption .verb {
+            color: var(--amber);
+        }
+
+        /* ---- the learning curve, the second protagonist ----
+
+           Same typographic register as the room panels: a hairline divider
+           on top, then a `panel-title` + `panel-subtitle` pair, then the
+           canvas. This is the change that makes the chart legible — without
+           the title the curve was a big nameless object on the right side
+           of the hero. */
+
+        .curve {
             position: relative;
-            cursor: grab;
-            flex: 1;
-            min-height: 0; /* Allow shrinking */
+            min-height: 0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            border-top: 1px solid var(--ink-3);
+            padding-top: 12px;
         }
-        
-        #neural-network-3d:active {
-            cursor: grabbing;
-        }
-        
-        /* Canvas styles */
-        canvas {
-            max-width: 100%;
-            height: auto !important;
-            flex: 1;
-            min-height: 0; /* Allow shrinking */
-        }
-        
-        /* Loss landscape specific */
-        .loss-landscape {
-            grid-column: span 2;
-            max-width: 100%;
-        }
-        
-        /* Attention heatmap */
-        #attention-heatmap {
-            width: 100%;
+        .curve .curve-frame {
             position: relative;
             flex: 1;
             min-height: 0;
         }
-        
-        /* Token probability cloud */
+        .curve canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+
+        /* ---- band 3: the room — three windows + a quiet column ----
+
+           Flexbox (not grid) so that toggling a panel off via the dock
+           lets the surviving panels reflow and fill the space. With grid
+           the column would persist as an empty gap. */
+
+        .room {
+            display: flex;
+            gap: 18px;
+            min-height: 0;
+        }
+        .room > .panel.network     { flex: 1.6 1 0; min-width: 0; }
+        .room > .panel.attention   { flex: 1 1 0;   min-width: 0; }
+        .room > .panel.spectrogram { flex: 1 1 0;   min-width: 0; }
+        .room > .diagnostics       { flex: 1 1 0;   min-width: 0; }
+
+        .panel {
+            position: relative;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            border-top: 1px solid var(--ink-3);
+            padding-top: 12px;
+        }
+
+        .panel-title {
+            font-size: 11px;
+            letter-spacing: 0.16em;
+            text-transform: lowercase;
+            color: var(--ink-2);
+            margin-bottom: 4px;
+        }
+        .panel-subtitle {
+            font-size: 11px;
+            color: var(--ink-3);
+            margin-bottom: 12px;
+            letter-spacing: 0.01em;
+        }
+        .panel-body {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* the 3D network — give it room and stillness */
+        #neural-network-3d {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            cursor: grab;
+        }
+        #neural-network-3d:active { cursor: grabbing; }
+        #neural-network-3d canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* attention canvas */
+        #attention-heatmap { flex: 1; min-height: 0; position: relative; }
+        #attention-canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+            image-rendering: pixelated;
+            opacity: 0.92;
+        }
+
+        /* spectrogram */
+        #spectrogram-canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+            flex: 1;
+            min-height: 0;
+            image-rendering: pixelated;
+            opacity: 0.92;
+        }
+
+        /* the diagnostics column (stacked) */
+        .diagnostics {
+            display: grid;
+            grid-template-rows: 1fr 1fr 1fr;
+            gap: 14px;
+            min-height: 0;
+        }
+        .dx {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            border-top: 1px solid var(--ink-3);
+            padding-top: 10px;
+        }
+        .dx .panel-title {
+            margin-bottom: 4px;
+        }
+        /* A diagnostic panel's headline number — the single value that
+           says "this is the thing right now" before the eye drops to the
+           sparkline for the trajectory. Same monospace tabular-figures
+           register as the heartbeat, just smaller. */
+        .dx .dx-value {
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+            font-size: 22px;
+            line-height: 1;
+            letter-spacing: -0.01em;
+            color: var(--ink);
+            margin-bottom: 6px;
+        }
+        .dx .dx-value .unit {
+            font-size: 0.5em;
+            color: var(--ink-3);
+            letter-spacing: 0.12em;
+            margin-left: 2px;
+        }
+        .dx canvas {
+            flex: 1;
+            min-height: 0;
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+
+        /* ---- band 4: tokens row — what it's about to say ---- */
+
+        .saying {
+            border-top: 1px solid var(--ink-3);
+            padding-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-height: 0;
+            max-height: 110px;
+        }
+        .saying .panel-title { margin-bottom: 0; }
         .token-cloud {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-            padding: 8px;
-            align-items: center;
-            justify-content: center;
-            overflow-y: auto;
-            flex: 1;
-            min-height: 0;
-        }
-        
-        .token {
-            padding: 8px 15px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 0, 204, 0.5);
-            border-radius: 20px;
-            font-size: 0.9em;
-            animation: pulse 2s infinite;
-            transition: all 0.3s;
-            color: #FFFFFF;
-        }
-        
-        .token:hover {
-            transform: scale(1.2);
-            background: rgba(255, 0, 204, 0.3);
-            border-color: #FF00CC;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
-        }
-        
-        /* Spectrogram display */
-        #spectrogram-canvas {
-            width: 100%;
-            image-rendering: pixelated;
-            flex: 1;
-            min-height: 0;
-        }
-        
-        /* Memory wave */
-        .memory-wave {
-            position: relative;
+            gap: 10px 18px;
+            align-items: baseline;
             overflow: hidden;
-            flex: 1;
-            min-height: 0;
         }
-        
-        .wave {
-            position: absolute;
-            bottom: 0;
-            width: 200%;
-            height: 100%;
-            background: linear-gradient(180deg, transparent, rgba(0, 255, 136, 0.4));
-            animation: wave-animation 3s infinite linear;
-        }
-        
-        @keyframes wave-animation {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
-        }
-        
-        /* Control panel */
-        .controls {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            display: flex;
-            gap: 10px;
-            z-index: 1000;
-        }
-        
-        .control-btn {
-            padding: 10px 20px;
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #FFFFFF;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-family: 'Courier New', monospace;
-            font-weight: bold;
-            backdrop-filter: blur(10px);
-        }
-        
-        .control-btn:hover {
-            border: 1px solid transparent;
-            border-image: linear-gradient(135deg, #FF00CC, #0099FF) 1;
-            transform: scale(1.1);
-            box-shadow: 0 0 20px rgba(255, 0, 204, 0.3);
-        }
-        
-        .control-btn.active {
-            background: linear-gradient(135deg, #FF00CC, #0099FF);
-            color: #FFFFFF;
+        .token {
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+            font-size: 13px;
+            color: var(--ink);
             border: none;
+            background: none;
+            padding: 0;
+            transition: opacity 240ms ease, color 240ms ease;
+            animation: none;
         }
-        
-        /* Loading animation */
-        .loading {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 2em;
-            animation: spin 2s linear infinite;
-            z-index: 2000;
+        .token::after {
+            content: "·";
+            color: var(--ink-3);
+            margin-left: 18px;
         }
-        
-        @keyframes spin {
-            0% { transform: translate(-50%, -50%) rotate(0deg); }
-            100% { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-        
-        /* Particle explosion effect */
+        .token:last-child::after { content: ""; }
+
+        /* ---- ambient: a single particle from the explosion effect ---- */
+
         .particle {
             position: absolute;
-            width: 4px;
-            height: 4px;
-            background: #FF00CC;
+            width: 3px;
+            height: 3px;
+            background: var(--amber);
             border-radius: 50%;
             pointer-events: none;
-            box-shadow: 0 0 6px rgba(255, 0, 204, 0.8);
+            box-shadow: 0 0 6px rgba(255, 176, 0, 0.6);
         }
-        
-        /* FPS counter */
-        .fps-counter {
+
+        /* ---- the dock — quiet, lower-right, recedes when idle ---- */
+
+        .controls {
             position: fixed;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 5px 10px;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 5px;
-            font-size: 0.9em;
-            z-index: 1000;
-            backdrop-filter: blur(10px);
-            color: #FFFFFF;
+            bottom: 18px;
+            right: 24px;
+            display: flex;
+            gap: 14px;
+            z-index: 100;
+            opacity: 0.35;
+            transition: opacity 360ms ease;
         }
-        
-        /* Responsive adjustments */
-        @media (max-width: 1400px) {
-            .dashboard {
-                grid-template-columns: repeat(2, 1fr);
-            }
+        .controls:hover,
+        .controls:focus-within { opacity: 1; }
+
+        .control-btn {
+            background: none;
+            border: none;
+            color: var(--ink-3);
+            font-family: var(--sans);
+            font-size: 11px;
+            font-weight: 400;
+            letter-spacing: 0.14em;
+            text-transform: lowercase;
+            cursor: pointer;
+            padding: 6px 4px;
+            transition: color 180ms ease;
         }
-        
-        @media (max-width: 768px) {
-            .dashboard {
-                grid-template-columns: 1fr;
-                padding: 10px;
-                max-height: calc(100vh - 120px);
-            }
-            
-            .viz-panel {
-                min-height: 250px;
-                max-height: 300px;
-            }
-            
-            .loss-landscape {
-                grid-column: span 1;
-            }
-            
-            .header h1 {
-                font-size: 1.5em;
-            }
-            
-            .stats-bar {
-                gap: 8px;
-            }
+        .control-btn:hover { color: var(--ink-2); }
+        .control-btn.active { color: var(--amber); }
+        /* Buttons render as plain text — the JS used to inject FontAwesome
+           <i> tags into innerHTML; the modern handlers use textContent and
+           any stale <i> elements that slip through stay invisible. */
+        .control-btn i { display: none; }
+        .control-btn:disabled {
+            opacity: 0.25;
+            cursor: default;
+            pointer-events: none;
         }
-        
-        /* For very large screens, use 3 columns */
-        @media (min-width: 1600px) {
-            .dashboard {
-                grid-template-columns: repeat(3, 1fr);
+
+        /* ---- the empty room: shown until the first step lands ---- */
+
+        .loading {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            z-index: 200;
+            font-family: var(--sans);
+            font-size: 13px;
+            letter-spacing: 0.18em;
+            text-transform: lowercase;
+            color: var(--ink-3);
+            transition: opacity 600ms ease;
+        }
+        .loading i { display: none; }
+        .loading::before {
+            content: "your machine is getting ready";
+            color: var(--ink-2);
+            animation: breathe 2.6s ease-in-out infinite;
+        }
+        @keyframes breathe {
+            0%, 100% { opacity: 0.35; }
+            50%      { opacity: 0.85; }
+        }
+
+        /* ---- accessibility: honor prefers-reduced-motion ---- */
+
+        @media (prefers-reduced-motion: reduce) {
+            /* The empty-room caption stops breathing — it just sits, fully lit. */
+            .loading::before {
+                animation: none;
+                opacity: 0.85;
             }
+            /* The heartbeat number changes color but does not transition. */
+            .heartbeat .loss-value { transition: none; }
+            /* No tween on the token cloud either. */
+            .token { transition: none; }
+            /* The control dock stops easing on hover. */
+            .control-btn { transition: none; }
+            /* The 3D network's rotation/pulse is gated in JS via
+               window.matchMedia('(prefers-reduced-motion: reduce)'). */
+        }
+
+        /* ---- responsive: collapse the room on narrow screens ---- */
+
+        @media (max-width: 1280px) {
+            .room { grid-template-columns: 1.4fr 1fr 1fr; }
+            .room .panel.spectrogram { display: none; }
+        }
+        @media (max-width: 960px) {
+            .stage { padding: 20px 22px 18px; gap: 14px; }
+            .hero { grid-template-columns: 1fr; gap: 18px; }
+            .heartbeat .loss-value { font-size: 88px; }
+            .room { grid-template-columns: 1fr 1fr; }
+            .room .panel.attention { display: none; }
+            .meta { gap: 16px; font-size: 11px; }
+            .saying { display: none; }
         }
     </style>
 </head>
 <body>
-    <!-- Background particles canvas -->
-    <canvas id="particles-bg"></canvas>
-    
-    <!-- Loading indicator -->
-    <div class="loading" id="loading">
-        <i class="fas fa-spinner"></i>
-    </div>
-    
-    <!-- FPS Counter -->
-    <div class="fps-counter">
-        FPS: <span id="fps-value">60</span>
-    </div>
-    
-    <!-- Header -->
-    <header class="header">
-        <h1><span>🎆 Gemma Training Visualizer 🎆</span></h1>
-        <div class="stats-bar">
-            <div class="stat">
-                <i class="fas fa-microchip"></i> Device: <span class="stat-value" id="device-name">MPS</span>
+    <!-- the empty room, shown until the first step arrives -->
+    <div class="loading" id="loading"><i></i></div>
+
+    <!-- legacy FPS counter (hidden via CSS, JS still writes to it) -->
+    <div class="fps-counter">FPS: <span id="fps-value">60</span></div>
+
+    <main class="stage">
+        <!-- band 1 — wordmark + meta -->
+        <header class="topbar">
+            <div class="wordmark">gemma<span class="dot">·</span>training</div>
+            <div class="meta">
+                <div><span class="label">step</span><span class="num" id="step-count">0</span></div>
+                <div><span class="label">epoch</span><span class="num" id="epoch-count">0</span></div>
+                <div><span class="label">rate</span><span class="num" id="speed">0</span><span class="label" style="margin-left:6px">/s</span></div>
+                <div><span class="label">device</span><span class="num" id="device-name">—</span></div>
+                <div><span class="label">params</span><span class="num" id="param-count">—</span></div>
             </div>
-            <div class="stat">
-                <i class="fas fa-brain"></i> Parameters: <span class="stat-value" id="param-count">0</span>
+        </header>
+
+        <!-- band 2 — hero: heartbeat + learning curve -->
+        <section class="hero">
+            <div class="heartbeat">
+                <div class="loss-value num" id="loss-value">—</div>
+                <div class="loss-label">loss</div>
+                <div class="caption">
+                    Your machine is <span class="verb" id="hero-verb">getting ready</span>.
+                </div>
             </div>
-            <div class="stat">
-                <i class="fas fa-clock"></i> Step: <span class="stat-value" id="step-count">0</span>
+            <div class="curve">
+                <div class="panel-title">loss · over time</div>
+                <div class="panel-subtitle">how wrong the model still is, step by step</div>
+                <div class="curve-frame">
+                    <canvas id="loss-chart"></canvas>
+                </div>
             </div>
-            <div class="stat">
-                <i class="fas fa-layer-group"></i> Epoch: <span class="stat-value" id="epoch-count">0</span>
+        </section>
+
+        <!-- band 3 — the room: three windows + a diagnostics column -->
+        <section class="room">
+            <div class="panel network">
+                <div class="panel-title">inside the model</div>
+                <div class="panel-subtitle">lit by the gradients flowing through it</div>
+                <div class="panel-body">
+                    <div id="neural-network-3d"></div>
+                </div>
             </div>
-            <div class="stat">
-                <i class="fas fa-tachometer-alt"></i> Speed: <span class="stat-value" id="speed">0</span> steps/s
+
+            <div class="panel attention">
+                <div class="panel-title">what it's looking at</div>
+                <div class="panel-subtitle">attention across the input</div>
+                <div class="panel-body">
+                    <div id="attention-heatmap">
+                        <canvas id="attention-canvas"></canvas>
+                    </div>
+                </div>
             </div>
-        </div>
-    </header>
-    
-    <!-- Main dashboard -->
-    <div class="dashboard">
-        <!-- 3D Neural Network -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-network-wired"></i>
-                Neural Network Galaxy
+
+            <!-- Audio panel is default-hidden. Auto-revealed by the JS when
+                 the first mel_spectrogram payload arrives; text-only runs
+                 never see it. The dock "audio" button still force-shows. -->
+            <div class="panel spectrogram" style="display: none;">
+                <div class="panel-title">listening</div>
+                <div class="panel-subtitle">audio it's processing right now</div>
+                <div class="panel-body">
+                    <canvas id="spectrogram-canvas"></canvas>
+                </div>
             </div>
-            <div id="neural-network-3d"></div>
-        </div>
-        
-        <!-- Loss Landscape -->
-        <div class="viz-panel loss-landscape">
-            <div class="panel-title">
-                <i class="fas fa-mountain"></i>
-                Loss Landscape
+
+            <div class="diagnostics">
+                <div class="dx">
+                    <div class="panel-title">signal strength</div>
+                    <div class="dx-value num" id="gradient-value">—</div>
+                    <canvas id="gradient-chart"></canvas>
+                </div>
+                <div class="dx">
+                    <div class="panel-title">step size</div>
+                    <div class="dx-value num" id="lr-value">—</div>
+                    <canvas id="lr-chart"></canvas>
+                </div>
+                <div class="dx">
+                    <div class="panel-title">memory</div>
+                    <div class="dx-value num" id="memory-value">—<span class="unit"> gb</span></div>
+                    <canvas id="memory-chart"></canvas>
+                </div>
             </div>
-            <canvas id="loss-chart"></canvas>
-        </div>
-        
-        <!-- Gradient Flow -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-water"></i>
-                Gradient Flow
-            </div>
-            <canvas id="gradient-chart"></canvas>
-        </div>
-        
-        <!-- Attention Heatmap -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-fire"></i>
-                Attention Heatmap
-            </div>
-            <div id="attention-heatmap">
-                <canvas id="attention-canvas"></canvas>
-            </div>
-        </div>
-        
-        <!-- Audio Spectrogram -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-waveform"></i>
-                Audio Spectrogram
-            </div>
-            <canvas id="spectrogram-canvas"></canvas>
-        </div>
-        
-        <!-- Token Probabilities -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-dice"></i>
-                Token Probability Cloud
-            </div>
+        </section>
+
+        <!-- band 4 — what it's about to say -->
+        <section class="saying">
+            <div class="panel-title">what it's about to say</div>
             <div class="token-cloud" id="token-cloud"></div>
-        </div>
-        
-        <!-- Memory Usage -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-memory"></i>
-                Memory Pulse
-            </div>
-            <div class="memory-wave">
-                <div class="wave"></div>
-                <canvas id="memory-chart"></canvas>
-            </div>
-        </div>
-        
-        <!-- Learning Rate -->
-        <div class="viz-panel">
-            <div class="panel-title">
-                <i class="fas fa-adjust"></i>
-                Learning Rate Dance
-            </div>
-            <canvas id="lr-chart"></canvas>
-        </div>
-    </div>
-    
-    <!-- Control buttons -->
+        </section>
+    </main>
+
+    <!-- the dock -->
     <div class="controls">
-        <button class="control-btn" id="pause-btn">
-            <i class="fas fa-pause"></i> Pause
-        </button>
-        <button class="control-btn" id="sound-btn">
-            <i class="fas fa-volume-up"></i> Sound
-        </button>
-        <button class="control-btn" id="fullscreen-btn">
-            <i class="fas fa-expand"></i> Fullscreen
-        </button>
-        <button class="control-btn" id="toggle-3d">
-            <i class="fas fa-cube"></i> 3D
-        </button>
-        <button class="control-btn" id="toggle-attn">
-            <i class="fas fa-fire"></i> Attention
-        </button>
-        <button class="control-btn" id="toggle-tokens">
-            <i class="fas fa-dice"></i> Tokens
-        </button>
-        <button class="control-btn" id="toggle-spec">
-            <i class="fas fa-waveform"></i> Spectrogram
-        </button>
+        <button class="control-btn" id="pause-btn">pause</button>
+        <button class="control-btn" id="sound-btn">sound</button>
+        <button class="control-btn" id="fullscreen-btn">fullscreen</button>
+        <button class="control-btn" id="toggle-3d">model</button>
+        <button class="control-btn" id="toggle-attn">attention</button>
+        <button class="control-btn" id="toggle-tokens">tokens</button>
+        <button class="control-btn" id="toggle-spec">audio</button>
+        <button class="control-btn" id="record-btn">record</button>
     </div>
-    
-    <!-- Load the main visualization script with cache busting -->
-    <script src="/static/visualizer.js?v=3"></script>
+
+    <script src="/static/vendor/gifenc/gifenc.global.js?v=1"></script>
+    <script src="/static/viz/status.js?v=1"></script>
+    <script src="/static/viz/gemma-viz-state.js?v=5"></script>
+    <script src="/static/viz/gemma-viz-charts.js?v=4"></script>
+    <script src="/static/viz/gemma-viz-scene.js?v=2"></script>
+    <script src="/static/viz/gemma-viz-panels.js?v=1"></script>
+    <script src="/static/viz/gemma-viz-recording.js?v=4"></script>
+    <script src="/static/viz/gemma-viz-app.js?v=7"></script>
 </body>
 </html>

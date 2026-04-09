@@ -168,6 +168,7 @@ class ProfileConfig:
     # ── CLI-injected keys (set after config load) ──
 
     model_name_or_path: Optional[str] = _UNSET  # type: ignore[assignment]
+    model_revision: Optional[str] = _UNSET  # type: ignore[assignment]
     split: Optional[str] = _UNSET  # type: ignore[assignment]
 
     # ── Wizard-only keys ──

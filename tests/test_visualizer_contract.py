@@ -1,8 +1,12 @@
 from pathlib import Path
 
+import pytest
 import torch
+from flask import Flask
+from flask_socketio import SocketIO
 
 from gemma_tuner.visualization.events import build_training_event
+from gemma_tuner.visualization.payload import finalize_training_payload
 
 
 def test_visualizer_template_uses_local_assets_only():
@@ -37,10 +41,22 @@ def test_build_training_event_extracts_bounded_payload():
         architecture={"encoder_layers": 12},
     )
 
-    payload = event.as_payload()
+    payload = finalize_training_payload(event.as_payload())
+    assert payload["viz_schema_version"] == 1
+    assert "panels_status" in payload
     assert payload["step"] == 10
     assert len(payload["attention"]) == 20
     assert len(payload["attention"][0]) == 20
     assert len(payload["token_probs"]["values"]) == 5
     assert payload["optimizer_stats"]["lr"] == 0.01
     assert payload["optimizer_stats"]["weight_decay"] == 0.1
+
+
+def test_flask_socketio_emit_must_not_use_broadcast_kwarg():
+    """Regression: ``broadcast=`` is not valid on ``SocketIO.emit`` (Flask-SocketIO 5)."""
+    app = Flask(__name__)
+    sio = SocketIO(app, async_mode="threading")
+    with app.app_context():
+        with pytest.raises(TypeError, match="broadcast"):
+            sio.emit("training_update", {"step": 1}, namespace="/", broadcast=True)
+        sio.emit("training_update", {"step": 1}, namespace="/")
