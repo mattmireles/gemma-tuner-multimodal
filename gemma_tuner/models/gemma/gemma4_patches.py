@@ -44,6 +44,32 @@ def apply_clippable_linear_patch() -> None:
                 self.register_buffer("output_min", torch.tensor(-float("inf")))
                 self.register_buffer("output_max", torch.tensor(float("inf")))
 
+        @property
+        def linear(self) -> "PatchedGemma4ClippableLinear":
+            # Compatibility shim: upstream ``transformers.models.gemma4.modeling_gemma4``
+            # reads ``self.ffw_layer_1.linear.weight.dtype`` (and similar patterns
+            # for ``linear_start`` / ``post`` in the audio / vision tower blocks)
+            # on the assumption that ``Gemma4ClippableLinear`` still wraps an
+            # inner ``self.linear = nn.Linear(...)`` submodule. After this patch
+            # the class IS an ``nn.Linear``, so that attribute access would
+            # ``AttributeError`` without this shim, aborting the forward pass:
+            #
+            #   File "transformers/models/gemma4/modeling_gemma4.py", line 392,
+            #     in forward
+            #     gradient_clipping = min(
+            #         self.gradient_clipping,
+            #         torch.finfo(self.ffw_layer_1.linear.weight.dtype).max,
+            #     )
+            #   AttributeError: 'PatchedGemma4ClippableLinear' object has no
+            #     attribute 'linear'
+            #
+            # Returning ``self`` makes ``self.linear.weight`` resolve to
+            # ``self.weight`` — same tensor, same dtype. Defined as a
+            # ``@property`` (not a submodule) so it is not registered in
+            # ``self._modules`` and does not create a self-referential entry in
+            # ``named_modules`` / state-dict iteration.
+            return self
+
         def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
             if self.use_clipped_linears:
                 hidden_states = torch.clamp(hidden_states, self.input_min, self.input_max)

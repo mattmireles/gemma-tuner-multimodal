@@ -23,8 +23,18 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# IMPORTANT: bootstrap must import before torch so that
+# ``PYTORCH_MPS_HIGH_WATERMARK_RATIO`` and ``PYTORCH_MPS_LOW_WATERMARK_RATIO``
+# are both set (with ``low < high``) before the MPS allocator initialises.
+# Without this, PyTorch 2.11 on a fresh MPS environment can compute a
+# low-watermark ratio of ``1.4`` (greater than 1 = illegal) and abort
+# ``model.to("mps")`` with ``RuntimeError: invalid low watermark ratio 1.4``.
+# ``gemma_tuner/cli_typer.py`` imports bootstrap first for the same reason;
+# standalone tool scripts must do the same.
+import gemma_tuner.core.bootstrap  # noqa: F401  # side-effect: MPS env setup
+
 import torch
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoProcessor
 
 try:
     from peft import PeftModel
@@ -42,8 +52,10 @@ try:
 except Exception:
     load_audio_local_or_gcs = None
 
+from gemma_tuner.models.common.collators import inject_mm_token_type_ids
+from gemma_tuner.models.gemma.base_model_loader import load_base_model_for_gemma
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
-from gemma_tuner.models.gemma.family import gate_gemma_model
+from gemma_tuner.models.gemma.family import family_capabilities, gate_gemma_model
 
 # Canonical device selection (MPS > CUDA > CPU) from shared utils
 from gemma_tuner.utils.device import get_device, probe_bfloat16
@@ -74,7 +86,8 @@ def main() -> int:
         print("[ERROR] jiwer not installed. Run: pip install jiwer")
         return 2
 
-    gate_gemma_model(args.model, entrypoint="eval_gemma_asr")
+    family = gate_gemma_model(args.model, entrypoint="eval_gemma_asr")
+    caps = family_capabilities(family)
 
     device = get_device()
 
@@ -82,11 +95,11 @@ def main() -> int:
     dtype = torch.bfloat16 if probe_bfloat16(device) else torch.float32
 
     processor = AutoProcessor.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_base_model_for_gemma(
         args.model,
+        family=family,
         torch_dtype=dtype,
         attn_implementation="eager",
-        low_cpu_mem_usage=True,
     )
     if args.adapters and PeftModel is not None:
         model = PeftModel.from_pretrained(model, args.adapters)
@@ -139,6 +152,8 @@ def main() -> int:
                 padding=True,
                 sampling_rate=sr,
             )
+            if caps["needs_mm_token_type_ids_injection"]:
+                inject_mm_token_type_ids(enc)
             enc = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in enc.items()}
 
             # Generate
