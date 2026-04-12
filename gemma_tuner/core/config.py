@@ -272,7 +272,7 @@ def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> "P
         configparser.NoOptionError: If required model/dataset keys missing from profile
 
     Example:
-        >>> cfg = configparser.ConfigParser()
+        >>> cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         >>> cfg.read("config.ini")
         >>> config = load_profile_config(cfg, "gemma-3n-custom")
         >>> print(config["base_model"])  # "google/gemma-3n-e4b-it" (from model section)
@@ -407,7 +407,7 @@ def _load_model_dataset_config_dict(cfg: configparser.ConfigParser, model_name: 
                                     needed for group configuration resolution
 
     Example:
-        >>> cfg = configparser.ConfigParser()
+        >>> cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         >>> cfg.read("config.ini")
         >>> config = load_model_dataset_config(cfg, "gemma-3n", "custom-dataset")
         >>> # Results in merged config with Gemma group defaults, gemma-3n model

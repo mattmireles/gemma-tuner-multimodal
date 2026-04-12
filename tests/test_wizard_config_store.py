@@ -11,7 +11,7 @@ def test_add_dataset_to_config_sets_required_defaults(tmp_path, monkeypatch):
 
     wizard_config._add_dataset_to_config("bq-sample", "text_perfect")
 
-    cfg = configparser.ConfigParser()
+    cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cfg.read(config_path)
 
     assert cfg.get("dataset:bq-sample", "source") == "bq-sample"

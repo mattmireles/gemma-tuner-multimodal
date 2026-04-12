@@ -390,7 +390,7 @@ def execute_training(profile_config: Dict[str, Any]):
 
     # New configuration generation with selective section copying
     # Preserves essential configuration structure while adding wizard profile
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
 
     # DEFAULT section preservation for global training parameters
     # ConfigParser treats DEFAULT as special - not returned by sections() but contains

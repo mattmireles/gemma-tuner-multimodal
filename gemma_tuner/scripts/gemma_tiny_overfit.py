@@ -28,7 +28,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # Load profile
-    cfg = configparser.ConfigParser()
+    cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cfg.read(args.config)
     profile = load_profile_config(cfg, args.profile)
     # Apply tiny limits and stability settings
