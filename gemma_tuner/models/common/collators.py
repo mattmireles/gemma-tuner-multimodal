@@ -611,17 +611,13 @@ class DataCollatorGemmaText:
                     f"DataCollatorGemmaText: prompt column {self.prompt_column!r} missing. Keys: {list(ex.keys())}"
                 )
             if _is_null(prompt):
-                raise ValueError(
-                    f"DataCollatorGemmaText: prompt column {self.prompt_column!r} has a null value"
-                )
+                raise ValueError(f"DataCollatorGemmaText: prompt column {self.prompt_column!r} has a null value")
             if self.text_column not in ex:
                 raise KeyError(
                     f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
                 )
             if _is_null(response):
-                raise ValueError(
-                    f"DataCollatorGemmaText: text column {self.text_column!r} has a null value"
-                )
+                raise ValueError(f"DataCollatorGemmaText: text column {self.text_column!r} has a null value")
             sp, sr = str(prompt), str(response)
             if self.instruction_truncation == "left_user":
                 sp, sr = _fit_instruction_pair_to_max_length(
@@ -729,9 +725,7 @@ class DataCollatorGemmaText:
                     f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
                 )
             if _is_null(t):
-                raise ValueError(
-                    f"DataCollatorGemmaText: text column {self.text_column!r} has a null value"
-                )
+                raise ValueError(f"DataCollatorGemmaText: text column {self.text_column!r} has a null value")
             texts.append(str(t))
 
         encoded = self.tokenizer(
@@ -802,9 +796,7 @@ class DataCollatorGemmaAudio(DataCollatorGemmaMultimodal):
                     f"Available keys: {list(ex.keys())}"
                 )
             if _is_null(text):
-                raise ValueError(
-                    f"DataCollatorGemmaAudio: text column '{self.text_column}' has a null value"
-                )
+                raise ValueError(f"DataCollatorGemmaAudio: text column '{self.text_column}' has a null value")
             audios.append(audio)
             texts.append(text)
 
