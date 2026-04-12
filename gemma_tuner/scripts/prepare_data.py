@@ -354,7 +354,7 @@ def prepare_data(dataset_name, config_path, no_download=False):
 
     # Configuration Loading and Validation
     # Load dataset-specific configuration from INI file
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     config.read(config_path)
 
     # Default Configuration Loading

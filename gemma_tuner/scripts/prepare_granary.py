@@ -297,7 +297,7 @@ def prepare_granary(profile_name: str, config_path: str | None = None) -> str:
 
     # Step 1: Load and validate configuration
     logger.info("📋 Loading configuration...")
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     from gemma_tuner.core.ops import _resolve_config_path
 
     config.read(_resolve_config_path(config_path))

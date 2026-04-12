@@ -106,7 +106,7 @@ load_validation = false
     try:
         monkeypatch.chdir(tmp_path)
         du._config = None
-        cfg = configparser.ConfigParser()
+        cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         cfg.read("config.ini")
         profile = load_profile_config(cfg, "text-smoke-g4")
         out = tmp_path / "out_smoke_gemma4"

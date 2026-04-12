@@ -20,6 +20,16 @@ from gemma_tuner.models.gemma.family import GemmaFamily, family_capabilities
 logger = logging.getLogger(__name__)
 
 
+def _is_null(value: Any) -> bool:
+    """Return True if *value* is None or a pandas-style NaN (float('nan'))."""
+    if value is None:
+        return True
+    try:
+        return isinstance(value, float) and value != value  # NaN != NaN
+    except (TypeError, ValueError):
+        return False
+
+
 def _find_subsequence_ids(haystack: torch.Tensor, needle: List[int]) -> int:
     """Index of first position in ``haystack`` where ``needle`` matches; ``-1`` if absent."""
     if not needle:
@@ -475,9 +485,9 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
         for ex in features:
             row_id = ex.get("id", ex.get("note_id", "<unknown>"))
             path = ex.get(self.image_path_column)
-            if path is None:
+            if _is_null(path):
                 raise KeyError(
-                    f"DataCollatorGemmaImage: image path column {self.image_path_column!r} missing. "
+                    f"DataCollatorGemmaImage: image path column {self.image_path_column!r} missing or null. "
                     f"Keys: {list(ex.keys())}"
                 )
             try:
@@ -487,9 +497,13 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
             images.append(img)
 
             text_val = ex.get(self.text_column)
-            if text_val is None:
+            if self.text_column not in ex:
                 raise KeyError(
                     f"DataCollatorGemmaImage: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            if _is_null(text_val):
+                raise ValueError(
+                    f"DataCollatorGemmaImage: text column {self.text_column!r} has a null value (row id={row_id!r})"
                 )
 
             if self.sub_mode == "caption":
@@ -500,9 +514,13 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
             else:
                 assert self.prompt_column is not None
                 q = ex.get(self.prompt_column)
-                if q is None:
+                if self.prompt_column not in ex:
                     raise KeyError(
                         f"DataCollatorGemmaImage: prompt column {self.prompt_column!r} missing. Keys: {list(ex.keys())}"
+                    )
+                if _is_null(q):
+                    raise ValueError(
+                        f"DataCollatorGemmaImage: prompt column {self.prompt_column!r} has a null value (row id={row_id!r})"
                     )
                 user_content = [
                     {"type": "image", "image": img},
@@ -588,13 +606,21 @@ class DataCollatorGemmaText:
         for ex in features:
             prompt = ex.get(self.prompt_column)
             response = ex.get(self.text_column)
-            if prompt is None:
+            if self.prompt_column not in ex:
                 raise KeyError(
                     f"DataCollatorGemmaText: prompt column {self.prompt_column!r} missing. Keys: {list(ex.keys())}"
                 )
-            if response is None:
+            if _is_null(prompt):
+                raise ValueError(
+                    f"DataCollatorGemmaText: prompt column {self.prompt_column!r} has a null value"
+                )
+            if self.text_column not in ex:
                 raise KeyError(
                     f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            if _is_null(response):
+                raise ValueError(
+                    f"DataCollatorGemmaText: text column {self.text_column!r} has a null value"
                 )
             sp, sr = str(prompt), str(response)
             if self.instruction_truncation == "left_user":
@@ -698,9 +724,13 @@ class DataCollatorGemmaText:
         texts: List[str] = []
         for ex in features:
             t = ex.get(self.text_column)
-            if t is None:
+            if self.text_column not in ex:
                 raise KeyError(
                     f"DataCollatorGemmaText: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            if _is_null(t):
+                raise ValueError(
+                    f"DataCollatorGemmaText: text column {self.text_column!r} has a null value"
                 )
             texts.append(str(t))
 
@@ -759,17 +789,21 @@ class DataCollatorGemmaAudio(DataCollatorGemmaMultimodal):
 
         for ex in features:
             audio_path = ex.get("audio_path", ex.get("audio"))
-            if audio_path is None:
+            if _is_null(audio_path):
                 raise KeyError(
                     f"DataCollatorGemmaAudio: no audio path found in sample. "
                     f"Expected 'audio_path' or 'audio' key. Available keys: {list(ex.keys())}"
                 )
             audio = load_audio_local_or_gcs(audio_path, sampling_rate=sampling_rate)
             text = ex.get(self.text_column)
-            if text is None:
+            if self.text_column not in ex:
                 raise KeyError(
                     f"DataCollatorGemmaAudio: text column '{self.text_column}' missing from sample. "
                     f"Available keys: {list(ex.keys())}"
+                )
+            if _is_null(text):
+                raise ValueError(
+                    f"DataCollatorGemmaAudio: text column '{self.text_column}' has a null value"
                 )
             audios.append(audio)
             texts.append(text)

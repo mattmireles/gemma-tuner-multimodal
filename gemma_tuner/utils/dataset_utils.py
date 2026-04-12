@@ -171,7 +171,7 @@ def _get_config() -> configparser.ConfigParser:
     """
     global _config
     if _config is None:
-        _config = configparser.ConfigParser()
+        _config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         cwd_ini = Path("config.ini")
         cwd_nested = Path("config/config.ini")
         if cwd_ini.exists():

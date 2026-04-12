@@ -942,7 +942,7 @@ def _load_config(path: Optional[str]):
     from gemma_tuner.core.ops import _resolve_config_path
 
     resolved = _resolve_config_path(path)
-    cfg = configparser.ConfigParser()
+    cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cfg.read(resolved)
     return cfg
 

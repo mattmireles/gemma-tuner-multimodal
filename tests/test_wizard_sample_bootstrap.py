@@ -9,7 +9,7 @@ from gemma_tuner.wizard.config_store import ensure_bundled_sample_config_section
 def test_config_ini_example_defines_sample_sections():
     root = Path(__file__).resolve().parent.parent
     example = root / "config" / "config.ini.example"
-    cfg = configparser.ConfigParser()
+    cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cfg.read(example)
     assert cfg.has_section("dataset:sample-text")
     assert cfg.has_section("profile:sample-text")
@@ -36,7 +36,7 @@ def test_ensure_bundled_sample_config_sections_copies_from_example(tmp_path):
         sample_dataset_name="sample-text",
     )
 
-    out = configparser.ConfigParser()
+    out = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     out.read(cfg_ini)
     assert out.has_section("dataset:sample-text")
     assert out.has_section("profile:sample-text")

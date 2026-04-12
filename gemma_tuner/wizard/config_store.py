@@ -21,7 +21,7 @@ _CONFIG_INI = _PROJECT_ROOT / "config" / "config.ini"
 
 
 def _read_config_path(path: Path) -> configparser.ConfigParser:
-    cfg = configparser.ConfigParser()
+    cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cfg.read(str(path))
     return cfg
 
@@ -67,7 +67,7 @@ def ensure_bundled_sample_config_sections(
         return False
 
     example_path = config_ini.with_name("config.ini.example")
-    example_cfg = configparser.ConfigParser()
+    example_cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     if example_path.exists():
         example_cfg.read(str(example_path))
 

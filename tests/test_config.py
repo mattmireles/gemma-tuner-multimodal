@@ -89,7 +89,7 @@ def make_cfg(sections: dict) -> configparser.ConfigParser:
             }
         })
     """
-    cfg = configparser.ConfigParser()
+    cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     for sec, vals in sections.items():
         cfg[sec] = {k: str(v) for k, v in vals.items()}
     return cfg

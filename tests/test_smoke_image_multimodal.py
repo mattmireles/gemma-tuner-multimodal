@@ -131,7 +131,7 @@ load_validation = false
     try:
         monkeypatch.chdir(tmp_path)
         du._config = None
-        cfg = configparser.ConfigParser()
+        cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         cfg.read("config.ini")
         profile = load_profile_config(cfg, "img-mm-caption")
         out.mkdir(parents=True)
@@ -255,7 +255,7 @@ load_validation = false
     try:
         monkeypatch.chdir(tmp_path)
         du._config = None
-        cfg = configparser.ConfigParser()
+        cfg = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         cfg.read("config.ini")
         profile = load_profile_config(cfg, "img-mm-vqa")
         out.mkdir(parents=True)
