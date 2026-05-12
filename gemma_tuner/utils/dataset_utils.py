@@ -305,6 +305,7 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
     )
     _ensure_modality_local_csv_only(context, adapter, streaming_enabled, "text")
     _ensure_modality_local_csv_only(context, adapter, streaming_enabled, "image")
+    _ensure_modality_local_csv_only(context, adapter, streaming_enabled, "audiovisual")
     source = adapter.patch_source(context)
 
     # Debug information for troubleshooting data loading issues
@@ -351,6 +352,10 @@ def load_dataset_split(split, dataset_config, max_samples=None, patches_dir="dat
                     "modality=image with image_sub_mode=vqa requires prompt_column in dataset_config (profile)."
                 )
             required_columns.add(context.prompt_column)
+    if context.modality == "audiovisual":
+        required_columns.add("audio_path")
+        ipc = context.image_path_column.strip() if context.image_path_column else "image_path"
+        required_columns.add(ipc)
 
     def _validate_columns(columns: Iterable[str]):
         missing = [c for c in required_columns if c not in columns]

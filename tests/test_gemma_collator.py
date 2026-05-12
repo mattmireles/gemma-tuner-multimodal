@@ -1,6 +1,7 @@
 import torch
+from PIL import Image as PILImage
 
-from gemma_tuner.models.common.collators import DataCollatorGemmaAudio
+from gemma_tuner.models.common.collators import DataCollatorGemmaAudio, DataCollatorGemmaAudioVisual
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
 from gemma_tuner.models.gemma.family import GemmaFamily
 
@@ -87,6 +88,39 @@ def test_audio_collator_gemma4_injects_mm_token_type_ids():
     dataset_prep_mod.load_audio_local_or_gcs = fake_loader
 
     out = collator([{"audio_path": "/path/a.wav", "text": "hello"}])
+    assert "token_type_ids" in out and "mm_token_type_ids" in out
+    assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
+    assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
+
+
+class DummyAudioVisualProcessor(DummyProcessor):
+    def __call__(self, text=None, audio=None, images=None, return_tensors=None, padding=None, **kwargs):
+        if audio is None or images is None:
+            raise ValueError("expected both audio and images")
+        return super().__call__(text=text, return_tensors=return_tensors, padding=padding, **kwargs)
+
+
+def test_audiovisual_collator_produces_labels_and_ids(tmp_path):
+    proc = DummyAudioVisualProcessor()
+    collator = DataCollatorGemmaAudioVisual(
+        processor=proc,
+        text_column="text",
+        family=GemmaFamily.GEMMA_4,
+        image_path_column="image_path",
+    )
+    image_path = tmp_path / "sample.png"
+    PILImage.new("RGB", (8, 8), color=(255, 0, 0)).save(image_path)
+
+    import gemma_tuner.utils.dataset_prep as dataset_prep_mod
+
+    def fake_loader(path, sampling_rate=None):
+        return [0.0] * 16000
+
+    dataset_prep_mod.load_audio_local_or_gcs = fake_loader
+
+    out = collator([{"audio_path": "/path/a.wav", "image_path": str(image_path), "text": "scene: people talking in a kitchen"}])
+    assert "input_ids" in out and "attention_mask" in out and "labels" in out
+    assert out["labels"].shape == out["input_ids"].shape
     assert "token_type_ids" in out and "mm_token_type_ids" in out
     assert torch.equal(out["token_type_ids"], torch.zeros_like(out["input_ids"]))
     assert torch.equal(out["mm_token_type_ids"], torch.zeros_like(out["input_ids"]))
