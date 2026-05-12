@@ -128,7 +128,9 @@ def test_audiovisual_collator_produces_labels_and_ids(tmp_path):
 
     dataset_prep_mod.load_audio_local_or_gcs = fake_loader
 
-    out = collator([{"audio_path": "/path/a.wav", "image_path": str(image_path), "text": "scene: people talking in a kitchen"}])
+    out = collator(
+        [{"audio_path": "/path/a.wav", "image_path": str(image_path), "text": "scene: people talking in a kitchen"}]
+    )
     assert "input_ids" in out and "attention_mask" in out and "labels" in out
     assert out["labels"].shape == out["input_ids"].shape
     assert "token_type_ids" in out and "mm_token_type_ids" in out
@@ -157,12 +159,7 @@ def test_audiovisual_collator_batch_passes_per_sample_audio_and_images(tmp_path)
 
     dataset_prep_mod.load_audio_local_or_gcs = fake_loader
 
-    collator(
-        [
-            {"audio_path": f"/path/{i}.wav", "image_path": paths[i], "text": f"sample {i}"}
-            for i in range(3)
-        ]
-    )
+    collator([{"audio_path": f"/path/{i}.wav", "image_path": paths[i], "text": f"sample {i}"} for i in range(3)])
     # Per-sample audio is a flat list of length batch; images is a list-per-sample wrapping.
     assert isinstance(proc.last_audio, list) and len(proc.last_audio) == 3
     assert isinstance(proc.last_images, list) and len(proc.last_images) == 3
