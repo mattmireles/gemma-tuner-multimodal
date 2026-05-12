@@ -696,9 +696,7 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         if ims == "vqa" and modality_val == "image":
             pc = conf.get("prompt_column")
             if pc is None or (isinstance(pc, str) and not str(pc).strip()):
-                raise ValueError(
-                    "modality=image with image_sub_mode=vqa requires prompt_column (question column)"
-                )
+                raise ValueError("modality=image with image_sub_mode=vqa requires prompt_column (question column)")
 
     # Validate data splits are specified
     for split_key in ("train_split", "validation_split"):
