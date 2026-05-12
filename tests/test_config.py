@@ -210,8 +210,10 @@ def test_validate_audiovisual_modality_profile():
     }
     _validate_profile_config(dict(base), ConfigConstants.REQUIRED_PROFILE_KEYS)
 
-    with pytest.raises(ValueError, match=r"prompt_column"):
-        bad = {**base, "image_sub_mode": "vqa"}
+    # audiovisual must reject vqa: the collator hardcodes a caption-style instruction
+    # and ignores prompt_column. Fail loud at config time instead of silently captioning.
+    with pytest.raises(ValueError, match=r"audiovisual.*does not support image_sub_mode=vqa"):
+        bad = {**base, "image_sub_mode": "vqa", "prompt_column": "question"}
         _validate_profile_config(bad, ConfigConstants.REQUIRED_PROFILE_KEYS)
 
 

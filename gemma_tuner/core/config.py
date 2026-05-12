@@ -671,6 +671,13 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         conf["image_sub_mode"] = ism
         if modality_val in ("image", "audiovisual") and ism not in ("caption", "vqa"):
             raise ValueError(f"image_sub_mode must be 'caption' or 'vqa', got {ism!r}")
+        # audiovisual currently only supports caption-style instruction; VQA isn't wired in the collator.
+        if modality_val == "audiovisual" and ism == "vqa":
+            raise ValueError(
+                "modality=audiovisual does not support image_sub_mode=vqa yet "
+                "(audiovisual collator uses a fixed caption-style instruction). "
+                "Use image_sub_mode=caption."
+            )
     if "image_path_column" in conf:
         ipc = conf["image_path_column"]
         if ipc is None or (isinstance(ipc, str) and not str(ipc).strip()):
@@ -686,11 +693,11 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
                 f"image_token_budget must be one of {sorted(ConfigConstants.IMAGE_TOKEN_BUDGET_ALLOWED)}, got {itb_int}"
             )
         ims = str(conf.get("image_sub_mode", "caption")).strip().lower()
-        if ims == "vqa":
+        if ims == "vqa" and modality_val == "image":
             pc = conf.get("prompt_column")
             if pc is None or (isinstance(pc, str) and not str(pc).strip()):
                 raise ValueError(
-                    f"modality={modality_val} with image_sub_mode=vqa requires prompt_column (question column)"
+                    "modality=image with image_sub_mode=vqa requires prompt_column (question column)"
                 )
 
     # Validate data splits are specified

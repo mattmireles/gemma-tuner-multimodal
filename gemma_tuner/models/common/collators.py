@@ -543,7 +543,18 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
 
 
 class DataCollatorGemmaAudioVisual(DataCollatorGemmaMultimodal):
-    """Batch audio+image+text examples for Gemma multimodal fine-tuning."""
+    """Batch audio+image+text examples for Gemma multimodal fine-tuning.
+
+    Caption-style only: a fixed instruction prompts the model to describe the audio+image
+    pair, and the row's ``text_column`` is the supervised response. VQA isn't supported
+    here yet — :func:`gemma_tuner.core.config._validate_profile_config` rejects
+    ``image_sub_mode=vqa`` for this modality at config time.
+
+    Uses :meth:`_labels_with_pad_and_prompt_mask_if_missing` (the audio-path label builder)
+    rather than the image-path variant: the Gemma audio-aware processor may set ``labels``
+    itself when ``audio=`` is passed, so we only rebuild when missing. The image-only path
+    never sets labels and always rebuilds.
+    """
 
     _INSTRUCTION = "Describe what is happening using the attached audio and image."
 
