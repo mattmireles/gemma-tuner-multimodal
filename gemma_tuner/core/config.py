@@ -645,8 +645,8 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
     if "modality" in conf and conf["modality"] is not None:
         modality = str(conf["modality"]).strip().lower()
         conf["modality"] = modality
-        if modality not in ("audio", "text", "image"):
-            raise ValueError(f"modality must be 'audio', 'text', or 'image', got {modality!r}")
+        if modality not in ("audio", "text", "image", "audiovisual"):
+            raise ValueError(f"modality must be 'audio', 'text', 'image', or 'audiovisual', got {modality!r}")
     if "text_sub_mode" in conf and conf["text_sub_mode"] is not None:
         sub = str(conf["text_sub_mode"]).strip().lower()
         conf["text_sub_mode"] = sub
@@ -664,20 +664,27 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         if msl < 1:
             raise ValueError(f"max_seq_length must be >= 1, got {msl}")
 
-    # Image modality (defaults applied via FALLBACK_DEFAULTS; validation only when modality=image)
+    # Image-bearing modalities (defaults applied via FALLBACK_DEFAULTS; validation only when needed)
     modality_val = str(conf.get("modality", "audio")).strip().lower()
     if "image_sub_mode" in conf and conf["image_sub_mode"] is not None:
         ism = str(conf["image_sub_mode"]).strip().lower()
         conf["image_sub_mode"] = ism
-        if modality_val == "image" and ism not in ("caption", "vqa"):
+        if modality_val in ("image", "audiovisual") and ism not in ("caption", "vqa"):
             raise ValueError(f"image_sub_mode must be 'caption' or 'vqa', got {ism!r}")
+        # audiovisual currently only supports caption-style instruction; VQA isn't wired in the collator.
+        if modality_val == "audiovisual" and ism == "vqa":
+            raise ValueError(
+                "modality=audiovisual does not support image_sub_mode=vqa yet "
+                "(audiovisual collator uses a fixed caption-style instruction). "
+                "Use image_sub_mode=caption."
+            )
     if "image_path_column" in conf:
         ipc = conf["image_path_column"]
         if ipc is None or (isinstance(ipc, str) and not str(ipc).strip()):
             conf["image_path_column"] = "image_path"
         elif isinstance(ipc, str):
             conf["image_path_column"] = ipc.strip()
-    if modality_val == "image":
+    if modality_val in ("image", "audiovisual"):
         itb = conf.get("image_token_budget", 280)
         itb_int = int(itb) if not isinstance(itb, int) else itb
         conf["image_token_budget"] = itb_int
@@ -686,10 +693,12 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
                 f"image_token_budget must be one of {sorted(ConfigConstants.IMAGE_TOKEN_BUDGET_ALLOWED)}, got {itb_int}"
             )
         ims = str(conf.get("image_sub_mode", "caption")).strip().lower()
-        if ims == "vqa":
+        if ims == "vqa" and modality_val == "image":
             pc = conf.get("prompt_column")
             if pc is None or (isinstance(pc, str) and not str(pc).strip()):
-                raise ValueError("modality=image with image_sub_mode=vqa requires prompt_column (question column)")
+                raise ValueError(
+                    "modality=image with image_sub_mode=vqa requires prompt_column (question column)"
+                )
 
     # Validate data splits are specified
     for split_key in ("train_split", "validation_split"):

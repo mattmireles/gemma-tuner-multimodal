@@ -534,9 +534,113 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                 ]
             )
 
-        encoded = self._apply_chat_template_and_processor(messages_batch, images=images)
+        # Gemma4 processor expects batched images as "list per sample" when text is batched.
+        batched_images = [[img] for img in images]
+        encoded = self._apply_chat_template_and_processor(messages_batch, images=batched_images)
         self._inject_mm_token_types_and_validate_bos(encoded)
         self._labels_with_prompt_mask_and_attention_padding(encoded)
+        return encoded
+
+
+class DataCollatorGemmaAudioVisual(DataCollatorGemmaMultimodal):
+    """Batch audio+image+text examples for Gemma multimodal fine-tuning.
+
+    Caption-style only: a fixed instruction prompts the model to describe the audio+image
+    pair, and the row's ``text_column`` is the supervised response. VQA isn't supported
+    here yet — :func:`gemma_tuner.core.config._validate_profile_config` rejects
+    ``image_sub_mode=vqa`` for this modality at config time.
+
+    Uses :meth:`_labels_with_pad_and_prompt_mask_if_missing` (the audio-path label builder)
+    rather than the image-path variant: the Gemma audio-aware processor may set ``labels``
+    itself when ``audio=`` is passed, so we only rebuild when missing. The image-only path
+    never sets labels and always rebuilds.
+    """
+
+    _INSTRUCTION = "Describe what is happening using the attached audio and image."
+
+    def __init__(
+        self,
+        processor,
+        text_column: str,
+        *,
+        family: GemmaFamily,
+        image_path_column: str = "image_path",
+        sampling_rate_hint: Optional[int] = None,
+    ):
+        self.processor = processor
+        self.text_column = text_column
+        self.image_path_column = image_path_column
+        self.sampling_rate_hint = sampling_rate_hint
+        self._family = family
+        self._caps = family_capabilities(family)
+        self._warned_prompt_masking: List[bool] = [False]
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        from gemma_tuner.utils.dataset_prep import load_audio_local_or_gcs
+
+        audios: List[List[float]] = []
+        images: List[Any] = []
+        messages_batch: List[Any] = []
+
+        sampling_rate = resolve_processor_sampling_rate(self.processor, hint=self.sampling_rate_hint)
+
+        for ex in features:
+            row_id = ex.get("id", ex.get("note_id", "<unknown>"))
+
+            audio_path = ex.get("audio_path", ex.get("audio"))
+            if _is_null(audio_path):
+                raise KeyError(
+                    "DataCollatorGemmaAudioVisual: no audio path found in sample. "
+                    f"Expected 'audio_path' or 'audio' key. Available keys: {list(ex.keys())}"
+                )
+            audio = load_audio_local_or_gcs(audio_path, sampling_rate=sampling_rate)
+            audios.append(audio)
+
+            image_path = ex.get(self.image_path_column)
+            if _is_null(image_path):
+                raise KeyError(
+                    f"DataCollatorGemmaAudioVisual: image path column {self.image_path_column!r} missing or null. "
+                    f"Keys: {list(ex.keys())}"
+                )
+            try:
+                img = _load_image_as_rgb(image_path)
+            except Exception as e:
+                raise RuntimeError(f"DataCollatorGemmaAudioVisual: row id={row_id!r}: {e}") from e
+            images.append(img)
+
+            text_val = ex.get(self.text_column)
+            if self.text_column not in ex:
+                raise KeyError(
+                    f"DataCollatorGemmaAudioVisual: text column {self.text_column!r} missing. Keys: {list(ex.keys())}"
+                )
+            if _is_null(text_val):
+                raise ValueError(
+                    f"DataCollatorGemmaAudioVisual: text column {self.text_column!r} has a null value "
+                    f"(row id={row_id!r})"
+                )
+
+            messages_batch.append(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": img},
+                            {"type": "audio", "audio": "<audio:attached>"},
+                            {"type": "text", "text": self._INSTRUCTION},
+                        ],
+                    },
+                    {"role": "assistant", "content": [{"type": "text", "text": str(text_val)}]},
+                ]
+            )
+
+        encoded = self._apply_chat_template_and_processor(
+            messages_batch,
+            images=[[img] for img in images],
+            audio=audios,
+            sampling_rate=sampling_rate,
+        )
+        self._inject_mm_token_types_and_validate_bos(encoded)
+        self._labels_with_pad_and_prompt_mask_if_missing(encoded)
         return encoded
 
 

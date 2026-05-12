@@ -77,6 +77,7 @@ from transformers.utils import logging as hf_logging
 
 from gemma_tuner.models.common.collators import (
     DataCollatorGemmaAudio,
+    DataCollatorGemmaAudioVisual,
     DataCollatorGemmaImage,
     DataCollatorGemmaText,
     apply_image_token_budget_to_processor,
@@ -338,7 +339,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     }
     if prompt_column is not None:
         dataset_config["prompt_column"] = prompt_column
-    if modality == "image":
+    if modality in ("image", "audiovisual"):
         dataset_config["image_sub_mode"] = str(profile_config.get("image_sub_mode", "caption")).strip().lower()
         ipc = profile_config.get("image_path_column")
         if ipc:
@@ -363,7 +364,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             logger.warning(f"Failed to load validation split; running without eval: {e}")
 
     image_path_column_resolved = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
-    if modality == "image":
+    if modality in ("image", "audiovisual"):
         dataset_dir = resolve_data_datasets_dir(dataset_name)
 
         def _resolve_image_paths(batch: dict) -> dict:
@@ -404,7 +405,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     else:
         logger.info(f"Loading processor ({modality} modality): {model_id}")
         processor = AutoProcessor.from_pretrained(model_id, revision=model_revision)
-        if modality == "image":
+        if modality in ("image", "audiovisual"):
             _itb = int(profile_config.get("image_token_budget", 280))
             apply_image_token_budget_to_processor(processor, _itb)
 
@@ -570,6 +571,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             prompt_column=prompt_column,
             image_token_budget=image_token_budget,
             sub_mode=image_sub_mode,
+        )
+    elif modality == "audiovisual":
+        image_path_col = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
+        data_collator = DataCollatorGemmaAudioVisual(
+            processor=processor,
+            text_column=text_column,
+            family=family,
+            image_path_column=image_path_col,
+            sampling_rate_hint=None,
         )
     else:
         data_collator = DataCollatorGemmaAudio(

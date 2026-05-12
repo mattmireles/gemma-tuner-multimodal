@@ -423,6 +423,48 @@ max_duration = 30
         _du_mod._config = None
 
 
+def test_audiovisual_modality_loads_local_csv(tmp_path):
+    data_dir = tmp_path / "data" / "datasets" / "av-toy"
+    os.makedirs(data_dir, exist_ok=True)
+    _write_csv(
+        str(data_dir / "train.csv"),
+        [{"id": 1, "audio_path": "a.wav", "image_path": "x.png", "text": "scene: people talking in a kitchen"}],
+    )
+    cfg_path = tmp_path / "config.ini"
+    cfg_path.write_text("""
+[dataset:av-toy]
+source = av-src
+text_column = text
+train_split = train
+validation_split = validation
+max_label_length = 64
+max_duration = 30
+""")
+
+    cwd = os.getcwd()
+    _du_mod._config = None
+    try:
+        os.chdir(str(tmp_path))
+        ds, source = load_dataset_split(
+            split="train",
+            dataset_config={
+                "name": "av-toy",
+                "text_column": "text",
+                "modality": "audiovisual",
+                "image_path_column": "image_path",
+            },
+            streaming_enabled=False,
+        )
+    finally:
+        os.chdir(cwd)
+        _du_mod._config = None
+
+    assert source == "av-src"
+    assert len(ds) == 1
+    assert ds[0]["audio_path"] == "a.wav"
+    assert ds[0]["image_path"] == "x.png"
+
+
 def test_text_modality_rejects_granary_adapter(tmp_path):
     data_dir = tmp_path / "data" / "datasets" / "granary-en"
     os.makedirs(data_dir, exist_ok=True)
