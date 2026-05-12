@@ -122,6 +122,29 @@ lora_dropout = 0.05
 target_modules = q_proj,k_proj,v_proj,o_proj
 
 # ----------------------------------------------------------------------------
+# 16 GB Mac memory-budget knobs
+# ----------------------------------------------------------------------------
+# Stock defaults assume 32 GB+ unified memory. On 16 GB Macs the model + KV cache
+# + optimizer state usually doesn't fit, and macOS jetsam-kills the process
+# (you'll see "MPS backend out of memory" or exit code -9 with "leaked
+# semaphore objects"). Add these to your [profile:...] block on a 16 GB Mac:
+#
+#     per_device_train_batch_size = 1
+#     per_device_eval_batch_size = 1
+#     gradient_accumulation_steps = 16
+#     gradient_checkpointing = true
+#     bf16 = true
+#     max_seq_length = 1024            # drop to 512 if still OOM
+#     # image / audiovisual modalities:
+#     # image_token_budget = 70
+#
+# Also: use gemma-4-e2b(-it), not e4b. If MPS still complains, try
+#     export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.85
+# (do NOT set this to 0.0 — bootstrap rejects it).
+# See README/guides/apple-silicon/gemma4-guide.md for the full table.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
 # Template LoRA profile + dataset (edit and rename for your own data).
 # ----------------------------------------------------------------------------
 [profile:my-lora-run]

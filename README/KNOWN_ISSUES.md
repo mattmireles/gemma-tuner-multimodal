@@ -23,10 +23,11 @@
 
 ### Common MPS Errors and Solutions
 
-1. **"MPS backend out of memory"**
-   - Solution: Reduce batch size or set `PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.7`
+1. **"MPS backend out of memory"** (or process killed with exit code `-9` + "leaked semaphore objects")
+   - On 16 GB Macs the stock defaults are over-budget. See the **16 GB Mac memory-budget knobs** block at the top of `config/config.ini.example` for the recommended profile overrides (`per_device_train_batch_size = 1`, `gradient_accumulation_steps = 16`, `gradient_checkpointing = true`, `bf16 = true`, `max_seq_length = 1024`).
+   - Solution: Reduce batch size or set `PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.85`
    - With Flash Attention 2 enabled, memory usage drops ~28%, often eliminating OOMs
-   - The unified memory architecture can cause swapping instead of OOM errors
+   - The unified memory architecture can cause swapping instead of OOM errors, which macOS resolves by jetsam-killing the process — that's the source of the `-9` exit code.
 
 2. **"Operation X not implemented for MPS"**
    - Solution: Set `PYTORCH_ENABLE_MPS_FALLBACK=1` (performance impact)
