@@ -241,6 +241,43 @@ def test_apply_image_token_budget_warns_once_per_processor_type(caplog):
     assert len(records) == 1
 
 
+class _CapturingImageProcessor(FakeImageProcessor):
+    """Records the ``images`` kwarg shape passed to ``__call__`` for assertion."""
+
+    def __init__(self):
+        super().__init__()
+        self.last_images = None
+
+    def __call__(self, text=None, images=None, return_tensors=None, padding=None, **kwargs):
+        self.last_images = images
+        return super().__call__(text=text, images=images, return_tensors=return_tensors, padding=padding, **kwargs)
+
+
+def test_image_collator_passes_list_per_sample_to_processor(tmp_path: Path):
+    """Gemma 4 multimodal processor expects ``images`` as one list per text sample.
+
+    Regression for PR #22: collator wraps each PIL image as ``[img]`` so batched calls
+    keep the per-sample boundary intact.
+    """
+    proc = _CapturingImageProcessor()
+    collator = DataCollatorGemmaImage(
+        processor=proc,
+        text_column="caption",
+        family=GemmaFamily.GEMMA_3N,
+        image_path_column="image_path",
+        sub_mode="caption",
+    )
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"b_{i}.png"
+        p.write_bytes(_make_png_bytes("RGB"))
+        paths.append(str(p))
+    collator([{"id": str(i), "image_path": paths[i], "caption": "x"} for i in range(3)])
+    assert isinstance(proc.last_images, list) and len(proc.last_images) == 3
+    for inner in proc.last_images:
+        assert isinstance(inner, list) and len(inner) == 1
+
+
 def test_image_collator_masks_padding_via_attention_mask_only(tmp_path: Path):
     """Padding is masked with attention_mask == 0 (not pad_id equality)."""
     proc = FakeImageProcessor()

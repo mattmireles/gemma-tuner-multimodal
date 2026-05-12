@@ -129,13 +129,35 @@ These keys can appear in `[DEFAULT]`, `[dataset:…]`, `[model:…]`, or `[profi
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `modality` | `audio` | `audio` — speech + transcript (current behavior). `text` — text-only CSV fine-tuning (instruction or completion). `image` — image + text CSV (captioning or VQA); see image columns below. |
+| `modality` | `audio` | `audio` — speech + transcript (current behavior). `text` — text-only CSV fine-tuning (instruction or completion). `image` — image + text CSV (captioning or VQA); see image columns below. `audiovisual` — joint audio + image + text in one sample (caption-style only); requires `audio_path` and the column named by `image_path_column` to be present in the CSV. |
 | `text_sub_mode` | `instruction` | When `modality = text`: `instruction` — prompt + response columns with prompt masked from loss; `completion` — single text column, full sequence trained. |
 | `prompt_column` | *(empty / none)* | When `text_sub_mode = instruction`, the column name for the user/prompt text. Ignored for `completion`. When `modality = image` and `image_sub_mode = vqa`, the column name for the **question** text. |
 | `max_seq_length` | `2048` | Maximum token length for text-mode batches (padding/truncation). |
 | `image_sub_mode` | `caption` | When `modality = image`: `caption` — fixed instruction + caption/response in `text_column`; `vqa` — question in `prompt_column`, answer in `text_column`. |
 | `image_path_column` | `image_path` | CSV column for the image file path (local or supported URI). |
 | `image_token_budget` | `280` | Vision token budget for the processor. Must be one of `70`, `140`, `280`, `560`, `1120` (train/serve must match). |
+
+### `modality = audiovisual` (joint image + audio + text)
+
+Single training run over rows that have *both* an `audio_path` and an image file (`image_path_column`, default `image_path`), with a free-form caption in `text_column`. The collator builds a fixed user prompt — "Describe what is happening using the attached audio and image." — and supervises on the row's caption.
+
+Constraints:
+
+- Caption-style only. `image_sub_mode = vqa` is rejected at config time for this modality.
+- Local CSV datasets only (same gate as `modality = image`).
+- `image_token_budget` applies as in image mode.
+
+Example profile:
+
+```ini
+[profile:my-audiovisual-lora]
+model = gemma-4-e2b-it
+dataset = my-av-dataset
+modality = audiovisual
+image_path_column = image_path
+text_column = label
+per_device_train_batch_size = 4
+```
 
 See `config/config.ini.example` for commented examples.
 

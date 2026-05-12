@@ -188,6 +188,35 @@ def test_validate_image_modality_profile():
         _validate_profile_config(vqa_no_prompt, ConfigConstants.REQUIRED_PROFILE_KEYS)
 
 
+def test_validate_audiovisual_modality_profile():
+    base = {
+        "model": "gemma-4-e2b-it",
+        "dataset": "dummy",
+        "base_model": "google/gemma-4-E2B-it",
+        "train_split": "train",
+        "validation_split": "validation",
+        "text_column": "text",
+        "max_label_length": 128,
+        "max_duration": 30.0,
+        "per_device_train_batch_size": 1,
+        "num_train_epochs": 1,
+        "logging_steps": 1,
+        "save_steps": 50,
+        "save_total_limit": 1,
+        "gradient_accumulation_steps": 1,
+        "modality": "audiovisual",
+        "image_sub_mode": "caption",
+        "image_token_budget": 280,
+    }
+    _validate_profile_config(dict(base), ConfigConstants.REQUIRED_PROFILE_KEYS)
+
+    # audiovisual must reject vqa: the collator hardcodes a caption-style instruction
+    # and ignores prompt_column. Fail loud at config time instead of silently captioning.
+    with pytest.raises(ValueError, match=r"audiovisual.*does not support image_sub_mode=vqa"):
+        bad = {**base, "image_sub_mode": "vqa", "prompt_column": "question"}
+        _validate_profile_config(bad, ConfigConstants.REQUIRED_PROFILE_KEYS)
+
+
 def test_load_profile_config_missing_profile_raises():
     """
     Tests that loading non-existent profiles raises appropriate ValueError exceptions.
