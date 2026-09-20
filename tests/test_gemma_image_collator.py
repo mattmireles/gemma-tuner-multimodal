@@ -15,6 +15,8 @@ from gemma_tuner.models.common.collators import (
     DataCollatorGemmaImage,
     _load_image_as_rgb,
     apply_image_token_budget_to_processor,
+    build_image_views,
+    completion_logits_to_keep,
     mask_gemma_prompt_tokens,
 )
 from gemma_tuner.models.gemma.constants import GemmaTrainingConstants
@@ -216,6 +218,15 @@ def test_apply_image_token_budget_rebuilds_sequence():
     assert proc.full_image_sequence.count("<img>") == 280
 
 
+def test_completion_logits_to_keep_covers_shifted_supervised_suffix() -> None:
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    labels = torch.tensor([[ignore, ignore, ignore, 10, 11, 12]])
+    assert completion_logits_to_keep(labels) == 4
+    labels[0, 4] = ignore
+    with pytest.raises(ValueError, match="contiguous supervised suffix"):
+        completion_logits_to_keep(labels)
+
+
 def test_apply_image_token_budget_warns_without_image_seq_length(caplog):
     collators_mod.reset_apply_image_budget_warning_dedupe()
 
@@ -247,10 +258,47 @@ class _CapturingImageProcessor(FakeImageProcessor):
     def __init__(self):
         super().__init__()
         self.last_images = None
+        self.last_messages = None
+        self.last_kwargs = None
+
+    def apply_chat_template(self, messages_batch, tokenize=False, add_generation_prompt=False, **kwargs):
+        self.last_messages = messages_batch
+        return super().apply_chat_template(
+            messages_batch,
+            tokenize=tokenize,
+            add_generation_prompt=add_generation_prompt,
+            **kwargs,
+        )
 
     def __call__(self, text=None, images=None, return_tensors=None, padding=None, **kwargs):
         self.last_images = images
+        self.last_kwargs = kwargs
         return super().__call__(text=text, images=images, return_tensors=return_tensors, padding=padding, **kwargs)
+
+
+class _StrictTelepathicProcessor(FakeImageProcessor):
+    def __init__(self):
+        super().__init__()
+        self.tokenizer.eos_token_id = 1
+        original_encode = self.tokenizer.encode
+
+        def encode(text: str, add_special_tokens: bool = False) -> list[int]:
+            if text == "<end_of_turn>":
+                return [1]
+            return original_encode(text, add_special_tokens=add_special_tokens)
+
+        self.tokenizer.encode = encode
+
+    def __call__(self, text=None, images=None, return_tensors=None, padding=None, **kwargs):
+        encoded = super().__call__(
+            text=text,
+            images=images,
+            return_tensors=return_tensors,
+            padding=padding,
+            **kwargs,
+        )
+        encoded["input_ids"][:, 7] = self.tokenizer.eos_token_id
+        return encoded
 
 
 def test_image_collator_passes_list_per_sample_to_processor(tmp_path: Path):
@@ -295,3 +343,181 @@ def test_image_collator_masks_padding_via_attention_mask_only(tmp_path: Path):
     ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
     assert (out["labels"][am == 0] == ignore).all()
     assert (out["labels"][am == 1] != ignore).any()
+
+
+def test_global_plus_quadrants_odd_dimensions_cover_source_exactly() -> None:
+    image = PILImage.new("RGB", (5, 3))
+    for y in range(3):
+        for x in range(5):
+            image.putpixel((x, y), (x, y, x + y))
+    global_view, top_left, top_right, bottom_left, bottom_right = build_image_views(
+        image, "global_plus_four_nonoverlapping_quadrants"
+    )
+    assert [view.size for view in (global_view, top_left, top_right, bottom_left, bottom_right)] == [
+        (5, 3),
+        (2, 1),
+        (3, 1),
+        (2, 2),
+        (3, 2),
+    ]
+    reconstructed = PILImage.new("RGB", image.size)
+    reconstructed.paste(top_left, (0, 0))
+    reconstructed.paste(top_right, (2, 0))
+    reconstructed.paste(bottom_left, (0, 1))
+    reconstructed.paste(bottom_right, (2, 1))
+    assert reconstructed.tobytes() == image.tobytes()
+
+
+@pytest.mark.parametrize("size", [(1, 5), (5, 1), (1, 1)])
+def test_global_plus_quadrants_rejects_one_pixel_dimension(size: tuple[int, int]) -> None:
+    with pytest.raises(ValueError, match="width and height >= 2"):
+        build_image_views(
+            PILImage.new("RGB", size),
+            "global_plus_four_nonoverlapping_quadrants",
+        )
+
+
+def test_five_view_conditioned_collator_preserves_order_and_message_bytes(tmp_path: Path) -> None:
+    proc = _CapturingImageProcessor()
+    collator = DataCollatorGemmaImage(
+        processor=proc,
+        text_column="answer",
+        family=GemmaFamily.GEMMA_3N,
+        image_path_column="image_path",
+        prompt_column="question",
+        image_view_policy="global_plus_four_nonoverlapping_quadrants",
+        system_prompt_column="system_prompt",
+        max_length=16,
+        sub_mode="vqa",
+    )
+    path = tmp_path / "odd.png"
+    PILImage.new("RGB", (5, 3), color=(10, 20, 30)).save(path)
+    collator(
+        [
+            {
+                "id": "x",
+                "image_path": str(path),
+                "question": "exact context and OCR bytes",
+                "answer": '{"context_analysis":{}}',
+                "system_prompt": "exact rendered intent bytes",
+            }
+        ]
+    )
+    assert [image.size for image in proc.last_images[0]] == [
+        (5, 3),
+        (2, 1),
+        (3, 1),
+        (2, 2),
+        (3, 2),
+    ]
+    messages = proc.last_messages[0]
+    assert [message["role"] for message in messages] == ["system", "user", "assistant"]
+    assert messages[0]["content"][0]["text"] == "exact rendered intent bytes"
+    assert [item["type"] for item in messages[1]["content"]] == [
+        "image",
+        "image",
+        "image",
+        "image",
+        "image",
+        "text",
+    ]
+    assert messages[1]["content"][-1]["text"] == "exact context and OCR bytes"
+    assert messages[2]["content"][0]["text"] == '{"context_analysis":{}}'
+    assert proc.last_kwargs["truncation"] is False
+
+
+def test_compact_collator_rejects_any_system_prompt_field(tmp_path: Path) -> None:
+    proc = FakeImageProcessor()
+    collator = DataCollatorGemmaImage(
+        processor=proc,
+        text_column="answer",
+        family=GemmaFamily.GEMMA_3N,
+        image_path_column="image_path",
+        prompt_column="question",
+        sub_mode="vqa",
+    )
+    path = tmp_path / "image.png"
+    PILImage.new("RGB", (4, 4)).save(path)
+    with pytest.raises(ValueError, match="forbidden system_prompt"):
+        collator(
+            [
+                {
+                    "image_path": str(path),
+                    "question": "q",
+                    "answer": "a",
+                    "system_prompt": "",
+                }
+            ]
+        )
+
+
+def test_image_collator_fails_closed_above_max_length(tmp_path: Path) -> None:
+    proc = FakeImageProcessor()
+    collator = DataCollatorGemmaImage(
+        processor=proc,
+        text_column="caption",
+        family=GemmaFamily.GEMMA_3N,
+        image_path_column="image_path",
+        max_length=8,
+        sub_mode="caption",
+    )
+    path = tmp_path / "image.png"
+    PILImage.new("RGB", (4, 4)).save(path)
+    with pytest.raises(ValueError, match="untruncated batch exceeds"):
+        collator([{"image_path": str(path), "caption": "a"}])
+
+
+def test_strict_telepathic_contract_requires_complete_ocr_target_and_eos(
+    tmp_path: Path,
+) -> None:
+    proc = _StrictTelepathicProcessor()
+    collator = DataCollatorGemmaImage(
+        processor=proc,
+        text_column="answer",
+        family=GemmaFamily.GEMMA_3N,
+        image_path_column="image_path",
+        prompt_column="question",
+        require_telepathic_contract=True,
+        completion_only_logits=True,
+        sub_mode="vqa",
+    )
+    path = tmp_path / "image.png"
+    PILImage.new("RGB", (4, 4)).save(path)
+    prompt = (
+        "Use the screenshot, context, and OCR. Return valid JSON with exactly one "
+        "top-level key: context_analysis.\n\n"
+        "<context>\n{}\n</context>\n\n"
+        "<first_pass_screenshot_ocr>\n{}\n</first_pass_screenshot_ocr>\n"
+    )
+    result = collator(
+        [
+            {
+                "image_path": str(path),
+                "question": prompt,
+                "answer": '{"context_analysis":{}}',
+            }
+        ]
+    )
+    assert int(result["labels"][0, 7]) == proc.tokenizer.eos_token_id
+    assert result["logits_to_keep"] == 3
+
+    with pytest.raises(ValueError, match="first_pass_screenshot_ocr"):
+        collator(
+            [
+                {
+                    "image_path": str(path),
+                    "question": prompt.replace("</first_pass_screenshot_ocr>", ""),
+                    "answer": '{"context_analysis":{}}',
+                }
+            ]
+        )
+    with pytest.raises(ValueError, match="exactly one context_analysis"):
+        collator(
+            [
+                {
+                    "image_path": str(path),
+                    "question": prompt,
+                    "answer": '{"wrong":{}}',
+                }
+            ]
+        )

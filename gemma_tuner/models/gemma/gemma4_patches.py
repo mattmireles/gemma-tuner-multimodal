@@ -1,8 +1,4 @@
-"""Optional runtime patches for Gemma 4 + PEFT on stacks with ``transformers>=5.5``.
-
-Apply **before** ``from_pretrained`` on Gemma 4 multimodal checkpoints. See
-``README/guides/apple-silicon/gemma4-guide.md`` and PEFT `#3129`.
-"""
+"""PEFT compatibility conversion for loaded Gemma 4 clippable linears."""
 
 from __future__ import annotations
 
@@ -10,73 +6,63 @@ import torch
 import torch.nn as nn
 
 
-def apply_clippable_linear_patch() -> None:
-    """Replace ``Gemma4ClippableLinear`` with an ``nn.Linear`` subclass (PEFT-friendly).
+class PeftCompatibleGemma4ClippableLinear(nn.Linear):
+    """An ``nn.Linear`` view of an already-loaded Gemma 4 wrapper.
 
-    Upstream wraps an ``nn.Linear`` in ``nn.Module``; PEFT often requires
-    ``isinstance(module, nn.Linear)``. This patch inlines the same forward
-    (clamp → linear → clamp) while inheriting ``nn.Linear``. Idempotent.
-
-    No-op if ``transformers`` has no Gemma 4 modeling module or patch already applied.
+    Conversion happens *after* ``from_pretrained`` so published
+    ``*.linear.weight`` keys load through the native Transformers architecture.
+    The same Parameter object is then moved onto this PEFT-compatible module;
+    no pretrained value is copied, translated, or reinitialized.
     """
-    try:
-        from transformers.models.gemma4 import modeling_gemma4 as m
-    except ImportError:
-        return
 
-    if getattr(m, "_GEMMA4_CLIPPABLE_LINEAR_PATCH_APPLIED", False):
-        return
+    def __init__(self, source: nn.Module) -> None:
+        inner = getattr(source, "linear", None)
+        if not isinstance(inner, nn.Linear) or inner.bias is not None:
+            raise TypeError("expected a bias-free native Gemma4ClippableLinear wrapper")
+        super().__init__(
+            inner.in_features,
+            inner.out_features,
+            bias=False,
+            device=inner.weight.device,
+            dtype=inner.weight.dtype,
+        )
+        self.weight = inner.weight
+        self.use_clipped_linears = bool(getattr(source, "use_clipped_linears"))
+        if self.use_clipped_linears:
+            for name in ("input_min", "input_max", "output_min", "output_max"):
+                value = getattr(source, name, None)
+                if not isinstance(value, torch.Tensor):
+                    raise TypeError(f"native Gemma4ClippableLinear lacks buffer {name}")
+                self.register_buffer(name, value)
 
-    if issubclass(m.Gemma4ClippableLinear, nn.Linear):
-        m._GEMMA4_CLIPPABLE_LINEAR_PATCH_APPLIED = True
-        return
+    @property
+    def linear(self) -> "PeftCompatibleGemma4ClippableLinear":
+        return self
 
-    class PatchedGemma4ClippableLinear(nn.Linear):
-        # Signature matches transformers 5.5+ modeling_gemma4.Gemma4ClippableLinear
-        # (config, in_features, out_features); inner linear is always bias=False.
-        def __init__(self, config, in_features: int, out_features: int, **kwargs) -> None:
-            kwargs.pop("bias", None)
-            super().__init__(in_features, out_features, bias=False, **kwargs)
-            self.use_clipped_linears = config.use_clipped_linears
-            if self.use_clipped_linears:
-                self.register_buffer("input_min", torch.tensor(-float("inf")))
-                self.register_buffer("input_max", torch.tensor(float("inf")))
-                self.register_buffer("output_min", torch.tensor(-float("inf")))
-                self.register_buffer("output_max", torch.tensor(float("inf")))
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if self.use_clipped_linears:
+            hidden_states = torch.clamp(hidden_states, self.input_min, self.input_max)
+        hidden_states = super().forward(hidden_states)
+        if self.use_clipped_linears:
+            hidden_states = torch.clamp(hidden_states, self.output_min, self.output_max)
+        return hidden_states
 
-        @property
-        def linear(self) -> "PatchedGemma4ClippableLinear":
-            # Compatibility shim: upstream ``transformers.models.gemma4.modeling_gemma4``
-            # reads ``self.ffw_layer_1.linear.weight.dtype`` (and similar patterns
-            # for ``linear_start`` / ``post`` in the audio / vision tower blocks)
-            # on the assumption that ``Gemma4ClippableLinear`` still wraps an
-            # inner ``self.linear = nn.Linear(...)`` submodule. After this patch
-            # the class IS an ``nn.Linear``, so that attribute access would
-            # ``AttributeError`` without this shim, aborting the forward pass:
-            #
-            #   File "transformers/models/gemma4/modeling_gemma4.py", line 392,
-            #     in forward
-            #     gradient_clipping = min(
-            #         self.gradient_clipping,
-            #         torch.finfo(self.ffw_layer_1.linear.weight.dtype).max,
-            #     )
-            #   AttributeError: 'PatchedGemma4ClippableLinear' object has no
-            #     attribute 'linear'
-            #
-            # Returning ``self`` makes ``self.linear.weight`` resolve to
-            # ``self.weight`` — same tensor, same dtype. Defined as a
-            # ``@property`` (not a submodule) so it is not registered in
-            # ``self._modules`` and does not create a self-referential entry in
-            # ``named_modules`` / state-dict iteration.
-            return self
 
-        def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-            if self.use_clipped_linears:
-                hidden_states = torch.clamp(hidden_states, self.input_min, self.input_max)
-            hidden_states = super().forward(hidden_states)
-            if self.use_clipped_linears:
-                hidden_states = torch.clamp(hidden_states, self.output_min, self.output_max)
-            return hidden_states
+def convert_loaded_clippable_linears(model: nn.Module) -> int:
+    """Replace native loaded wrappers in-place while preserving Parameters exactly."""
+    converted = 0
+    for name, child in list(model.named_children()):
+        if child.__class__.__name__ == "Gemma4ClippableLinear":
+            setattr(model, name, PeftCompatibleGemma4ClippableLinear(child))
+            converted += 1
+        else:
+            converted += convert_loaded_clippable_linears(child)
+    return converted
 
-    m.Gemma4ClippableLinear = PatchedGemma4ClippableLinear
-    m._GEMMA4_CLIPPABLE_LINEAR_PATCH_APPLIED = True
+
+def apply_clippable_linear_patch() -> None:
+    """Reject the obsolete pre-load monkey patch."""
+    raise RuntimeError(
+        "pre-load Gemma4ClippableLinear patching is unsafe; load native weights "
+        "then call convert_loaded_clippable_linears(model)"
+    )

@@ -82,7 +82,18 @@ def compute_directory_integrity(
         include_patterns = _CHECKPOINT_EXTENSIONS
 
     if exclude_patterns is None:
-        exclude_patterns = {".git", "__pycache__", ".cache", "node_modules"}
+        # The manifest cannot content-address itself. Excluding it also makes
+        # repeated finalization (for example, stop then resume in one output
+        # directory) produce a verifiable replacement rather than hashing the
+        # previous manifest and immediately overwriting it.
+        exclude_patterns = {
+            ".git",
+            "__pycache__",
+            ".cache",
+            "node_modules",
+            INTEGRITY_MANIFEST_FILENAME,
+            f"{INTEGRITY_MANIFEST_FILENAME}.tmp",
+        }
 
     root_path = Path(directory).resolve()
     manifest: dict[str, Any] = {

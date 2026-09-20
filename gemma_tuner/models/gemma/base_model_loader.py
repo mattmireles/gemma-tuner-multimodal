@@ -50,11 +50,6 @@ def load_base_model_for_gemma(
     revision: str | None = None,
 ) -> Any:
     """Load base weights using the Auto class that matches ``config.architectures``."""
-    if family == GemmaFamily.GEMMA_4:
-        from gemma_tuner.models.gemma.gemma4_patches import apply_clippable_linear_patch
-
-        apply_clippable_linear_patch()
-
     try:
         config_kwargs = {"trust_remote_code": True}
         if revision:
@@ -74,7 +69,8 @@ def load_base_model_for_gemma(
         }
         if revision:
             load_kwargs["revision"] = revision
-        return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        return _convert_gemma4_linears_after_load(model, family, required=False)
 
     if not config_is_multimodal_gemma_like(config):
         load_kwargs = {
@@ -85,7 +81,11 @@ def load_base_model_for_gemma(
         }
         if revision:
             load_kwargs["revision"] = revision
-        return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        # Text-only fixtures may deliberately exercise Gemma-4 family routing
+        # without containing Gemma4ClippableLinear wrappers. Conversion is
+        # optional here; the real multimodal path below remains fail-closed.
+        return _convert_gemma4_linears_after_load(model, family, required=False)
 
     multimodal_lm: Any = None
     try:
@@ -112,6 +112,7 @@ def load_base_model_for_gemma(
             if revision:
                 load_kwargs["revision"] = revision
             model = loader_cls.from_pretrained(model_id, **load_kwargs)
+            model = _convert_gemma4_linears_after_load(model, family, required=True)
             logger.info("Loaded multimodal base model %s via %s", model_id, loader_cls.__name__)
             return model
         except Exception as e:
@@ -130,3 +131,21 @@ def load_base_model_for_gemma(
         f"AutoModelForImageTextToText (last error: {last_err!r}). "
         "Loading as CausalLM would omit encoder towers; aborting."
     ) from last_err
+
+
+def _convert_gemma4_linears_after_load(
+    model: Any,
+    family: GemmaFamily,
+    *,
+    required: bool,
+) -> Any:
+    if family != GemmaFamily.GEMMA_4:
+        return model
+    from gemma_tuner.models.gemma.gemma4_patches import convert_loaded_clippable_linears
+
+    converted = convert_loaded_clippable_linears(model)
+    if required and converted < 1:
+        raise RuntimeError("Gemma 4 model contained no native clippable linears to convert")
+    if converted:
+        logger.info("Converted %d loaded Gemma 4 clippable linears for PEFT", converted)
+    return model

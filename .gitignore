@@ -133,6 +133,7 @@ experiments.db
 distributed_training_result.pt
 output/
 data/audio/
+data/bundles/
 data/datasets/*
 # Allow the bundled happy-path sample dataset (CSVs only).
 !data/datasets/sample-text/
@@ -163,7 +164,8 @@ distributed_hosts.json
 /temp_configs/
 
 # Local implementation plans (not published)
-README/plans/
+README/plans/*
+!README/plans/gemma4-e4b-telepathic-context-sft.md
 
 # Agent / editor bundles (local only)
 .agents/

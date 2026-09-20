@@ -23,7 +23,7 @@ TINY_GEMMA = "fxmarty/tiny-random-GemmaForCausalLM"
     reason="Gemma 4 training path requires transformers>=5.5 (requirements/requirements-gemma4.txt)",
 )
 def test_text_completion_smoke_two_steps_gemma4_family(tmp_path, monkeypatch):
-    """Forces ``detect_family`` → GEMMA_4 so ``apply_clippable_linear_patch`` runs before load."""
+    """A text-only fixture can exercise GEMMA_4 routing without multimodal wrappers."""
     import gemma_tuner.utils.dataset_utils as du
     from gemma_tuner.core.config import load_profile_config
     from gemma_tuner.models.gemma import finetune as gemma_finetune

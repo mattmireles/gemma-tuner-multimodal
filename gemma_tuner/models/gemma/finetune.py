@@ -54,15 +54,20 @@ References:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import re
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Union
 
 if TYPE_CHECKING:
     from gemma_tuner.core.profile_config import ProfileConfig
 
 import torch
+import torch.nn.functional as F
 from datasets import Dataset as HFDataset
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import Dataset
@@ -97,8 +102,17 @@ from gemma_tuner.models.gemma.family import (
     assert_family_supported,
     detect_family,
 )
+from gemma_tuner.utils.checkpoints import (
+    ImmutableCheckpointCallback,
+    StopAfterStepCallback,
+    verify_complete_checkpoint,
+)
 from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
 from gemma_tuner.utils.device import empty_cache, get_device, to_bool
+from gemma_tuner.utils.gradient_receipt import (
+    GradientSubsystemReceiptCallback,
+    RedactedTrainingMetricsCallback,
+)
 from gemma_tuner.utils.integrity import create_integrity_manifest
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
@@ -107,6 +121,42 @@ from gemma_tuner.utils.integrity import create_integrity_manifest
 __all__ = ["DataCollatorGemmaAudio"]
 
 logger = logging.getLogger(__name__)
+
+
+def completion_only_causal_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+) -> torch.Tensor:
+    """Compute causal CE when Gemma returns only the supervised suffix logits."""
+    if logits.ndim != 3 or labels.ndim != 2:
+        raise ValueError("completion-only loss expects [B,K,V] logits and [B,L] labels")
+    kept = int(logits.shape[1])
+    if kept < 2 or kept > labels.shape[1]:
+        raise ValueError("completion-only logits length is incompatible with labels")
+    shift_logits = logits[:, :-1, :]
+    shift_labels = labels[:, -(kept - 1) :]
+    if attention_mask is not None:
+        shift_attention = attention_mask[:, -(kept - 1) :].to(dtype=torch.bool)
+        shift_logits = shift_logits[shift_attention]
+        shift_labels = shift_labels[shift_attention]
+    return F.cross_entropy(
+        shift_logits.reshape(-1, shift_logits.shape[-1]).float(),
+        shift_labels.reshape(-1).to(shift_logits.device),
+        ignore_index=GemmaTrainingConstants.IGNORE_TOKEN_ID,
+    )
+
+
+class CompletionOnlyTrainer(Trainer):
+    """Avoid full-sequence 256k-vocabulary logits for suffix-only SFT loss."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        prepared = dict(inputs)
+        labels = prepared.pop("labels")
+        attention_mask = prepared.get("attention_mask")
+        outputs = model(**prepared)
+        loss = completion_only_causal_loss(outputs.logits, labels, attention_mask)
+        return (loss, outputs) if return_outputs else loss
 
 
 def _test_mps_bfloat16_support(device: torch.device) -> bool:
@@ -284,6 +334,92 @@ def _raise_if_lora_targets_use_peft_incompatible_linears(model: torch.nn.Module,
     )
 
 
+def _validate_lora_target_regex(model: torch.nn.Module, pattern: str) -> List[str]:
+    try:
+        compiled = re.compile(pattern)
+    except re.error as exc:
+        raise ValueError(f"invalid lora_target_modules_regex: {exc}") from exc
+    matched: List[str] = []
+    incompatible: List[str] = []
+    for name, module in model.named_modules():
+        if not compiled.fullmatch(name):
+            continue
+        if not isinstance(module, torch.nn.Linear):
+            incompatible.append(f"{name} ({module.__class__.__name__})")
+        else:
+            matched.append(name)
+    if incompatible:
+        raise RuntimeError("lora_target_modules_regex matched non-linear modules: " + ", ".join(incompatible[:8]))
+    if not matched:
+        raise ValueError("lora_target_modules_regex matched no torch.nn.Linear modules")
+    return matched
+
+
+def _trainable_parameter_receipt(model: torch.nn.Module) -> dict[str, Any]:
+    by_subsystem = {
+        "vision": 0,
+        "projector": 0,
+        "decoder": 0,
+        "output_head": 0,
+        "audio": 0,
+        "other": 0,
+    }
+    names: List[str] = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if ".lm_head." in f".{name}." or name.startswith("lm_head."):
+            subsystem = "output_head"
+        elif "vision_tower" in name:
+            subsystem = "vision"
+        elif "embed_vision" in name:
+            subsystem = "projector"
+        elif "language_model" in name:
+            subsystem = "decoder"
+        elif "audio_tower" in name:
+            subsystem = "audio"
+        else:
+            subsystem = "other"
+        by_subsystem[subsystem] += parameter.numel()
+        names.append(name)
+    return {
+        "schema_version": "gemma_trainable_parameters_v1",
+        "by_subsystem": by_subsystem,
+        "total": sum(by_subsystem.values()),
+        "parameter_name_sha256": hashlib.sha256(("\n".join(sorted(names)) + "\n").encode()).hexdigest(),
+        "parameter_tensors": len(names),
+    }
+
+
+def _validate_conditioned_prompt_file(profile_config: "ProfileConfig") -> None:
+    column = profile_config.get("system_prompt_column")
+    template = profile_config.get("conditioned_system_prompt_template")
+    expected = profile_config.get("conditioned_system_prompt_sha256")
+    provenance = profile_config.get("system_prompt_provenance_path")
+    provenance_sha = profile_config.get("system_prompt_provenance_sha256")
+    if not column:
+        if template or expected or provenance or provenance_sha:
+            raise ValueError("system prompt provenance requires system_prompt_column")
+        return
+    if bool(template or expected) == bool(provenance or provenance_sha):
+        raise ValueError("system prompt requires exactly one template or per-row provenance pair")
+    path_value = template or provenance
+    digest_value = expected or provenance_sha
+    if not path_value or not digest_value:
+        raise ValueError("system prompt provenance path/hash pair is incomplete")
+    path = Path(str(path_value)).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError("system prompt provenance file is missing")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != str(digest_value):
+        raise ValueError("system prompt provenance hash mismatch")
+    if template:
+        text = path.read_text(encoding="utf-8")
+        for placeholder in ("{USER_FULL_NAME}", "{APPLICATION_NAME}"):
+            if placeholder not in text:
+                raise ValueError(f"conditioned system prompt template lacks {placeholder}")
+
+
 def main(profile_config: "ProfileConfig", output_dir: str):
     """Main Gemma 3n LoRA training entry.
 
@@ -298,6 +434,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     logger.setLevel(logging.INFO)
+    _validate_conditioned_prompt_file(profile_config)
     # Quiet down Hugging Face tokenizers dumping huge AddedToken lists
     try:
         hf_logging.set_verbosity_error()
@@ -454,6 +591,9 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     #
     # Called during LoRA configuration setup in main() function
     # Affects PEFT model creation via get_peft_model() later in this function
+    target_regex = profile_config.get("lora_target_modules_regex")
+    if target_regex and profile_config.get("lora_target_modules"):
+        raise ValueError("lora_target_modules_regex and lora_target_modules are mutually exclusive")
     target_modules_from_config = profile_config.get("lora_target_modules") or GemmaTrainingConstants.LORA_TARGET_MODULES
 
     if isinstance(target_modules_from_config, str):
@@ -485,7 +625,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     # Intersect: which of the requested names are actually present in the model?
     validated_target_modules = [m for m in target_modules_list if m in discovered_modules]
 
-    if not validated_target_modules:
+    if target_regex:
+        matched_target_modules = _validate_lora_target_regex(model, str(target_regex))
+        lora_target_spec: str | List[str] = str(target_regex)
+        logger.info("LoRA target regex matched %d linear modules", len(matched_target_modules))
+    elif not validated_target_modules:
         if user_specified_targets:
             # User explicitly asked for modules that don't exist → hard error.
             available = sorted({name.split(".")[-1] for name, _ in model.named_modules() if "." in name})
@@ -498,18 +642,29 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             # Defaults weren't found — use whatever _discover found (may be empty,
             # in which case PEFT will raise its own informative error).
             validated_target_modules = discovered_modules
+        lora_target_spec = validated_target_modules
+    else:
+        lora_target_spec = validated_target_modules
 
     lora_cfg = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
-        target_modules=validated_target_modules,
+        target_modules=lora_target_spec,
         bias="none",
         task_type="CAUSAL_LM",
     )
-    _raise_if_lora_targets_use_peft_incompatible_linears(model, validated_target_modules)
+    if not target_regex:
+        _raise_if_lora_targets_use_peft_incompatible_linears(model, validated_target_modules)
     model = get_peft_model(model, lora_cfg)
     model = model.to(device)
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    trainable_receipt = _trainable_parameter_receipt(model)
+    (Path(output_dir) / "trainable_parameters.json").write_text(
+        json.dumps(trainable_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     # Install kwarg filter at all PEFT nesting levels.
     # Prevents TypeErrors when HuggingFace Trainer injects unexpected kwargs
@@ -563,6 +718,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         image_sub_mode = str(profile_config.get("image_sub_mode", "caption")).strip().lower()
         image_path_col = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
         image_token_budget = int(profile_config.get("image_token_budget", 280))
+        image_view_policy = str(profile_config.get("image_view_policy", "single"))
+        system_prompt_column = profile_config.get("system_prompt_column")
         data_collator = DataCollatorGemmaImage(
             processor=processor,
             text_column=text_column,
@@ -570,6 +727,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             image_path_column=image_path_col,
             prompt_column=prompt_column,
             image_token_budget=image_token_budget,
+            image_view_policy=image_view_policy,
+            system_prompt_column=system_prompt_column,
+            require_telepathic_contract=to_bool(profile_config.get("require_telepathic_contract", False)),
+            completion_only_logits=to_bool(profile_config.get("completion_only_logits", False)),
+            max_length=max_seq_length,
             sub_mode=image_sub_mode,
         )
     elif modality == "audiovisual":
@@ -697,9 +859,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         gradient_accumulation_steps=gradient_accumulation_steps,
         num_train_epochs=num_train_epochs,
         learning_rate=learning_rate,
+        weight_decay=float(profile_config.get("weight_decay", 0.0)),
+        warmup_steps=int(profile_config.get("warmup_steps", 0)),
+        warmup_ratio=float(profile_config.get("warmup_ratio", 0.0)),
+        lr_scheduler_type=str(profile_config.get("lr_scheduler_type", "linear")),
         bf16=use_bf16,
         gradient_checkpointing=gradient_checkpointing,
         logging_steps=_logging_steps,
+        save_steps=int(profile_config.get("save_steps", 1000)),
+        save_total_limit=int(profile_config.get("save_total_limit", 10)),
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
         eval_strategy=effective_eval_strategy,
         report_to=[],
@@ -709,6 +877,9 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         # Avoid Trainer.evaluate() stalling on MPS (transformers#27181); matches gemma4-guide.md.
         skip_memory_metrics=True,
         torch_compile=resolve_training_torch_compile(device, profile_config),
+        seed=int(profile_config.get("seed", 42)),
+        data_seed=int(profile_config.get("seed", 42)),
+        full_determinism=to_bool(profile_config.get("full_determinism", False)),
     )
     _ms = profile_config.get("max_steps")
     if _ms is not None and _ms != "":
@@ -719,10 +890,23 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     set_seed(args.seed)
 
     trainer_callbacks: List[Any] = []
+    trainer_callbacks.append(ImmutableCheckpointCallback())
+    trainer_callbacks.append(RedactedTrainingMetricsCallback(output_dir))
+    stop_after_step = profile_config.get("stop_after_step")
+    if stop_after_step not in (None, ""):
+        trainer_callbacks.append(StopAfterStepCallback(int(stop_after_step)))
+    required_gradient_subsystems = str(profile_config.get("require_gradient_subsystems", "")).split(",")
+    if any(value.strip() for value in required_gradient_subsystems):
+        trainer_callbacks.append(
+            GradientSubsystemReceiptCallback(output_dir, required_gradient_subsystems)
+        )
     if _do_viz:
         trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _logging_steps)))
 
-    trainer_cls = GemmaVizTrainer if _do_viz else Trainer
+    completion_only_logits = to_bool(profile_config.get("completion_only_logits", False))
+    if _do_viz and completion_only_logits:
+        raise ValueError("completion_only_logits is not compatible with visualization")
+    trainer_cls = GemmaVizTrainer if _do_viz else (CompletionOnlyTrainer if completion_only_logits else Trainer)
     trainer_kwargs: dict[str, Any] = {}
     if _do_viz:
         trainer_kwargs["visualize"] = True
@@ -750,7 +934,14 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             )
 
     logger.info("Starting Gemma LoRA training...")
-    train_result = trainer.train()
+    resume_from_checkpoint = profile_config.get("resume_from_checkpoint")
+    if resume_from_checkpoint:
+        verify_complete_checkpoint(Path(str(resume_from_checkpoint)).expanduser().resolve())
+    train_result = trainer.train(
+        resume_from_checkpoint=(
+            str(Path(str(resume_from_checkpoint)).expanduser().resolve()) if resume_from_checkpoint else None
+        )
+    )
     logger.info("Training complete. Saving adapter...")
     trainer.save_model()
     if _do_viz:

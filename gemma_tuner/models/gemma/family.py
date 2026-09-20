@@ -78,6 +78,7 @@ def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
     if family == GemmaFamily.GEMMA_3N:
         return {
             "control_token": "<start_of_turn>",
+            "assistant_end_token": "<end_of_turn>",
             "supports_assistant_mask": True,
             "needs_clippable_patch": False,
             # Multimodal Gemma paths can omit these keys on some transformers versions; zeros match
@@ -91,6 +92,7 @@ def family_capabilities(family: GemmaFamily) -> Dict[str, Any]:
         # confuse them. See ``supports_assistant_mask`` below for why the primary HF
         # assistant-mask path is disabled for this family.
         "control_token": "<|turn>",
+        "assistant_end_token": "<turn|>",
         "supports_assistant_mask": False,
         "needs_clippable_patch": True,
         "needs_mm_token_type_ids_injection": True,
