@@ -134,3 +134,5 @@ def test_generation_messages_preserve_arm_difference_only() -> None:
     assert [message["role"] for message in compact] == ["user"]
     assert [message["role"] for message in conditioned] == ["system", "user"]
     assert compact[-1] == conditioned[-1]
+    full = evaluation.messages_for_generation(row, "full", views)
+    assert [message["role"] for message in full] == ["system", "user"]

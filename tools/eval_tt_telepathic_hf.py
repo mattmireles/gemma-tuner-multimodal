@@ -143,7 +143,7 @@ def existing_rows(path: Path, settings_sha256: str) -> dict[str, dict[str, Any]]
 
 def messages_for_generation(row: dict[str, str], arm: str, views: list[Any]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
-    if arm == "conditioned":
+    if arm in {"conditioned", "full"}:
         prompt = row.get("system_prompt", "")
         if not prompt:
             raise ValueError("conditioned row has no system prompt")
@@ -363,7 +363,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arm", choices=("compact", "conditioned"), required=True)
+    parser.add_argument("--arm", choices=("compact", "conditioned", "full"), required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument("--ids-json", type=Path)

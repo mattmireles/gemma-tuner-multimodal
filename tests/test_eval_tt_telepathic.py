@@ -49,6 +49,10 @@ def test_messages_differ_only_by_conditioned_system_role(tmp_path: Path) -> None
         {"role": "system", "content": "cut-down intent prompt"},
         {"role": "user", "content": "user prompt"},
     ]
+    assert evaluation.build_messages(conditioned, "full") == [
+        {"role": "system", "content": "cut-down intent prompt"},
+        {"role": "user", "content": "user prompt"},
+    ]
 
 
 @pytest.mark.parametrize(

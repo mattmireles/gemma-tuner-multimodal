@@ -126,6 +126,33 @@ def profile_for_rank64_followup(profiles: configparser.ConfigParser) -> None:
     })
 
 
+def profile_for_full_prompt_epoch(profiles: configparser.ConfigParser) -> None:
+    """One production-proxy epoch with exact half/final optimizer checkpoints."""
+    base = dict(profiles["profile:telepathic-full"])
+    base.update({
+        "dataset": "tt-screenshot-telepathic-v3-sft/full",
+        "lora_r": "64",
+        "lora_alpha": "128",
+        "lora_dropout": "0.05",
+        "learning_rate": "0.0001",
+        "weight_decay": "0.01",
+        "num_train_epochs": "1",
+        "gradient_accumulation_steps": "8",
+        "lr_scheduler_type": "cosine",
+        "warmup_steps": "0",
+        "warmup_ratio": "0.03",
+        "logging_steps": "1",
+        "save_strategy": "steps",
+        "save_steps": "78",
+        "save_total_limit": "2",
+        "eval_strategy": "no",
+        "load_validation": "false",
+        "require_gradient_subsystems": "vision,projector,decoder",
+        "completion_only_logits": "true",
+    })
+    profiles["profile:telepathic-full-r64-one-epoch"] = base
+
+
 def build(staging: Path, output: Path, contract_path: Path, *, smoke_id: str) -> dict[str, Any]:
     manifest_path = staging / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -138,7 +165,7 @@ def build(staging: Path, output: Path, contract_path: Path, *, smoke_id: str) ->
     written: dict[str, dict[str, int]] = {}
     file_hashes: dict[str, str] = {}
 
-    for arm in ("compact", "conditioned"):
+    for arm in ("compact", "conditioned", "full"):
         train_path = staging / arm / "train.csv"
         validation_path = staging / arm / "validation.csv"
         if sha256_file(train_path) != manifest["file_sha256"][f"{arm}/train.csv"]:
@@ -172,13 +199,23 @@ def build(staging: Path, output: Path, contract_path: Path, *, smoke_id: str) ->
     shutil.copy2(prompt_source, prompt_destination)
     file_hashes[prompt_destination.relative_to(output).as_posix()] = sha256_file(prompt_destination)
 
+    full_prompt_source = (ROOT / contract["dataset"]["full_prompt_path"]).resolve()
+    if sha256_file(full_prompt_source) != contract["dataset"]["full_prompt_sha256"]:
+        raise ValueError("full-prompt source hash mismatch")
+    full_prompt_destination = output / "full_prompt_source.jsonl"
+    shutil.copy2(full_prompt_source, full_prompt_destination)
+    file_hashes[full_prompt_destination.relative_to(output).as_posix()] = sha256_file(full_prompt_destination)
+
     profiles = configparser.ConfigParser(interpolation=None)
     profiles.read(staging / "profiles.ini")
     remote_root = "data/datasets/tt-screenshot-telepathic-v3-sft"
     profiles["profile:telepathic-conditioned"]["conditioned_system_prompt_template"] = (
         f"{remote_root}/intent_system_prompt.txt"
     )
-    for arm in ("compact", "conditioned"):
+    profiles["profile:telepathic-full"]["system_prompt_provenance_path"] = (
+        f"{remote_root}/full_prompt_source.jsonl"
+    )
+    for arm in ("compact", "conditioned", "full"):
         for subset in ("pilot", "overfit", "smoke"):
             dataset = f"tt-screenshot-telepathic-v3-sft/{arm}-{subset}"
             profiles[f"dataset:{dataset}"] = {
@@ -201,6 +238,7 @@ def build(staging: Path, output: Path, contract_path: Path, *, smoke_id: str) ->
         # test whether the first run was capacity/step limited before full SFT.
         if arm == "conditioned":
             profile_for_rank64_followup(profiles)
+    profile_for_full_prompt_epoch(profiles)
     profiles_path = output / "profiles.ini"
     with profiles_path.open("w", encoding="utf-8") as handle:
         profiles.write(handle)

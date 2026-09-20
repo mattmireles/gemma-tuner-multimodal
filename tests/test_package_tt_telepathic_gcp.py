@@ -52,3 +52,18 @@ def test_rank64_followup_is_conditioned_constant_lr_and_checkpointed() -> None:
     assert profile["save_strategy"] == "steps"
     assert profile["save_steps"] == "160"
     assert profile["save_total_limit"] == "3"
+
+
+def test_full_prompt_rank64_epoch_uses_accumulation_eight_and_624_row_checkpoint() -> None:
+    profiles = configparser.ConfigParser(interpolation=None)
+    profiles["profile:telepathic-full"] = {"model": "gemma4-e4b"}
+
+    package.profile_for_full_prompt_epoch(profiles)
+
+    profile = profiles["profile:telepathic-full-r64-one-epoch"]
+    assert profile["lora_r"] == "64"
+    assert profile["lora_alpha"] == "128"
+    assert profile["num_train_epochs"] == "1"
+    assert profile["gradient_accumulation_steps"] == "8"
+    assert profile["save_steps"] == "78"
+    assert profile["save_total_limit"] == "2"

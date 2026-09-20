@@ -99,7 +99,7 @@ def build_image_views(image: Any) -> list[Any]:
 def read_frozen_rows(
     *, arm: str, staging: Path, manifest_path: Path, count: int
 ) -> list[dict[str, str]]:
-    if arm not in {"compact", "conditioned"}:
+    if arm not in {"compact", "conditioned", "full"}:
         raise ValueError(f"unknown arm: {arm}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     frozen_ids = [str(value) for value in manifest["validation_first_20_ids"]]
@@ -122,8 +122,8 @@ def read_frozen_rows(
             raise FileNotFoundError(row["image_path"])
         if arm == "compact" and "system_prompt" in row:
             raise ValueError("compact validation ABI must omit the system_prompt column")
-        if arm == "conditioned" and not row.get("system_prompt", "").strip():
-            raise ValueError(f"conditioned row {row['id']} has no system prompt")
+        if arm in {"conditioned", "full"} and not row.get("system_prompt", "").strip():
+            raise ValueError(f"system-prompt row {row['id']} has no system prompt")
     return rows
 
 
@@ -131,7 +131,7 @@ def build_messages(row: dict[str, str], arm: str) -> list[dict[str, str]]:
     user = {"role": "user", "content": row["prompt"]}
     if arm == "compact":
         return [user]
-    if arm == "conditioned":
+    if arm in {"conditioned", "full"}:
         return [{"role": "system", "content": row["system_prompt"]}, user]
     raise ValueError(f"unknown arm: {arm}")
 
@@ -411,7 +411,7 @@ def run_mlx(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arm", choices=("compact", "conditioned"), required=True)
+    parser.add_argument("--arm", choices=("compact", "conditioned", "full"), required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--model-repo", default="mlx-community/gemma-4-e4b-it-bf16")
     parser.add_argument("--model-revision", required=True)
