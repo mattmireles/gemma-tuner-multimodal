@@ -99,6 +99,30 @@ def owner_diverse_subset(rows: list[dict[str, Any]], seed: str, count: int) -> l
     return selected
 
 
+def full_prompt_rows(dataset: dict[str, Any], authority_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Load v2 prompt bytes and prove all non-prompt identity against v3."""
+    source = (ROOT / dataset["full_prompt_path"]).resolve()
+    if sha256_file(source) != dataset["full_prompt_sha256"]:
+        raise ValueError("full-prompt dataset hash mismatch")
+    rows = [json.loads(line) for line in source.open(encoding="utf-8")]
+    by_id = {str(row["context_id"]): row for row in rows}
+    authority_by_id = {str(row["context_id"]): row for row in authority_rows}
+    if len(by_id) != len(rows) or set(by_id) != set(authority_by_id):
+        raise ValueError("full-prompt and v3 context IDs differ")
+    for context_id, authority in authority_by_id.items():
+        full = by_id[context_id]
+        for field in ("owner_id", "split", "target_json", "screenshot_local_path"):
+            if full.get(field) != authority.get(field):
+                raise ValueError(f"full-prompt row differs from v3 authority: {field}")
+        if not str(full.get("system_prompt", "")).strip():
+            raise ValueError("full-prompt row has no system prompt")
+        prompt = str(full.get("user_prompt", ""))
+        for tag in ("<first_pass_screenshot_ocr>", "</first_pass_screenshot_ocr>"):
+            if prompt.count(tag) != 1:
+                raise ValueError(f"full-prompt row requires exactly one {tag}")
+    return by_id
+
+
 def build(contract_path: Path, output: Path, *, verify_model: bool = False) -> dict[str, Any]:
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     if verify_model:
@@ -124,26 +148,7 @@ def build(contract_path: Path, output: Path, *, verify_model: bool = False) -> d
     if len(owners) != dataset["counts"]["owners"] or any(len(v) != 1 for v in owners.values()):
         raise ValueError("owner count or split isolation mismatch")
 
-    full_source = (ROOT / dataset["full_prompt_path"]).resolve()
-    if sha256_file(full_source) != dataset["full_prompt_sha256"]:
-        raise ValueError("full-prompt dataset hash mismatch")
-    full_by_id = {
-        str(row["context_id"]): row
-        for row in (json.loads(line) for line in full_source.open(encoding="utf-8"))
-    }
-    if set(full_by_id) != {str(row["context_id"]) for row in rows}:
-        raise ValueError("full-prompt and v3 context IDs differ")
-    for row in rows:
-        full = full_by_id[str(row["context_id"])]
-        for field in ("owner_id", "split", "target_json", "screenshot_local_path"):
-            if full.get(field) != row.get(field):
-                raise ValueError(f"full-prompt row differs from v3 authority: {field}")
-        if not str(full.get("system_prompt", "")).strip():
-            raise ValueError("full-prompt row has no system prompt")
-        prompt = str(full.get("user_prompt", ""))
-        for tag in ("<first_pass_screenshot_ocr>", "</first_pass_screenshot_ocr>"):
-            if prompt.count(tag) != 1:
-                raise ValueError(f"full-prompt row requires exactly one {tag}")
+    full_by_id = full_prompt_rows(dataset, rows)
 
     output.mkdir(parents=True, exist_ok=True)
     common_fields = ["id", "owner_id", "image_path", "prompt", "response", "image_view_policy"]
@@ -272,13 +277,7 @@ def build(contract_path: Path, output: Path, *, verify_model: bool = False) -> d
                 }
             )
         elif arm == "full":
-            profile.update(
-                {
-                    "system_prompt_column": "system_prompt",
-                    "system_prompt_provenance_path": str(full_source),
-                    "system_prompt_provenance_sha256": dataset["full_prompt_sha256"],
-                }
-            )
+            profile["system_prompt_column"] = "system_prompt"
         profiles[f"profile:telepathic-{arm}"] = profile
     profiles_path = output / "profiles.ini"
     temporary_profiles = output / "profiles.ini.tmp"

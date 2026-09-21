@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import configparser
+import importlib.util
 from pathlib import Path
 
 from PIL import Image
@@ -54,7 +54,7 @@ def test_rank64_followup_is_conditioned_constant_lr_and_checkpointed() -> None:
     assert profile["save_total_limit"] == "3"
 
 
-def test_full_prompt_rank64_epoch_uses_accumulation_eight_and_624_row_checkpoint() -> None:
+def test_full_prompt_rank64_epoch_uses_frozen_one_epoch_schedule() -> None:
     profiles = configparser.ConfigParser(interpolation=None)
     profiles["profile:telepathic-full"] = {"model": "gemma4-e4b"}
 
@@ -63,7 +63,34 @@ def test_full_prompt_rank64_epoch_uses_accumulation_eight_and_624_row_checkpoint
     profile = profiles["profile:telepathic-full-r64-one-epoch"]
     assert profile["lora_r"] == "64"
     assert profile["lora_alpha"] == "128"
+    assert profile["learning_rate"] == "0.0001"
     assert profile["num_train_epochs"] == "1"
     assert profile["gradient_accumulation_steps"] == "8"
+    assert profile["lr_scheduler_type"] == "constant"
+    assert profile["warmup_steps"] == "0"
+    assert profile["warmup_ratio"] == "0"
     assert profile["save_steps"] == "78"
     assert profile["save_total_limit"] == "2"
+    assert profiles["profile:telepathic-full-r64-half-epoch"]["stop_after_step"] == "78"
+
+
+def test_full_prompt_bundle_prunes_legacy_experiment_profiles() -> None:
+    profiles = configparser.ConfigParser(interpolation=None)
+    profiles["dataset_defaults"] = {"text_column": "response"}
+    profiles["group:gemma"] = {"dtype": "bfloat16"}
+    profiles["model:gemma-4-e4b-it-pinned"] = {"group": "gemma"}
+    profiles["dataset:tt-screenshot-telepathic-v3-sft/full"] = {"source": "full"}
+    profiles["profile:telepathic-full-r64-one-epoch"] = {"dataset": "full"}
+    profiles["profile:telepathic-full-r64-half-epoch"] = {"dataset": "full", "stop_after_step": "78"}
+    profiles["profile:telepathic-conditioned-overfit-r64-lr0.0001"] = {"dataset": "overfit"}
+
+    package.prune_to_full_prompt_epoch(profiles)
+
+    assert set(profiles.sections()) == {
+        "dataset_defaults",
+        "group:gemma",
+        "model:gemma-4-e4b-it-pinned",
+        "dataset:tt-screenshot-telepathic-v3-sft/full",
+        "profile:telepathic-full-r64-one-epoch",
+        "profile:telepathic-full-r64-half-epoch",
+    }

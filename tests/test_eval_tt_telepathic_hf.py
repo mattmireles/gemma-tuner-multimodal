@@ -75,6 +75,18 @@ def test_move_batch_to_device_preserves_scalar_model_kwargs() -> None:
     assert moved["logits_to_keep"] == 7
 
 
+def test_adapter_integrity_accepts_sealed_checkpoint_and_stock(tmp_path: Path) -> None:
+    assert evaluation.adapter_integrity_sha256(None) is None
+    marker = tmp_path / ".complete.json"
+    marker.write_text('{"global_step":78}\n', encoding="utf-8")
+    assert evaluation.adapter_integrity_sha256(tmp_path) == evaluation.sha256_file(marker)
+
+
+def test_adapter_integrity_rejects_unsealed_adapter(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="no checkpoint completion"):
+        evaluation.adapter_integrity_sha256(tmp_path)
+
+
 def test_completion_loss_contract_accepts_attention_mask() -> None:
     from gemma_tuner.models.gemma.finetune import completion_only_causal_loss
 
@@ -136,3 +148,4 @@ def test_generation_messages_preserve_arm_difference_only() -> None:
     assert compact[-1] == conditioned[-1]
     full = evaluation.messages_for_generation(row, "full", views)
     assert [message["role"] for message in full] == ["system", "user"]
+    assert full == conditioned

@@ -187,7 +187,17 @@ def peak_memory_bytes(torch_runtime: Any, device: str) -> int:
     return 0
 
 
-def load_runtime(adapter: Path, device: str):
+def adapter_integrity_sha256(adapter: Path | None) -> str | None:
+    if adapter is None:
+        return None
+    for name in (".complete.json", ".integrity.json"):
+        marker = adapter / name
+        if marker.is_file():
+            return sha256_file(marker)
+    raise ValueError("adapter has no checkpoint completion or run integrity marker")
+
+
+def load_runtime(adapter: Path | None, device: str):
     import torch
     from peft import PeftModel
     from transformers import AutoProcessor
@@ -204,7 +214,11 @@ def load_runtime(adapter: Path, device: str):
         attn_implementation="sdpa",
         revision=SOURCE_REVISION,
     )
-    model = PeftModel.from_pretrained(base, str(adapter), is_trainable=False).to(device)
+    model = (
+        PeftModel.from_pretrained(base, str(adapter), is_trainable=False)
+        if adapter is not None
+        else base
+    ).to(device)
     model.eval()
     return torch, processor, model, family
 
@@ -219,7 +233,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     from gemma_tuner.models.gemma.finetune import completion_only_causal_loss
 
     csv_path = args.csv.resolve()
-    adapter = args.adapter.resolve()
+    adapter = args.adapter.resolve() if args.adapter is not None else None
     ledger = args.ledger.resolve()
     source_rows = read_csv(csv_path)
     frozen_ids = None
@@ -230,7 +244,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "schema_version": "tt_telepathic_hf_eval_v1",
         "model_id": MODEL_ID,
         "model_revision": SOURCE_REVISION,
-        "adapter_integrity_sha256": sha256_file(adapter / ".integrity.json"),
+        "candidate": "stock" if adapter is None else "adapter",
+        "adapter_integrity_sha256": adapter_integrity_sha256(adapter),
         "csv_sha256": sha256_file(csv_path),
         "arm": args.arm,
         "count": len(rows),
@@ -257,8 +272,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         prompt_column="prompt",
         image_token_budget=280,
         image_view_policy="global_plus_four_nonoverlapping_quadrants",
-        system_prompt_column="system_prompt" if args.arm == "conditioned" else None,
-        require_telepathic_contract=True,
+        system_prompt_column="system_prompt" if args.arm in {"conditioned", "full"} else None,
+        require_telepathic_contract=args.arm != "full",
         completion_only_logits=True,
         max_length=16384,
         sub_mode="vqa",
@@ -314,13 +329,16 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                     )
                 losses[condition] = float(loss.item())
                 if condition == "correct":
-                    with model.disable_adapter(), torch_runtime.inference_mode():
-                        base_outputs = model(**prepared)
-                        base_loss = completion_only_causal_loss(
-                            base_outputs.logits,
-                            labels,
-                            prepared.get("attention_mask"),
-                        )
+                    if adapter is None:
+                        base_outputs = outputs
+                    else:
+                        with model.disable_adapter(), torch_runtime.inference_mode():
+                            base_outputs = model(**prepared)
+                    base_loss = completion_only_causal_loss(
+                        base_outputs.logits,
+                        labels,
+                        prepared.get("attention_mask"),
+                    )
                     losses["base_correct"] = float(base_loss.item())
             dependence = {
                 **losses,
@@ -364,7 +382,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--arm", choices=("compact", "conditioned", "full"), required=True)
-    parser.add_argument("--adapter", type=Path, required=True)
+    candidate = parser.add_mutually_exclusive_group(required=True)
+    candidate.add_argument("--adapter", type=Path)
+    candidate.add_argument("--stock", action="store_true")
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument("--ids-json", type=Path)
     parser.add_argument("--count", type=int)

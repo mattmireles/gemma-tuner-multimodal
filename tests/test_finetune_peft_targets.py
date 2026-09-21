@@ -133,6 +133,10 @@ def test_conditioned_prompt_hash_is_fail_closed(tmp_path) -> None:
         _validate_conditioned_prompt_file(config)
 
 
+def test_content_bound_per_row_system_prompts_need_no_template_file() -> None:
+    _validate_conditioned_prompt_file({"system_prompt_column": "system_prompt"})
+
+
 def test_completion_only_loss_matches_full_masked_causal_loss() -> None:
     torch.manual_seed(7)
     full_logits = torch.randn(1, 8, 13)

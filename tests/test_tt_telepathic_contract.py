@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from tools.gcp_tt_sft_contract import ContractError, load_contract, render_launch
-from tools.prepare_tt_telepathic_sft import owner_diverse_subset, parse_context, render_conditioned, stable_key
+from tools.prepare_tt_telepathic_sft import (
+    full_prompt_rows,
+    owner_diverse_subset,
+    parse_context,
+    render_conditioned,
+    stable_key,
+)
 
 
 def test_stable_order_is_deterministic_and_seeded() -> None:
@@ -68,8 +74,25 @@ def test_phase0_contract_budget_sums_and_hashes_exist() -> None:
     assert budget["owner_total"] == 500.0
     assert sum(budget["compute_phase_max_hours"].values()) == contract["gcp"]["maximum_program_compute_hours"]
     assert contract["messages"]["compact_system_role"] is False
+    assert contract["dataset"]["full_prompt_sha256"] == "61989be21337925ca8213e89fe72bd07f2bb8e2ff453ab7e99be8073d27f961a"
     assert contract["model"]["revision"] == "fee6332c1abaafb77f6f9624236c63aa2f1d0187"
     assert len(contract["model"]["files"]["model.safetensors"]) == 64
+    assert contract["target_abi"]["token_bounds_with_five_views"]["full"]["processor_total_max"] < 16384
+    assert contract["paired_training"]["full_prompt_one_epoch"]["checkpoint_steps"] == [78, 156]
+
+
+def test_full_prompt_source_is_content_bound_to_v3_authority() -> None:
+    root = Path(__file__).resolve().parents[1]
+    contract = json.loads((root / "config" / "telepathic_context_sft_phase0.json").read_text())
+    source = (root / contract["dataset"]["path"]).resolve()
+    authority = [json.loads(line) for line in source.open(encoding="utf-8")]
+
+    by_id = full_prompt_rows(contract["dataset"], authority)
+
+    assert len(by_id) == 1407
+    assert sum(row["split"] == "train" for row in by_id.values()) == 1246
+    assert all(row["system_prompt"].strip() for row in by_id.values())
+    assert all(row["user_prompt"].count("<first_pass_screenshot_ocr>") == 1 for row in by_id.values())
 
 
 def test_gcp_launch_is_identity_and_lease_bounded() -> None:

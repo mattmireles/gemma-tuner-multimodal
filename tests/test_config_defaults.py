@@ -17,3 +17,11 @@ def test_validate_profile_config_applies_fallbacks():
     assert lang_mode == "strict"
     assert isinstance(conf["max_duration"], float)
     assert isinstance(conf["max_label_length"], int)
+
+
+def test_stop_after_step_is_coerced_for_checkpoint_boundary() -> None:
+    conf = {"stop_after_step": "78"}
+
+    _validate_profile_config(conf, [])
+
+    assert conf["stop_after_step"] == 78

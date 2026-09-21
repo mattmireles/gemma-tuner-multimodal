@@ -166,6 +166,7 @@ distributed_hosts.json
 # Local implementation plans (not published)
 README/plans/*
 !README/plans/gemma4-e4b-telepathic-context-sft.md
+!README/plans/gemma4-e4b-full-prompt-r64-one-epoch-plan.md
 
 # Agent / editor bundles (local only)
 .agents/

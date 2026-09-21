@@ -395,29 +395,25 @@ def _validate_conditioned_prompt_file(profile_config: "ProfileConfig") -> None:
     column = profile_config.get("system_prompt_column")
     template = profile_config.get("conditioned_system_prompt_template")
     expected = profile_config.get("conditioned_system_prompt_sha256")
-    provenance = profile_config.get("system_prompt_provenance_path")
-    provenance_sha = profile_config.get("system_prompt_provenance_sha256")
     if not column:
-        if template or expected or provenance or provenance_sha:
-            raise ValueError("system prompt provenance requires system_prompt_column")
+        if template or expected:
+            raise ValueError("conditioned prompt template/hash require system_prompt_column")
         return
-    if bool(template or expected) == bool(provenance or provenance_sha):
-        raise ValueError("system prompt requires exactly one template or per-row provenance pair")
-    path_value = template or provenance
-    digest_value = expected or provenance_sha
-    if not path_value or not digest_value:
-        raise ValueError("system prompt provenance path/hash pair is incomplete")
-    path = Path(str(path_value)).expanduser().resolve()
+    if not template and not expected:
+        # Per-row system prompts are content-bound by the staged CSV and manifest.
+        return
+    if not template or not expected:
+        raise ValueError("conditioned system prompt template/hash pair is incomplete")
+    path = Path(str(template)).expanduser().resolve()
     if not path.is_file():
-        raise FileNotFoundError("system prompt provenance file is missing")
+        raise FileNotFoundError("conditioned system prompt template is missing")
     actual = hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual != str(digest_value):
-        raise ValueError("system prompt provenance hash mismatch")
-    if template:
-        text = path.read_text(encoding="utf-8")
-        for placeholder in ("{USER_FULL_NAME}", "{APPLICATION_NAME}"):
-            if placeholder not in text:
-                raise ValueError(f"conditioned system prompt template lacks {placeholder}")
+    if actual != str(expected):
+        raise ValueError("conditioned system prompt template hash mismatch")
+    text = path.read_text(encoding="utf-8")
+    for placeholder in ("{USER_FULL_NAME}", "{APPLICATION_NAME}"):
+        if placeholder not in text:
+            raise ValueError(f"conditioned system prompt template lacks {placeholder}")
 
 
 def main(profile_config: "ProfileConfig", output_dir: str):

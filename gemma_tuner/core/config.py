@@ -118,6 +118,7 @@ class ConfigConstants:
         "max_seq_length",
         "image_token_budget",
         "seed",
+        "stop_after_step",
     }
 
     FLOAT_COERCION_KEYS = {
@@ -673,8 +674,6 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         "system_prompt_column",
         "conditioned_system_prompt_template",
         "conditioned_system_prompt_sha256",
-        "system_prompt_provenance_path",
-        "system_prompt_provenance_sha256",
         "resume_from_checkpoint",
         "lora_target_modules_regex",
     ):
@@ -683,27 +682,23 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
             conf[optional_string] = str(value).strip() if value is not None and str(value).strip() else None
     if conf.get("lora_target_modules_regex") and conf.get("lora_target_modules"):
         raise ValueError("lora_target_modules_regex and lora_target_modules are mutually exclusive")
-    if conf.get("system_prompt_column"):
-        template_pair = (
-            conf.get("conditioned_system_prompt_template"),
-            conf.get("conditioned_system_prompt_sha256"),
-        )
-        provenance_pair = (
-            conf.get("system_prompt_provenance_path"),
-            conf.get("system_prompt_provenance_sha256"),
-        )
-        if not (all(template_pair) ^ all(provenance_pair)):
-            raise ValueError(
-                "system_prompt_column requires exactly one complete template or per-row provenance path/hash pair"
-            )
-        digest = str(template_pair[1] or provenance_pair[1])
+    if conf.get("system_prompt_column") and (
+        conf.get("conditioned_system_prompt_template")
+        or conf.get("conditioned_system_prompt_sha256")
+    ):
+        if not conf.get("conditioned_system_prompt_template") or not conf.get("conditioned_system_prompt_sha256"):
+            raise ValueError("conditioned system prompt template/hash pair is incomplete")
+        digest = str(conf["conditioned_system_prompt_sha256"])
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
-            raise ValueError("system prompt provenance must be lowercase SHA-256")
+            raise ValueError("conditioned_system_prompt_sha256 must be lowercase SHA-256")
 
     if "max_seq_length" in conf and conf["max_seq_length"] is not None and conf["max_seq_length"] != "":
         msl = int(conf["max_seq_length"]) if not isinstance(conf["max_seq_length"], int) else conf["max_seq_length"]
         if msl < 1:
             raise ValueError(f"max_seq_length must be >= 1, got {msl}")
+    if "stop_after_step" in conf and conf["stop_after_step"] not in (None, ""):
+        if int(conf["stop_after_step"]) < 1:
+            raise ValueError("stop_after_step must be >= 1")
 
     # Image-bearing modalities (defaults applied via FALLBACK_DEFAULTS; validation only when needed)
     modality_val = str(conf.get("modality", "audio")).strip().lower()
