@@ -113,6 +113,11 @@ from gemma_tuner.utils.gradient_receipt import (
     GradientSubsystemReceiptCallback,
     RedactedTrainingMetricsCallback,
 )
+from gemma_tuner.utils.exposure_ledger import (
+    ExposureCommitCallback,
+    ExposureLedger,
+    ExposureTrackingCollator,
+)
 from gemma_tuner.utils.integrity import create_integrity_manifest
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
@@ -744,6 +749,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             processor=processor, text_column=text_column, family=family, sampling_rate_hint=None
         )
 
+    exposure_ledger = None
+    if to_bool(profile_config.get("record_exposures", False)):
+        exposure_ledger = ExposureLedger(Path(output_dir) / "exposures.jsonl")
+        data_collator = ExposureTrackingCollator(data_collator, exposure_ledger)
+
     # WER metrics for speech runs only; text/image use loss / optional perplexity in train_results.
     compute_metrics_fn = None
     preprocess_logits_for_metrics = None
@@ -888,6 +898,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     trainer_callbacks: List[Any] = []
     trainer_callbacks.append(ImmutableCheckpointCallback())
     trainer_callbacks.append(RedactedTrainingMetricsCallback(output_dir))
+    if exposure_ledger is not None:
+        trainer_callbacks.append(ExposureCommitCallback(exposure_ledger))
     stop_after_step = profile_config.get("stop_after_step")
     if stop_after_step not in (None, ""):
         trainer_callbacks.append(StopAfterStepCallback(int(stop_after_step)))

@@ -94,3 +94,32 @@ def test_full_prompt_bundle_prunes_legacy_experiment_profiles() -> None:
         "profile:telepathic-full-r64-one-epoch",
         "profile:telepathic-full-r64-half-epoch",
     }
+
+
+def test_plan29_profile_freezes_one_epoch_quarter_checkpoints() -> None:
+    profiles = configparser.ConfigParser(interpolation=None)
+    profiles["profile:telepathic-plan29-r64-one-epoch"] = {
+        "lora_r": "64", "lora_alpha": "128", "lora_dropout": "0.05",
+        "learning_rate": "0.0001", "num_train_epochs": "1",
+        "gradient_accumulation_steps": "8", "lr_scheduler_type": "constant",
+            "save_steps": "88", "save_total_limit": "4", "max_seq_length": "24576",
+            "completion_only_logits": "true", "image_view_policy": "global_plus_four_nonoverlapping_quadrants",
+            "record_exposures": "true",
+        }
+    package.verify_plan29_profile(profiles)
+
+
+def test_plan29_bundle_preserves_only_plan29_profile(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    staging = root / "data" / "datasets" / "tt-screenshot-plan28-sft-v1"
+    if not staging.is_dir():
+        import pytest
+        pytest.skip("private Plan 29 staging not built")
+    result = package.build_plan29_bundle(staging, tmp_path / "bundle")
+    assert result["written"] == {"train": 2812, "validation": 252}
+    assert result["checkpoint_steps"] == [88, 176, 264, 352]
+    assert result["sealed_test_staged"] is False
+    profiles = configparser.ConfigParser(interpolation=None)
+    profiles.read(tmp_path / "bundle" / "profiles.ini")
+    assert "profile:telepathic-plan29-r64-one-epoch" in profiles
+    assert "profile:telepathic-full-r64-one-epoch" not in profiles

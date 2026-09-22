@@ -43,7 +43,7 @@ class GemmaTrainingConstants:
     LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
     # Default when profile omits base_model. Gemma 3n instruct — matches base
-    # transformers pin (<5.0); see README/plans/gemma4-upgrade.md for Gemma 4 setup.
+    # transformers pin (<5.0); see README/plans/002-gemma4-upgrade.md for Gemma 4 setup.
     DEFAULT_BASE_MODEL_ID = "google/gemma-3n-E2B-it"
 
     # Special token handling

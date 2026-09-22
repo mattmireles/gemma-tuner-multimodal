@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STAGING = ROOT / "data" / "datasets" / "tt-screenshot-telepathic-v3-sft"
 DEFAULT_OUTPUT = ROOT / "data" / "bundles" / "tt-screenshot-telepathic-v3-sft-gcp"
 DEFAULT_CONTRACT = ROOT / "config" / "telepathic_context_sft_phase0.json"
+DEFAULT_PLAN29_STAGING = ROOT / "data" / "datasets" / "tt-screenshot-plan28-sft-v1"
+DEFAULT_PLAN29_OUTPUT = ROOT / "data" / "bundles" / "tt-screenshot-plan28-sft-v1-gcp"
 
 
 def sha256_file(path: Path) -> str:
@@ -156,6 +158,75 @@ def profile_for_full_prompt_epoch(profiles: configparser.ConfigParser) -> None:
     profiles["profile:telepathic-full-r64-half-epoch"] = half
 
 
+def verify_plan29_profile(profiles: configparser.ConfigParser) -> None:
+    profile = profiles["profile:telepathic-plan29-r64-one-epoch"]
+    expected = {
+        "lora_r": "64", "lora_alpha": "128", "lora_dropout": "0.05",
+        "learning_rate": "0.0001", "num_train_epochs": "1",
+        "gradient_accumulation_steps": "8", "lr_scheduler_type": "constant",
+        "save_steps": "88", "save_total_limit": "4", "max_seq_length": "24576",
+        "completion_only_logits": "true", "image_view_policy": "global_plus_four_nonoverlapping_quadrants",
+        "record_exposures": "true",
+    }
+    for key, value in expected.items():
+        if profile.get(key) != value:
+            raise ValueError(f"Plan 29 profile changed: {key}")
+
+
+def build_plan29_bundle(staging: Path, output: Path) -> dict[str, Any]:
+    """Build the single-arm Plan 29 bundle without legacy experiment profiles."""
+    manifest_path = staging / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != "gemma4_e4b_plan29_private_staging_v1":
+        raise ValueError("unexpected Plan 29 staging schema")
+    output.mkdir(parents=True, exist_ok=True)
+    images = output / "images"
+    files: dict[str, str] = {}
+    written: dict[str, int] = {}
+    for split, expected in (("train", 2812), ("validation", 252)):
+        source = staging / "full" / f"{split}.csv"
+        if sha256_file(source) != manifest["file_sha256"][f"full/{split}.csv"]:
+            raise ValueError(f"Plan 29 staging {split} hash mismatch")
+        fields, rows = read_csv(source)
+        if len(rows) != expected:
+            raise ValueError(f"unexpected Plan 29 {split} row count")
+        projected = portable_rows(rows, selected_ids=None, images=images)
+        destination = output / "full" / f"{split}.csv"
+        write_csv(destination, fields, projected)
+        files[f"full/{split}.csv"] = sha256_file(destination)
+        written[split] = len(projected)
+    profiles = configparser.ConfigParser(interpolation=None)
+    profiles.read(staging / "profiles.ini")
+    verify_plan29_profile(profiles)
+    allowed = {
+        "dataset_defaults", "group:gemma", "model:gemma-4-e4b-it-pinned",
+        "dataset:tt-screenshot-plan28-sft-v1/full", "profile:telepathic-plan29-r64-one-epoch",
+    }
+    for section in list(profiles.sections()):
+        if section not in allowed:
+            profiles.remove_section(section)
+    if set(profiles.sections()) != allowed:
+        raise ValueError("Plan 29 bundle profile set changed")
+    profile_path = output / "profiles.ini"
+    with profile_path.open("w", encoding="utf-8") as handle:
+        profiles.write(handle)
+    files["profiles.ini"] = sha256_file(profile_path)
+    receipt = {
+        "schema_version": "gemma4_e4b_plan29_gcp_bundle_v1",
+        "source_manifest_sha256": sha256_file(manifest_path),
+        "written": written,
+        "images": len(list(images.iterdir())),
+        "image_bytes": sum(path.stat().st_size for path in images.iterdir()),
+        "file_sha256": files,
+        "profile": "telepathic-plan29-r64-one-epoch",
+        "checkpoint_steps": [88, 176, 264, 352],
+        "sealed_test_staged": False,
+    }
+    receipt_path = output / "bundle-manifest.json"
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return receipt
+
+
 def prune_to_full_prompt_epoch(profiles: configparser.ConfigParser) -> None:
     keep = {
         "dataset_defaults",
@@ -291,9 +362,15 @@ def main() -> None:
     parser.add_argument("--staging", type=Path, default=DEFAULT_STAGING)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
-    parser.add_argument("--smoke-id", required=True)
+    parser.add_argument("--smoke-id")
     parser.add_argument("--full-prompt-only", action="store_true")
+    parser.add_argument("--plan29", action="store_true")
     args = parser.parse_args()
+    if args.plan29:
+        print(json.dumps(build_plan29_bundle(args.staging.resolve(), args.output.resolve()), indent=2, sort_keys=True))
+        return
+    if not args.smoke_id:
+        parser.error("--smoke-id is required unless --plan29 is used")
     print(json.dumps(build(
         args.staging.resolve(), args.output.resolve(), args.contract.resolve(),
         smoke_id=args.smoke_id, full_prompt_only=args.full_prompt_only,

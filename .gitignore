@@ -165,8 +165,12 @@ distributed_hosts.json
 
 # Local implementation plans (not published)
 README/plans/*
-!README/plans/gemma4-e4b-telepathic-context-sft.md
-!README/plans/gemma4-e4b-full-prompt-r64-one-epoch-plan.md
+!README/plans/001-text-only-finetuning.md
+!README/plans/002-gemma4-upgrade.md
+!README/plans/003-image-finetuning.md
+!README/plans/004-gemma4-e4b-metal-inference-engine.md
+!README/plans/005-gemma4-e4b-telepathic-context-sft.md
+!README/plans/006-gemma4-e4b-full-prompt-r64-one-epoch-plan.md
 
 # Agent / editor bundles (local only)
 .agents/

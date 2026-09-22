@@ -15,6 +15,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "config" / "telepathic_context_sft_phase0.json"
 DEFAULT_OUTPUT = ROOT / "data" / "datasets" / "tt-screenshot-telepathic-v3-sft"
+DEFAULT_PLAN29_PROJECTION = ROOT.parent / "perfect-dictator" / "data" / "datasets" / "tt_screenshot_plan28_sft_v1" / "private" / "plan29-sft-v1"
+DEFAULT_PLAN29_OUTPUT = ROOT / "data" / "datasets" / "tt-screenshot-plan28-sft-v1"
 
 
 def sha256_file(path: Path) -> str:
@@ -97,6 +99,102 @@ def owner_diverse_subset(rows: list[dict[str, Any]], seed: str, count: int) -> l
         if not made_progress:
             raise ValueError("pilot subset is larger than available training rows")
     return selected
+
+
+def build_plan29_projection(source: Path, output: Path) -> dict[str, Any]:
+    """Project the sealed Plan 29 JSONL into the existing full-prompt trainer ABI."""
+    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != "tt_screenshot_plan28_sft_v1":
+        raise ValueError("unexpected Plan 29 projection schema")
+    output.mkdir(parents=True, exist_ok=True)
+    full = output / "full"
+    full.mkdir(parents=True, exist_ok=True)
+    fields = ["id", "owner_id", "image_path", "prompt", "response", "image_view_policy", "system_prompt"]
+    file_hashes: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    for split, expected in (("train", 2812), ("validation", 252)):
+        source_path = source / f"{split}.jsonl"
+        expected_file = manifest["files"][f"{split}.jsonl"]
+        if sha256_file(source_path) != expected_file["sha256"]:
+            raise ValueError(f"sealed Plan 29 {split} hash mismatch")
+        rows = [json.loads(line) for line in source_path.open(encoding="utf-8")]
+        if len(rows) != expected or len({row["id"] for row in rows}) != expected:
+            raise ValueError(f"unexpected Plan 29 {split} rows")
+        if any(row["split"] != split for row in rows):
+            raise ValueError("split mutation in Plan 29 projection")
+        destination = full / f"{split}.csv"
+        temporary = destination.with_suffix(".csv.tmp")
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for row in rows:
+                image = Path(row["image_path"])
+                if not image.is_file() or sha256_file(image) != row["image_sha256"]:
+                    raise ValueError("Plan 29 image binding failed")
+                if row["image_view_policy"] != "original-plus-four-quadrants":
+                    raise ValueError("Plan 29 view policy changed")
+                writer.writerow({
+                    "id": row["id"],
+                    "owner_id": row["owner_hash"],
+                    "image_path": str(image.resolve()),
+                    "prompt": row["user_prompt"],
+                    "response": row["response"],
+                    "image_view_policy": "global_plus_four_nonoverlapping_quadrants",
+                    "system_prompt": row["system_prompt"],
+                })
+        temporary.replace(destination)
+        counts[split] = len(rows)
+        file_hashes[f"full/{split}.csv"] = sha256_file(destination)
+    profiles = configparser.ConfigParser(interpolation=None)
+    profiles["DEFAULT"] = {
+        "num_train_epochs": "1", "logging_steps": "1", "save_steps": "88",
+        "save_total_limit": "4", "gradient_accumulation_steps": "8",
+        "learning_rate": "0.0001", "warmup_steps": "0", "output_dir": "output",
+    }
+    profiles["dataset_defaults"] = {
+        "text_column": "response", "max_label_length": "1024", "max_duration": "1.0",
+        "id_column": "id", "streaming_enabled": "false", "preprocessing_num_workers": "0",
+        "dataloader_num_workers": "0",
+    }
+    profiles["group:gemma"] = {"dtype": "bfloat16", "attn_implementation": "sdpa", "optim": "adamw_torch"}
+    profiles["model:gemma-4-e4b-it-pinned"] = {
+        "base_model": "google/gemma-4-E4B-it",
+        "model_revision": "fee6332c1abaafb77f6f9624236c63aa2f1d0187",
+        "group": "gemma", "per_device_train_batch_size": "1", "per_device_eval_batch_size": "1",
+    }
+    dataset_name = "tt-screenshot-plan28-sft-v1/full"
+    profiles[f"dataset:{dataset_name}"] = {"source": dataset_name, "train_split": "train", "validation_split": "validation"}
+    profiles["profile:telepathic-plan29-r64-one-epoch"] = {
+        "model": "gemma-4-e4b-it-pinned", "dataset": dataset_name, "modality": "image",
+        "image_sub_mode": "vqa", "image_path_column": "image_path", "prompt_column": "prompt",
+        "system_prompt_column": "system_prompt", "text_column": "response",
+        "image_token_budget": "280", "image_view_policy": "global_plus_four_nonoverlapping_quadrants",
+        "require_telepathic_contract": "false", "completion_only_logits": "true",
+        "max_seq_length": "24576", "gradient_checkpointing": "true", "full_determinism": "true",
+        "seed": "42", "load_validation": "false", "save_strategy": "steps", "save_steps": "88",
+        "save_total_limit": "4", "eval_strategy": "no", "lora_r": "64", "lora_alpha": "128",
+        "lora_dropout": "0.05", "learning_rate": "0.0001", "weight_decay": "0.01",
+        "num_train_epochs": "1", "gradient_accumulation_steps": "8", "lr_scheduler_type": "constant",
+        "warmup_steps": "0", "warmup_ratio": "0", "logging_steps": "1",
+        "require_gradient_subsystems": "vision,projector,decoder",
+        "record_exposures": "true",
+        "lora_target_modules_regex": "^(?:model\\.language_model\\..*\\.(?:q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)|model\\.vision_tower\\.encoder\\.layers\\.\\d+\\.(?:self_attn\\.(?:q_proj|k_proj|v_proj|o_proj)|mlp\\.(?:gate_proj|up_proj|down_proj))|model\\.embed_vision\\.embedding_projection)$",
+    }
+    profiles_path = output / "profiles.ini"
+    with profiles_path.open("w", encoding="utf-8") as handle:
+        profiles.write(handle)
+    file_hashes["profiles.ini"] = sha256_file(profiles_path)
+    output_manifest = {
+        "schema_version": "gemma4_e4b_plan29_private_staging_v1",
+        "source_manifest_sha256": sha256_file(source / "manifest.json"),
+        "file_sha256": file_hashes,
+        "written": {"full": counts},
+        "validation_order_ids": [row["id"] for row in [json.loads(line) for line in (source / "validation.jsonl").open()]],
+        "sealed_test": {"count": 232, "staged": False},
+    }
+    manifest_path = output / "manifest.json"
+    manifest_path.write_text(json.dumps(output_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {**output_manifest, "manifest_sha256": sha256_file(manifest_path)}
 
 
 def full_prompt_rows(dataset: dict[str, Any], authority_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -341,7 +439,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--verify-model", action="store_true")
+    parser.add_argument("--plan29-projection", type=Path)
+    parser.add_argument("--plan29-output", type=Path, default=DEFAULT_PLAN29_OUTPUT)
     args = parser.parse_args()
+    if args.plan29_projection:
+        print(json.dumps(build_plan29_projection(args.plan29_projection.resolve(), args.plan29_output.resolve()), indent=2, sort_keys=True))
+        return
     receipt = build(args.contract.resolve(), args.output.resolve(), verify_model=args.verify_model)
     if args.receipt:
         args.receipt.parent.mkdir(parents=True, exist_ok=True)

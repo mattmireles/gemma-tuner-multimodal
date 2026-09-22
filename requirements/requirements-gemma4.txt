@@ -5,7 +5,7 @@
 # Base pyproject.toml already requires transformers>=5.5.0; this file repeats
 # that pin and adds a PEFT floor for Gemma 4 LoRA. Use it when you want an
 # explicit one-shot install or to bump PEFT without re-reading pyproject.
-# See README/plans/gemma4-upgrade.md.
+# See README/plans/002-gemma4-upgrade.md.
 
 transformers>=5.5.0
 peft>=0.18.1
