@@ -132,6 +132,9 @@ experiments.csv
 experiments.db
 distributed_training_result.pt
 output/
+artifacts/runtime-receipts/
+artifacts/runtime-reviews/
+runtime/build/
 data/audio/
 data/bundles/
 data/datasets/*
@@ -140,6 +143,7 @@ data/datasets/*
 data/datasets/sample-text/.cache/
 data_patches/
 exports/
+tests/runtime/private/
 
 # IDE files
 .idea/

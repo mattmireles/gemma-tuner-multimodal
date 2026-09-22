@@ -71,6 +71,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -464,6 +465,61 @@ def export(
         revision: Optional Hugging Face revision (commit hash, tag, or branch)
     """
     ops.export(model_path_or_profile, model_revision=revision)
+
+
+@app.command(name="pack-runtime")
+def pack_runtime_command(
+    model_source: Path = typer.Argument(..., exists=True, file_okay=False, readable=True, help="HF/MLX export directory"),
+    output: Path = typer.Argument(..., help="New runtime package directory"),
+    model_id: str = typer.Option(..., "--model-id", help="Immutable source model identity"),
+    revision: str = typer.Option(..., "--revision", help="Immutable source revision or artifact identifier"),
+    source_kind: str = typer.Option("stock", "--source-kind", help="stock or merged_sft"),
+    upstream_export_manifest: Optional[Path] = typer.Option(
+        None,
+        "--upstream-export-manifest",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Required content manifest for a merged SFT export",
+    ),
+    coreml_package: Optional[Path] = typer.Option(
+        None,
+        "--coreml-package",
+        exists=True,
+        readable=True,
+        help="Optional compiled model or mlpackage for the vision encoder",
+    ),
+    assistant_revision: Optional[str] = typer.Option(
+        None,
+        "--assistant-revision",
+        help="Optional official MTP assistant revision",
+    ),
+):
+    """Create a deterministic, content-addressed Gemma 4 E4B runtime package.
+
+    The command validates exact E4B text/vision geometry and the W6 recipe
+    before copying weights. A merged SFT must be offline-merged and bind its
+    export manifest; this command never applies a LoRA or silently re-quantizes.
+    """
+
+    from gemma_tuner.runtime.package_schema import PackageValidationError
+    from gemma_tuner.runtime.packer import pack_runtime
+
+    try:
+        manifest = pack_runtime(
+            model_source,
+            output,
+            model_id=model_id,
+            revision=revision,
+            source_kind=source_kind,
+            upstream_export_manifest=upstream_export_manifest,
+            coreml_package=coreml_package,
+            assistant_revision=assistant_revision,
+        )
+    except PackageValidationError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Runtime package: {output.resolve()}")
+    typer.echo(f"Content SHA-256: {manifest['payload']['content_sha256']}")
 
 
 @app.command()
