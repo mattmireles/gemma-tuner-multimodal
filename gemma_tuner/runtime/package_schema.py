@@ -16,6 +16,7 @@ from typing import Any
 
 SCHEMA_VERSION = "gemma4-e4b-runtime-package-v1"
 ENGINE_ABI_MAJOR = 1
+TENSOR_INDEX_VERSION = "gemma4-tensor-index-v1"
 SOURCE_KINDS = frozenset({"stock", "merged_sft"})
 W6_RECIPE = {"bits": 6, "group_size": 64, "mode": "affine"}
 
@@ -165,7 +166,8 @@ def inspect_safetensors(path: Path) -> list[dict[str, Any]]:
     if not isinstance(header, dict):
         raise PackageValidationError(f"SafeTensors header must be an object: {path.name}")
 
-    data_bytes = size - 8 - header_length
+    data_start = 8 + header_length
+    data_bytes = size - data_start
     intervals: list[tuple[int, int, str]] = []
     tensors: list[dict[str, Any]] = []
     for name, descriptor in header.items():
@@ -198,11 +200,66 @@ def inspect_safetensors(path: Path) -> list[dict[str, Any]]:
                 f"tensor byte size mismatch for {name}: {offsets[1] - offsets[0]} != {expected_bytes}"
             )
         intervals.append((offsets[0], offsets[1], name))
-        tensors.append({"name": name, "dtype": dtype, "shape": shape, "shard": path.name})
+        tensors.append(
+            {
+                "name": name,
+                "dtype": dtype,
+                "shape": shape,
+                "shard": path.name,
+                "file_offset": data_start + offsets[0],
+                "byte_length": expected_bytes,
+            }
+        )
     for previous, current in zip(sorted(intervals), sorted(intervals)[1:]):
         if current[0] < previous[1]:
             raise PackageValidationError(f"overlapping tensor data in {path.name}: {previous[2]} and {current[2]}")
     return sorted(tensors, key=lambda tensor: tensor["name"])
+
+
+def tensor_index_bytes(entries: list[dict[str, Any]], *, path_prefix: str = "model") -> bytes:
+    """Encode the native tensor index without requiring a JSON parser in C++.
+
+    Runtime packages keep shards below ``model/``. Reference tooling may pass
+    an empty prefix so the same native reader can map an existing SafeTensors
+    directory without copying multi-gigabyte checkpoints.
+    """
+
+    lines = [TENSOR_INDEX_VERSION]
+    for tensor in sorted(entries, key=lambda value: value["name"]):
+        name = tensor.get("name")
+        dtype = tensor.get("dtype")
+        shard = tensor.get("shard")
+        shape = tensor.get("shape")
+        file_offset = tensor.get("file_offset")
+        byte_length = tensor.get("byte_length")
+        if not isinstance(name, str) or not name or any(character in name for character in "\t\r\n"):
+            raise PackageValidationError("tensor index contains an unsafe tensor name")
+        if not isinstance(dtype, str) or dtype not in _DTYPE_BYTES:
+            raise PackageValidationError(f"tensor index contains an invalid dtype for {name}")
+        if not isinstance(shard, str) or any(character in shard for character in "\t\r\n"):
+            raise PackageValidationError(f"tensor index contains an unsafe shard for {name}")
+        relative_path = safe_package_path(f"{path_prefix}/{shard}" if path_prefix else shard)
+        if not isinstance(shape, list) or any(not isinstance(dimension, int) or dimension < 0 for dimension in shape):
+            raise PackageValidationError(f"tensor index contains an invalid shape for {name}")
+        if not isinstance(file_offset, int) or file_offset < 0:
+            raise PackageValidationError(f"tensor index contains an invalid file offset for {name}")
+        if not isinstance(byte_length, int) or byte_length < 0:
+            raise PackageValidationError(f"tensor index contains an invalid byte length for {name}")
+        dimensions = ",".join(str(dimension) for dimension in shape)
+        lines.append(
+            "\t".join(
+                (
+                    name,
+                    dtype,
+                    relative_path,
+                    str(file_offset),
+                    str(byte_length),
+                    str(len(shape)),
+                    dimensions,
+                )
+            )
+        )
+    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def tensor_inventory(model_root: Path) -> dict[str, Any]:
@@ -237,6 +294,41 @@ def tensor_inventory(model_root: Path) -> dict[str, Any]:
         "dtypes": dict(sorted(dtypes.items())),
         "entries": entries,
     }
+
+
+def validate_w6_tensor_layout(entries: list[dict[str, Any]]) -> dict[str, int]:
+    """Validate MLX affine W6 triples without loading multi-gigabyte payloads."""
+
+    by_name = {str(entry["name"]): entry for entry in entries}
+    quantized = 0
+    for name, weight in by_name.items():
+        if weight["dtype"] != "U32":
+            continue
+        if not name.endswith(".weight"):
+            raise PackageValidationError(f"W6 U32 tensor is not a weight: {name}")
+        shape = weight["shape"]
+        if len(shape) != 2 or shape[0] <= 0 or shape[1] <= 0:
+            raise PackageValidationError(f"W6 packed weight must be rank two: {name}")
+        packed_columns = shape[1]
+        packed_bits = packed_columns * 32
+        if packed_bits % W6_RECIPE["bits"]:
+            raise PackageValidationError(f"W6 packed width is not divisible by six bits: {name}")
+        columns = packed_bits // W6_RECIPE["bits"]
+        if columns % W6_RECIPE["group_size"]:
+            raise PackageValidationError(f"W6 logical width is not group-aligned: {name}")
+        expected_aux_shape = [shape[0], columns // W6_RECIPE["group_size"]]
+        base = name[: -len(".weight")]
+        for suffix in ("scales", "biases"):
+            auxiliary_name = f"{base}.{suffix}"
+            auxiliary = by_name.get(auxiliary_name)
+            if auxiliary is None:
+                raise PackageValidationError(f"W6 tensor is missing {auxiliary_name}")
+            if auxiliary["dtype"] != "BF16" or auxiliary["shape"] != expected_aux_shape:
+                raise PackageValidationError(
+                    f"W6 auxiliary tensor has the wrong dtype or shape: {auxiliary_name}"
+                )
+        quantized += 1
+    return {"quantized_tensors": quantized, "bits": 6, "group_size": 64}
 
 
 def validate_manifest(manifest: dict[str, Any]) -> None:

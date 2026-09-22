@@ -118,5 +118,15 @@ class ExposureCommitCallback(TrainerCallback):
 
     def on_train_end(self, args, state, control, **kwargs):  # noqa: ANN001, ARG002
         if self.ledger.pending:
-            raise RuntimeError("training ended with an uncommitted exposure batch")
+            # A resumed TrainerState retains the original run's max_steps.
+            # The active segment ceiling lives on TrainingArguments and may be
+            # lower (88 -> 176 -> 264 -> 352).
+            active_max_steps = int(getattr(args, "max_steps", state.max_steps))
+            if int(state.global_step) < active_max_steps:
+                raise RuntimeError("training ended with an uncommitted exposure batch")
+            # Trainer may ask the dataloader for the next batch before noticing
+            # that max_steps was reached. The collator stages that prefetched
+            # identity, but no forward/backward callback follows. It is not an
+            # exposure and must not poison an otherwise complete segment.
+            self.ledger.pending.clear()
         return control

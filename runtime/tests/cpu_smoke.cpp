@@ -6,8 +6,8 @@
 int main() {
     gemma_runtime::DeviceCapabilities device;
     device.deviceName = "fixture";
-    device.macosMajor = 26;
-    device.macosMinor = 4;
+    device.macosMajor = 15;
+    device.macosMinor = 0;
     device.appleGpuFamily = 8;
     device.gpuCoreCount = 60;
     device.physicalMemoryBytes = 64ULL << 30;
@@ -20,6 +20,18 @@ int main() {
         std::cerr << device.json() << '\n';
         return EXIT_FAILURE;
     }
+    if (device.json().find("\"metal_language\":\"3.1\"") == std::string::npos) {
+        std::cerr << "Metal compatibility lane is missing from diagnostics\n";
+        return EXIT_FAILURE;
+    }
+    device.macosMajor = 14;
+    device.macosMinor = 6;
+    if (device.validationError() != "macos_15_0_required") {
+        std::cerr << "unsupported macOS version did not fail closed\n";
+        return EXIT_FAILURE;
+    }
+    device.macosMajor = 15;
+    device.macosMinor = 0;
     device.appleGpuFamily = 11;
     if (device.validationError() != "apple_gpu_family_7_through_10_required") {
         std::cerr << "unknown GPU family did not fail closed\n";

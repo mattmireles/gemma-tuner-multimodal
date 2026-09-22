@@ -131,3 +131,51 @@ def test_frozen_rows_follow_manifest_order_and_reject_compact_system_column(tmp_
         arm="compact", staging=staging, manifest_path=manifest_path, count=2
     )
     assert [row["id"] for row in rows] == ["1", "2"]
+
+
+def test_plan29_rows_follow_frozen_ids_and_require_full_prompt(tmp_path: Path) -> None:
+    image = tmp_path / "image.png"
+    Image.new("RGB", (2, 2)).save(image)
+    csv_path = tmp_path / "validation.csv"
+    csv_path.write_text(
+        "id,image_path,prompt,response,image_view_policy,system_prompt\n"
+        f"b,{image},pb,r,{evaluation.VIEW_POLICY},system\n"
+        f"a,{image},pa,r,{evaluation.VIEW_POLICY},system\n",
+        encoding="utf-8",
+    )
+    ids_path = tmp_path / "ids.json"
+    ids_path.write_text('["a","b"]\n', encoding="utf-8")
+    rows = evaluation.read_plan29_rows(csv_path=csv_path, ids_path=ids_path, count=None)
+    assert [row["id"] for row in rows] == ["a", "b"]
+    assert all(row["system_prompt"] == "system" for row in rows)
+
+
+def test_seed_generation_reuses_only_exact_inputs(tmp_path: Path) -> None:
+    image = tmp_path / "image.png"
+    Image.new("RGB", (2, 2)).save(image)
+    row = source_row("a", image, conditioned=True)
+    source = tmp_path / "source.jsonl"
+    source.write_text(
+        evaluation.canonical({
+            "example_id": "a", "image_path": str(image),
+            "image_sha256": evaluation.sha256_file(image),
+            "system_prompt": row["system_prompt"], "user_prompt": row["prompt"],
+            "candidate_output": '{"context_analysis":{}}', "elapsed_seconds": 1.0,
+            "prompt_tokens": 10, "generation_tokens": 5, "peak_memory_gb": 2.0,
+            "finish_reason": "stop", "settings_sha256": "old",
+        }) + "\n", encoding="utf-8"
+    )
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"settings": {
+        "model": "mlx-community/gemma-4-e4b-it-bf16",
+        "revision": "eec12d0899edea9b738ab1009af9159cdfd70d71",
+        "thinking": False, "temperature": 0.0, "max_tokens": 8192,
+    }}), encoding="utf-8")
+    ledger = tmp_path / "ledger.jsonl"
+    assert evaluation.seed_generation_rows(
+        source_path=source, source_receipt_path=receipt, rows=[row], ledger=ledger,
+        arm="full", settings_sha256="new", max_tokens=8192,
+    ) == 1
+    seeded = json.loads(ledger.read_text())
+    assert seeded["settings_sha256"] == "new"
+    assert seeded["reused_from"]["settings_sha256"] == "old"

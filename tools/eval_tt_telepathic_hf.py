@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import hashlib
 import json
 import math
@@ -179,6 +180,12 @@ def reset_peak_memory(torch_runtime: Any, device: str) -> None:
         torch_runtime.mps.empty_cache()
 
 
+def release_device_cache(torch_runtime: Any, device: str) -> None:
+    gc.collect()
+    if device == "mps" and hasattr(torch_runtime.mps, "empty_cache"):
+        torch_runtime.mps.empty_cache()
+
+
 def peak_memory_bytes(torch_runtime: Any, device: str) -> int:
     if device == "cuda":
         return int(torch_runtime.cuda.max_memory_allocated())
@@ -197,7 +204,9 @@ def adapter_integrity_sha256(adapter: Path | None) -> str | None:
     raise ValueError("adapter has no checkpoint completion or run integrity marker")
 
 
-def load_runtime(adapter: Path | None, device: str):
+def load_runtime(adapter: Path | None, device: str, *, merge_adapter: bool = False):
+    if merge_adapter and adapter is None:
+        raise ValueError("cannot merge without an adapter")
     import torch
     from peft import PeftModel
     from transformers import AutoProcessor
@@ -218,7 +227,10 @@ def load_runtime(adapter: Path | None, device: str):
         PeftModel.from_pretrained(base, str(adapter), is_trainable=False)
         if adapter is not None
         else base
-    ).to(device)
+    )
+    if merge_adapter:
+        model = model.merge_and_unload()
+    model = model.to(device)
     model.eval()
     return torch, processor, model, family
 
@@ -244,7 +256,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "schema_version": "tt_telepathic_hf_eval_v1",
         "model_id": MODEL_ID,
         "model_revision": SOURCE_REVISION,
-        "candidate": "stock" if adapter is None else "adapter",
+        "candidate": (
+            "stock" if adapter is None else "merged_adapter" if args.merge_adapter else "adapter"
+        ),
         "adapter_integrity_sha256": adapter_integrity_sha256(adapter),
         "csv_sha256": sha256_file(csv_path),
         "arm": args.arm,
@@ -263,7 +277,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
     device = resolve_device(torch, args.device)
-    torch_runtime, processor, model, family = load_runtime(adapter, device)
+    torch_runtime, processor, model, family = load_runtime(
+        adapter, device, merge_adapter=args.merge_adapter
+    )
     collator = DataCollatorGemmaImage(
         processor,
         text_column="response",
@@ -361,6 +377,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         append_jsonl(ledger, result)
         prior[row["id"]] = result
         print(canonical({"case": index, "total": len(rows), "valid": result["raw_valid_json"]}), flush=True)
+        # Do not retain the prior row's full generation and five-view batch
+        # until the next assignment. On MPS that pins many gigabytes of Metal
+        # allocations and can force the following row into swap.
+        del encoded, generated, completion, views, messages, prompt
+        release_device_cache(torch_runtime, device)
 
     ordered = [prior[row["id"]] for row in rows]
     receipt = {
@@ -385,6 +406,7 @@ def parse_args() -> argparse.Namespace:
     candidate = parser.add_mutually_exclusive_group(required=True)
     candidate.add_argument("--adapter", type=Path)
     candidate.add_argument("--stock", action="store_true")
+    parser.add_argument("--merge-adapter", action="store_true")
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument("--ids-json", type=Path)
     parser.add_argument("--count", type=int)
@@ -392,7 +414,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=8192)
     parser.add_argument("--image-dependence", action="store_true")
     parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.merge_adapter and args.adapter is None:
+        parser.error("--merge-adapter requires --adapter")
+    return args
 
 
 if __name__ == "__main__":

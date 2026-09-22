@@ -12,6 +12,7 @@ import argparse
 import copy
 import platform
 import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +104,15 @@ def move_inputs(inputs: dict[str, Any], device: str) -> dict[str, Any]:
     return {key: (value.to(device) if hasattr(value, "to") else value) for key, value in inputs.items()}
 
 
-def _capture_cache(torch_module: Any, cache: Any, tensors: dict[str, Any], prefix: str) -> dict[str, Any]:
+def _capture_cache(
+    torch_module: Any,
+    cache: Any,
+    tensors: dict[str, Any],
+    prefix: str,
+    *,
+    capture_shared_states: bool = False,
+    full_state_tensors: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     metadata: dict[str, Any] = {"type": type(cache).__name__}
     if hasattr(cache, "get_seq_length"):
         metadata["sequence_length"] = int(cache.get_seq_length())
@@ -118,11 +127,17 @@ def _capture_cache(torch_module: Any, cache: Any, tensors: dict[str, Any], prefi
         # A small deterministic slice is enough to detect ownership/layout drift.
         tensors[f"{prefix}.layer_{index}.key_edge"] = keys.detach().cpu()[..., :1, :8].contiguous()
         tensors[f"{prefix}.layer_{index}.value_edge"] = values.detach().cpu()[..., :1, :8].contiguous()
+        if full_state_tensors is not None:
+            full_state_tensors[f"{prefix}.layer_{index}.key"] = keys.detach().cpu().contiguous()
+            full_state_tensors[f"{prefix}.layer_{index}.value"] = values.detach().cpu().contiguous()
     shared = getattr(cache, "shared_layers", {})
     metadata["shared_layer_indexes"] = sorted(int(index) for index in shared)
     for index, pair in sorted(shared.items()):
         tensors[f"{prefix}.shared_{index}.key_edge"] = pair[0].detach().cpu()[..., :1, :8].contiguous()
         tensors[f"{prefix}.shared_{index}.value_edge"] = pair[1].detach().cpu()[..., :1, :8].contiguous()
+        if capture_shared_states:
+            tensors[f"{prefix}.shared_{index}.key"] = pair[0].detach().cpu().contiguous()
+            tensors[f"{prefix}.shared_{index}.value"] = pair[1].detach().cpu().contiguous()
     return metadata
 
 
@@ -148,6 +163,38 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
         attn_implementation="eager",
         local_files_only=args.local_files_only,
     ).eval()
+    safe_per_layer_gather = False
+    if device == "mps":
+        language_model = model.model.language_model
+        per_layer_weight = language_model.embed_tokens_per_layer.weight.detach()
+        if per_layer_weight.numel() * per_layer_weight.element_size() > 2**32:
+            safe_per_layer_gather = True
+            cpu_per_layer_weight = per_layer_weight
+            cpu_scale = torch.tensor(
+                language_model.embed_tokens_per_layer.scalar_embed_scale,
+                dtype=cpu_per_layer_weight.dtype,
+            )
+
+            def safe_get_per_layer_inputs(
+                self: Any,
+                input_ids: Any,
+                _inputs_embeds: Any,
+            ) -> Any:
+                if input_ids is None:
+                    raise RuntimeError("safe oversized per-layer gather requires input_ids")
+                ids_cpu = input_ids.detach().cpu()
+                gathered = torch.nn.functional.embedding(ids_cpu, cpu_per_layer_weight) * cpu_scale
+                gathered = gathered.reshape(
+                    *ids_cpu.shape,
+                    self.config.num_hidden_layers,
+                    self.config.hidden_size_per_layer_input,
+                )
+                return gathered.to(input_ids.device)
+
+            language_model.get_per_layer_inputs = types.MethodType(  # type: ignore[method-assign]
+                safe_get_per_layer_inputs,
+                language_model,
+            )
     model.to(device)
 
     inputs, _ = prepare_inputs(processor, fixture)
@@ -167,10 +214,12 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
     synchronize(torch, device)
 
     hidden_states = outputs.hidden_states or ()
+    hidden_tensors: dict[str, Any] = {}
     for index in args.layers:
         if index >= len(hidden_states):
             raise ValueError(f"requested hidden state {index}, but model returned {len(hidden_states)}")
-        tensors[f"decoder.hidden_{index}"] = hidden_states[index].detach().cpu().contiguous()
+        destination = hidden_tensors if args.hidden_output is not None else tensors
+        destination[f"decoder.hidden_{index}"] = hidden_states[index].detach().cpu().contiguous()
     tensors["decoder.last_logits"] = outputs.logits[:, -1:, :].detach().cpu().contiguous()
     next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
     tensors["decoder.greedy_next_token"] = next_token.detach().cpu().contiguous()
@@ -179,7 +228,15 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
     if outputs.audio_hidden_states is not None:
         tensors["encoder.audio_soft_tokens"] = outputs.audio_hidden_states.detach().cpu().contiguous()
 
-    cache_metadata = _capture_cache(torch, outputs.past_key_values, tensors, "cache.prefill")
+    full_cache_tensors: dict[str, Any] = {}
+    cache_metadata = _capture_cache(
+        torch,
+        outputs.past_key_values,
+        tensors,
+        "cache.prefill",
+        capture_shared_states=True,
+        full_state_tensors=full_cache_tensors if args.full_cache_output is not None else None,
+    )
     transition_metadata: dict[str, Any] = {"attempted": True}
     attention_mask = device_inputs.get("attention_mask")
     if attention_mask is None:
@@ -195,16 +252,55 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
         cache_position=cache_position,
         use_cache=True,
     )
+    for name, value in prepared.items():
+        if isinstance(value, torch.Tensor):
+            tensors[f"transition.{name}"] = value.detach().cpu().contiguous()
     synchronize(torch, device)
     with torch.inference_mode():
-        next_outputs = model(**prepared, return_dict=True)
+        next_outputs = model(**prepared, output_hidden_states=True, return_dict=True)
     synchronize(torch, device)
     tensors["decoder.transition_logits"] = next_outputs.logits[:, -1:, :].detach().cpu().contiguous()
-    transition_metadata.update(_capture_cache(torch, next_outputs.past_key_values, tensors, "cache.transition"))
+    transition_token = next_outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+    tensors["decoder.transition_greedy_next_token"] = transition_token.detach().cpu().contiguous()
+    for index, hidden_state in enumerate(next_outputs.hidden_states or ()):
+        tensors[f"decoder.transition_hidden_{index}"] = hidden_state.detach().cpu().contiguous()
+    transition_metadata.update(
+        _capture_cache(
+            torch,
+            next_outputs.past_key_values,
+            tensors,
+            "cache.transition",
+            full_state_tensors=full_cache_tensors if args.full_cache_output is not None else None,
+        )
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     tensor_path = args.output_dir / f"{row['fixture_id']}.safetensors"
     save_file(tensors, str(tensor_path))
+    hidden_metadata = None
+    if args.hidden_output is not None:
+        hidden_path = args.hidden_output.resolve()
+        if hidden_path == tensor_path.resolve():
+            raise ValueError("--hidden-output must differ from the primary tensor receipt")
+        hidden_path.parent.mkdir(parents=True, exist_ok=True)
+        save_file(hidden_tensors, str(hidden_path))
+        hidden_metadata = {
+            "path": str(hidden_path),
+            "sha256": sha256_file(hidden_path),
+            "tensor_names": sorted(hidden_tensors),
+        }
+    full_cache_metadata = None
+    if args.full_cache_output is not None:
+        full_cache_path = args.full_cache_output.resolve()
+        if full_cache_path in {tensor_path.resolve(), args.hidden_output.resolve() if args.hidden_output else None}:
+            raise ValueError("--full-cache-output must differ from the other tensor receipts")
+        full_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        save_file(full_cache_tensors, str(full_cache_path))
+        full_cache_metadata = {
+            "path": str(full_cache_path),
+            "sha256": sha256_file(full_cache_path),
+            "tensor_names": sorted(full_cache_tensors),
+        }
     metadata = {
         "schema_version": "gemma4-e4b-reference-capture-v1",
         "fixture_id": row["fixture_id"],
@@ -219,12 +315,17 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
         },
         "capture": {
             "hidden_state_indexes": args.layers,
+            "safe_per_layer_embedding_gather": safe_per_layer_gather,
             "cache_prefill": cache_metadata,
             "cache_transition": transition_metadata,
-            "tensor_names": sorted(tensors),
+            "tensor_names": sorted([*tensors, *hidden_tensors]),
         },
         "tensors": {"path": tensor_path.name, "sha256": sha256_file(tensor_path)},
     }
+    if hidden_metadata is not None:
+        metadata["hidden_tensors"] = hidden_metadata
+    if full_cache_metadata is not None:
+        metadata["full_cache_tensors"] = full_cache_metadata
     metadata_path = args.output_dir / f"{row['fixture_id']}.json"
     metadata_path.write_text(canonical_json(metadata) + "\n", encoding="utf-8")
     return metadata
@@ -239,8 +340,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--revision", required=True)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--dtype", choices=("bf16", "fp16", "fp32"), default="bf16")
-    parser.add_argument("--layers", type=parse_layers, default=parse_layers("0,5,6,23,24,41,42"))
+    parser.add_argument("--layers", type=parse_layers, default=parse_layers("0,1,5,6,23,24,25,41,42"))
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/runtime-receipts/reference"))
+    parser.add_argument(
+        "--hidden-output",
+        type=Path,
+        help="write requested decoder hidden states to a separate SafeTensors file",
+    )
+    parser.add_argument(
+        "--full-cache-output",
+        type=Path,
+        help="write complete prefill and transition physical cache tensors separately",
+    )
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
     return parser.parse_args()

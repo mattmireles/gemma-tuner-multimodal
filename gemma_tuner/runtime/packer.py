@@ -19,9 +19,11 @@ from .package_schema import (
     safe_package_path,
     sha256_entries,
     sha256_file,
+    tensor_index_bytes,
     tensor_inventory,
     validate_gemma4_e4b_config,
     validate_manifest,
+    validate_w6_tensor_layout,
 )
 
 _MODEL_SUFFIXES = frozenset({".json", ".safetensors", ".jinja", ".model"})
@@ -106,6 +108,7 @@ def pack_runtime(
     config = _json_object(source / "config.json")
     quantization = validate_gemma4_e4b_config(config, source_kind)
     tensors = tensor_inventory(source)
+    w6_layout = validate_w6_tensor_layout(tensors["entries"]) if quantization is not None else None
 
     upstream = Path(upstream_export_manifest).resolve() if upstream_export_manifest else None
     if source_kind == "merged_sft" and (upstream is None or not upstream.is_file()):
@@ -123,8 +126,11 @@ def pack_runtime(
         model_destination.mkdir()
         for path in files:
             shutil.copyfile(path, model_destination / path.name)
+        metadata_destination = temporary / "metadata"
+        metadata_destination.mkdir()
+        (metadata_destination / "tensor-index.tsv").write_bytes(tensor_index_bytes(tensors["entries"]))
         if upstream is not None:
-            _copy_tree(upstream, temporary / "metadata" / "upstream-export-manifest.json")
+            _copy_tree(upstream, metadata_destination / "upstream-export-manifest.json")
         if coreml is not None:
             suffix = coreml.suffix if coreml.is_file() else ".mlpackage"
             _copy_tree(coreml, temporary / f"vision{suffix}")
@@ -144,6 +150,7 @@ def pack_runtime(
                 "geometry": EXPECTED_GEOMETRY,
                 "config_sha256": sha256_file(source / "config.json"),
                 "quantization": quantization,
+                "w6_layout": w6_layout,
                 "tensors": tensors,
             },
             "processor": {

@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from gemma_tuner.runtime.package_schema import EXPECTED_GEOMETRY, PackageValidationError, canonical_json_bytes
+from gemma_tuner.runtime.package_schema import (
+    EXPECTED_GEOMETRY,
+    PackageValidationError,
+    canonical_json_bytes,
+    inspect_safetensors,
+    tensor_index_bytes,
+    validate_w6_tensor_layout,
+)
 from gemma_tuner.runtime.packer import pack_runtime, verify_runtime_package
 
 
@@ -60,6 +67,29 @@ def test_stock_package_is_byte_deterministic(tmp_path: Path) -> None:
     for entry in manifest_a["payload"]["files"]:
         assert (first / entry["path"]).read_bytes() == (second / entry["path"]).read_bytes()
     assert verify_runtime_package(first) == manifest_a
+    assert manifest_a["model"]["tensors"]["entries"] == [
+        {
+            "name": "model.weight",
+            "dtype": "BF16",
+            "shape": [2],
+            "shard": "model.safetensors",
+            "file_offset": 74,
+            "byte_length": 4,
+        }
+    ]
+    assert (first / "metadata" / "tensor-index.tsv").read_text(encoding="utf-8") == (
+        "gemma4-tensor-index-v1\n"
+        "model.weight\tBF16\tmodel/model.safetensors\t74\t4\t1\t2\n"
+    )
+
+
+def test_reference_index_can_address_an_existing_safetensors_directory(tmp_path: Path) -> None:
+    source = _model(tmp_path / "model")
+    entries = inspect_safetensors(source / "model.safetensors")
+    assert tensor_index_bytes(entries, path_prefix="").decode() == (
+        "gemma4-tensor-index-v1\n"
+        "model.weight\tBF16\tmodel.safetensors\t74\t4\t1\t2\n"
+    )
 
 
 def test_merged_sft_binds_export_manifest(tmp_path: Path) -> None:
@@ -133,3 +163,29 @@ def test_geometry_mismatch_fails_before_output_creation(tmp_path: Path) -> None:
     with pytest.raises(PackageValidationError, match="patch_size"):
         pack_runtime(source, output, model_id="test/gemma", revision="abc")
     assert not output.exists()
+
+
+def test_w6_layout_validates_affine_triples() -> None:
+    entries = [
+        {"name": "x.weight", "dtype": "U32", "shape": [2, 12]},
+        {"name": "x.scales", "dtype": "BF16", "shape": [2, 1]},
+        {"name": "x.biases", "dtype": "BF16", "shape": [2, 1]},
+    ]
+    assert validate_w6_tensor_layout(entries) == {"quantized_tensors": 1, "bits": 6, "group_size": 64}
+
+
+def test_w6_layout_rejects_missing_or_misshaped_auxiliary() -> None:
+    missing = [
+        {"name": "x.weight", "dtype": "U32", "shape": [2, 12]},
+        {"name": "x.scales", "dtype": "BF16", "shape": [2, 1]},
+    ]
+    with pytest.raises(PackageValidationError, match="x.biases"):
+        validate_w6_tensor_layout(missing)
+
+    wrong_shape = [
+        {"name": "x.weight", "dtype": "U32", "shape": [2, 12]},
+        {"name": "x.scales", "dtype": "BF16", "shape": [2, 2]},
+        {"name": "x.biases", "dtype": "BF16", "shape": [2, 1]},
+    ]
+    with pytest.raises(PackageValidationError, match="wrong dtype or shape"):
+        validate_w6_tensor_layout(wrong_shape)

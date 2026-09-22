@@ -97,6 +97,22 @@ def test_completion_loss_contract_accepts_attention_mask() -> None:
     assert torch.isfinite(loss)
 
 
+def test_merge_adapter_requires_an_adapter() -> None:
+    # The fail-closed condition is evaluated before an adapter can be merged.
+    with pytest.raises(ValueError, match="without an adapter"):
+        evaluation.load_runtime(None, "cpu", merge_adapter=True)
+
+
+def test_release_device_cache_empties_mps_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    runtime = type("Runtime", (), {
+        "mps": type("MPS", (), {"empty_cache": lambda self: calls.append("mps")})()
+    })()
+    monkeypatch.setattr(evaluation.gc, "collect", lambda: calls.append("gc"))
+    evaluation.release_device_cache(runtime, "mps")
+    assert calls == ["gc", "mps"]
+
+
 def test_cyclic_permutation_never_reuses_own_image() -> None:
     rows = [
         {"id": "a", "image_path": "a.png"},

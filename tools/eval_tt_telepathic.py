@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate matched telepathic-context candidates and blind Terra work items.
+"""Generate matched telepathic-context candidates and blind judge work items.
 
 Generation ledgers contain private screenshots, prompts, and model outputs. They
 must remain under the ignored private staging directory. Checked-in receipts are
@@ -127,6 +127,35 @@ def read_frozen_rows(
     return rows
 
 
+def read_plan29_rows(
+    *, csv_path: Path, ids_path: Path, count: int | None
+) -> list[dict[str, str]]:
+    ids = [str(value) for value in json.loads(ids_path.read_text(encoding="utf-8"))]
+    if count is not None:
+        if count < 1 or count > len(ids):
+            raise ValueError(f"count must be in [1, {len(ids)}]")
+        ids = ids[:count]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate Plan 29 IDs")
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        rows_by_id = {str(row["id"]): row for row in csv.DictReader(handle)}
+    missing = [example_id for example_id in ids if example_id not in rows_by_id]
+    if missing:
+        raise ValueError(f"missing {len(missing)} Plan 29 IDs")
+    rows = [rows_by_id[example_id] for example_id in ids]
+    for row in rows:
+        image_path = Path(row["image_path"])
+        if not image_path.is_absolute():
+            row["image_path"] = str((csv_path.parent / image_path).resolve())
+        if row.get("image_view_policy") != VIEW_POLICY:
+            raise ValueError(f"wrong view policy for {row['id']}")
+        if not Path(row["image_path"]).is_file():
+            raise FileNotFoundError(row["image_path"])
+        if not row.get("system_prompt", "").strip():
+            raise ValueError(f"Plan 29 row {row['id']} has no full system prompt")
+    return rows
+
+
 def build_messages(row: dict[str, str], arm: str) -> list[dict[str, str]]:
     user = {"role": "user", "content": row["prompt"]}
     if arm == "compact":
@@ -170,6 +199,70 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(canonical(row) + "\n")
         handle.flush()
+
+
+def seed_generation_rows(
+    *, source_path: Path, source_receipt_path: Path, rows: list[dict[str, str]],
+    ledger: Path, arm: str, settings_sha256: str, max_tokens: int,
+) -> int:
+    receipt = json.loads(source_receipt_path.read_text(encoding="utf-8"))
+    expected = {
+        "model": "mlx-community/gemma-4-e4b-it-bf16",
+        "revision": "eec12d0899edea9b738ab1009af9159cdfd70d71",
+        "thinking": False,
+        "temperature": 0.0,
+        "max_tokens": max_tokens,
+    }
+    for key, value in expected.items():
+        if receipt.get("settings", {}).get(key) != value:
+            raise ValueError(f"seed receipt setting mismatch: {key}")
+    selected = {row["id"]: row for row in rows}
+    existing = read_generation_ledger(ledger, arm=arm, settings_sha256=settings_sha256)
+    seeded = 0
+    for line in source_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        source = json.loads(line)
+        row = selected.get(str(source["example_id"]))
+        if row is None or row["id"] in existing:
+            continue
+        if (
+            source.get("image_path") != row["image_path"]
+            or source.get("image_sha256") != sha256_file(Path(row["image_path"]))
+            or source.get("system_prompt") != row["system_prompt"]
+            or source.get("user_prompt") != row["prompt"]
+        ):
+            raise ValueError(f"seed input mismatch: {row['id']}")
+        candidate = str(source["candidate_output"]).strip()
+        valid_json, normalized_sha = parse_candidate_json(candidate)
+        copied = {
+            "schema_version": SCHEMA_VERSION,
+            "arm": arm,
+            "settings_sha256": settings_sha256,
+            "example_id": row["id"],
+            "image_ref": row["image_path"],
+            "image_sha256": source["image_sha256"],
+            "system_instruction": row["system_prompt"],
+            "user_message": row["prompt"],
+            "candidate_output": candidate,
+            "candidate_sha256": sha256_text(candidate),
+            "normalized_json_sha256": normalized_sha,
+            "raw_valid_json": valid_json,
+            "elapsed_seconds": float(source["elapsed_seconds"]),
+            "prompt_tokens": int(source["prompt_tokens"]),
+            "generation_tokens": int(source["generation_tokens"]),
+            "peak_memory_gb": float(source["peak_memory_gb"]),
+            "finish_reason": source.get("finish_reason"),
+            "reused_from": {
+                "ledger_sha256": sha256_file(source_path),
+                "receipt_sha256": sha256_file(source_receipt_path),
+                "settings_sha256": source.get("settings_sha256"),
+            },
+        }
+        append_jsonl(ledger, copied)
+        existing[row["id"]] = copied
+        seeded += 1
+    return seeded
 
 
 def generate_rows(
@@ -273,8 +366,6 @@ def build_blind_work_items(
             "image_sha256": str(row["image_sha256"]),
             "rendered_prompt": rendered,
             "rendered_prompt_sha256": sha256_text(rendered),
-            "judge_model": "gpt-5.6-terra",
-            "judge_effort": "high",
         }
         if PROHIBITED_WORK_ITEM_FIELDS.intersection(item):
             raise AssertionError("work item violates blind-evaluation contract")
@@ -298,36 +389,87 @@ def run_mlx(args: argparse.Namespace) -> dict[str, Any]:
     from PIL import Image
 
     model_path = args.model.resolve()
-    staging = args.staging.resolve()
-    manifest = staging / "manifest.json"
-    rows = read_frozen_rows(
-        arm=args.arm, staging=staging, manifest_path=manifest, count=args.count
-    )
+    staging = args.staging.resolve() if args.staging is not None else None
+    manifest = staging / "manifest.json" if staging is not None else None
+    if args.csv is not None or args.ids_json is not None:
+        if args.csv is None or args.ids_json is None or args.arm != "full":
+            raise ValueError("Plan 29 requires --arm full plus both --csv and --ids-json")
+        csv_path = args.csv.resolve()
+        ids_path = args.ids_json.resolve()
+        rows = read_plan29_rows(csv_path=csv_path, ids_path=ids_path, count=args.count)
+    else:
+        if staging is None or manifest is None or args.count is None:
+            raise ValueError("legacy evaluation requires --staging and --count")
+        csv_path = staging / args.arm / "validation.csv"
+        ids_path = manifest
+        rows = read_frozen_rows(
+            arm=args.arm, staging=staging, manifest_path=manifest, count=args.count
+        )
     config_path = model_path / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if config.get("quantization") is not None:
         raise ValueError("Phase 2 stock control must use unquantized BF16 weights")
-    if model_path.name != args.model_revision:
-        raise ValueError("model snapshot path does not match the pinned MLX revision")
-    readme = (model_path / "README.md").read_text(encoding="utf-8")
-    if f"Source revision: `{SOURCE_REVISION}`" not in readme:
-        raise ValueError("MLX model card does not bind the pinned source revision")
+    conversion_identity = None
+    if args.candidate_kind == "stock":
+        if model_path.name != args.model_revision:
+            raise ValueError("model snapshot path does not match the pinned MLX revision")
+        readme = (model_path / "README.md").read_text(encoding="utf-8")
+        if f"Source revision: `{SOURCE_REVISION}`" not in readme:
+            raise ValueError("MLX model card does not bind the pinned source revision")
+    else:
+        conversion_path = model_path / "conversion-receipt.json"
+        conversion = json.loads(conversion_path.read_text(encoding="utf-8"))
+        if (
+            conversion.get("precision") != "bfloat16"
+            or conversion.get("quantization") is not None
+            or conversion.get("source_hf", {}).get("revision") != SOURCE_REVISION
+        ):
+            raise ValueError("candidate conversion receipt mismatch")
+        for name, digest in conversion["output"]["files_sha256"].items():
+            if sha256_file(model_path / name) != digest:
+                raise ValueError(f"candidate conversion file mismatch: {name}")
+        conversion_identity = conversion["conversion_identity_sha256"]
     weights_sha256, weight_bytes = sha256_weights(model_path)
     settings = {
         "schema_version": SCHEMA_VERSION,
         "arm": args.arm,
         "model_repo": args.model_repo,
         "model_revision": args.model_revision,
+        "candidate_kind": args.candidate_kind,
+        "conversion_identity_sha256": conversion_identity,
         "source_revision": SOURCE_REVISION,
         "precision": "bfloat16",
         "views": list(VIEW_ORDER),
         "thinking": False,
         "temperature": 0.0,
         "max_tokens": args.max_tokens,
+        "runtime": {
+            "mlx_vlm": runtime_version("mlx-vlm"),
+            "mlx": runtime_version("mlx"),
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+        },
+        "inputs": {
+            "csv_sha256": sha256_file(csv_path),
+            "ids_sha256": sha256_file(ids_path),
+            "rows": len(rows),
+        },
     }
     settings_sha = sha256_text(canonical(settings))
+    if args.seed_ledger is not None or args.seed_receipt is not None:
+        if args.candidate_kind != "stock" or args.seed_ledger is None or args.seed_receipt is None:
+            raise ValueError("seed reuse requires stock plus both seed paths")
+        seeded = seed_generation_rows(
+            source_path=args.seed_ledger.resolve(),
+            source_receipt_path=args.seed_receipt.resolve(), rows=rows,
+            ledger=args.ledger.resolve(), arm=args.arm,
+            settings_sha256=settings_sha, max_tokens=args.max_tokens,
+        )
+        print(canonical({"seeded": seeded, "total": len(rows)}), flush=True)
     started = time.perf_counter()
-    model, processor = load(str(model_path), revision=args.model_revision)
+    model, processor = load(
+        str(model_path), revision=args.model_revision if args.candidate_kind == "stock" else None
+    )
     load_seconds = time.perf_counter() - started
 
     def generator(source: dict[str, str], messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -383,7 +525,9 @@ def run_mlx(args: argparse.Namespace) -> dict[str, Any]:
             "load_seconds": load_seconds,
         },
         "input": {
-            "manifest_sha256": sha256_file(manifest),
+            "manifest_sha256": sha256_file(manifest) if manifest is not None else None,
+            "csv_sha256": sha256_file(csv_path),
+            "ids_sha256": sha256_file(ids_path),
             "rows": len(rows),
         },
         "output": {
@@ -415,11 +559,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--model-repo", default="mlx-community/gemma-4-e4b-it-bf16")
     parser.add_argument("--model-revision", required=True)
-    parser.add_argument("--staging", type=Path, default=Path("data/datasets/tt-screenshot-telepathic-v3-sft"))
+    parser.add_argument("--candidate-kind", choices=("stock", "merged"), default="stock")
+    parser.add_argument("--staging", type=Path)
+    parser.add_argument("--csv", type=Path)
+    parser.add_argument("--ids-json", type=Path)
+    parser.add_argument("--seed-ledger", type=Path)
+    parser.add_argument("--seed-receipt", type=Path)
     parser.add_argument("--evaluation-prompt", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--work-items", type=Path, required=True)
-    parser.add_argument("--count", type=int, default=20)
+    parser.add_argument("--count", type=int)
     parser.add_argument("--max-tokens", type=int, default=8192)
     return parser.parse_args()
 

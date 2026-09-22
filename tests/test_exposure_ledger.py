@@ -68,3 +68,34 @@ def test_accumulation_prefetch_commits_fifo(tmp_path) -> None:
     callback.on_step_end(None, None, SimpleNamespace())
     assert ledger.pending == []
     assert ledger.verify_complete(range(8))["exposures"] == 8
+
+
+def test_train_end_discards_only_max_step_prefetch(tmp_path) -> None:
+    ledger = ExposureLedger(tmp_path / "exposures.jsonl")
+    ExposureTrackingCollator(lambda rows: rows, ledger)([{"id": "prefetched"}])
+    callback = ExposureCommitCallback(ledger)
+
+    with pytest.raises(RuntimeError, match="uncommitted exposure"):
+        callback.on_train_end(
+            None, SimpleNamespace(global_step=7, max_steps=8), SimpleNamespace()
+        )
+    assert len(ledger.pending) == 1
+
+    callback.on_train_end(
+        None, SimpleNamespace(global_step=8, max_steps=8), SimpleNamespace()
+    )
+    assert ledger.pending == []
+    assert not ledger.path.exists()
+
+
+def test_train_end_uses_active_segment_max_steps_not_resumed_state(tmp_path) -> None:
+    ledger = ExposureLedger(tmp_path / "exposures.jsonl")
+    ExposureTrackingCollator(lambda rows: rows, ledger)([{"id": "prefetched"}])
+    callback = ExposureCommitCallback(ledger)
+
+    callback.on_train_end(
+        SimpleNamespace(max_steps=264),
+        SimpleNamespace(global_step=264, max_steps=352),
+        SimpleNamespace(),
+    )
+    assert ledger.pending == []

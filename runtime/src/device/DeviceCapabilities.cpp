@@ -41,7 +41,7 @@ std::string DeviceCapabilities::selectedPolicy() const {
 }
 
 std::optional<std::string> DeviceCapabilities::validationError() const {
-    if (!meetsMinimumMacos()) return "macos_26_4_required";
+    if (!meetsMinimumMacos()) return "macos_15_0_required";
     if (appleGpuFamily < kMinimumAppleGpuFamily || appleGpuFamily > kMaximumAppleGpuFamily) {
         return "apple_gpu_family_7_through_10_required";
     }
