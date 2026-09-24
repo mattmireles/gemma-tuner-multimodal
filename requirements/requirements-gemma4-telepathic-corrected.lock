@@ -1,0 +1,10 @@
+# Plan 30 corrected Gemma 4 E4B smoke only. Do not replace the historical
+# requirements-gemma4-telepathic.lock used for Plan 29 checkpoints.
+# The CUDA base image supplies torch==2.9.1+cu129 and torchvision==0.24.1+cu129.
+# Torchaudio must be aligned separately to torch==2.9.1+cu129.
+transformers==5.5.2
+peft==0.18.1
+datasets==4.8.4
+accelerate==1.13.0
+tokenizers==0.22.2
+jinja2==3.1.6

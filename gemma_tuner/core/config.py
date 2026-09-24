@@ -119,6 +119,7 @@ class ConfigConstants:
         "image_token_budget",
         "seed",
         "stop_after_step",
+        "telemetry_start_step",
     }
 
     FLOAT_COERCION_KEYS = {
@@ -186,6 +187,7 @@ class ConfigConstants:
         "image_token_budget": 280,
         "image_view_policy": "single",
         "system_prompt_column": None,
+        "input_mode_column": None,
         "full_determinism": False,
         "require_telepathic_contract": False,
         "completion_only_logits": False,
@@ -672,6 +674,10 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
             conf["prompt_column"] = pc.strip()
     for optional_string in (
         "system_prompt_column",
+        "input_mode_column",
+        "plan31_schedule_path",
+        "plan31_schedule_sha256",
+        "plan31_projection_receipt_sha256",
         "conditioned_system_prompt_template",
         "conditioned_system_prompt_sha256",
         "resume_from_checkpoint",
@@ -691,6 +697,14 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         digest = str(conf["conditioned_system_prompt_sha256"])
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("conditioned_system_prompt_sha256 must be lowercase SHA-256")
+    if conf.get("input_mode_column") and (
+        str(conf.get("modality", "")).strip().lower() != "image"
+        or str(conf.get("image_sub_mode", "")).strip().lower() != "vqa"
+        or not conf.get("prompt_column")
+        or not conf.get("system_prompt_column")
+        or str(conf.get("image_view_policy", "")) != "global_plus_four_nonoverlapping_quadrants"
+    ):
+        raise ValueError("input_mode_column requires image VQA with prompt/system columns and five views")
 
     if "max_seq_length" in conf and conf["max_seq_length"] is not None and conf["max_seq_length"] != "":
         msl = int(conf["max_seq_length"]) if not isinstance(conf["max_seq_length"], int) else conf["max_seq_length"]

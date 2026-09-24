@@ -17,6 +17,7 @@ from gemma_tuner.models.gemma.constants import (
     resolve_processor_sampling_rate,
 )
 from gemma_tuner.models.gemma.family import GemmaFamily, family_capabilities
+from gemma_tuner.models.common.plan31_input_modes import render_plan31_input
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +511,7 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
         image_token_budget: int = 280,
         image_view_policy: str = IMAGE_VIEW_SINGLE,
         system_prompt_column: Optional[str] = None,
+        input_mode_column: Optional[str] = None,
         require_telepathic_contract: bool = False,
         completion_only_logits: bool = False,
         max_length: Optional[int] = None,
@@ -534,6 +536,14 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
             )
         self.image_view_policy = image_view_policy
         self.system_prompt_column = system_prompt_column
+        self.input_mode_column = input_mode_column
+        if input_mode_column and (
+            sub_mode != "vqa"
+            or prompt_column is None
+            or system_prompt_column is None
+            or image_view_policy != IMAGE_VIEW_GLOBAL_PLUS_QUADRANTS
+        ):
+            raise ValueError("Plan 31 input modes require VQA, prompt/system columns, and five frozen views")
         self.require_telepathic_contract = bool(require_telepathic_contract)
         self.completion_only_logits = bool(completion_only_logits)
         self.max_length = int(max_length) if max_length is not None else None
@@ -577,7 +587,21 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                     f"DataCollatorGemmaImage: text column {self.text_column!r} has a null value (row id={row_id!r})"
                 )
 
-            if self.sub_mode == "caption":
+            plan31_messages = None
+            if self.input_mode_column is not None:
+                mode = ex.get(self.input_mode_column)
+                prompt = ex.get(self.prompt_column)
+                system_prompt = ex.get(self.system_prompt_column)
+                if _is_null(mode) or _is_null(prompt) or _is_null(system_prompt):
+                    raise ValueError(f"DataCollatorGemmaImage: Plan 31 row id={row_id!r} is missing input fields")
+                image_views, plan31_messages = render_plan31_input(
+                    mode=str(mode),
+                    full_prompt=str(prompt),
+                    system_prompt=str(system_prompt),
+                    full_views=image_views,
+                )
+                images[-1] = image_views
+            elif self.sub_mode == "caption":
                 user_content: List[Dict[str, Any]] = [
                     *({"type": "image", "image": view} for view in image_views),
                     {"type": "text", "text": self._CAPTION_INSTRUCTION},
@@ -610,7 +634,7 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                     {"type": "text", "text": str(q)},
                 ]
 
-            if self.require_telepathic_contract:
+            if self.require_telepathic_contract or self.input_mode_column is not None:
                 try:
                     target = json.loads(str(text_val))
                 except json.JSONDecodeError as exc:
@@ -620,28 +644,24 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                         "DataCollatorGemmaImage: telepathic target must have exactly one context_analysis key"
                     )
 
-            messages: List[Dict[str, Any]] = []
-            if self.system_prompt_column is None:
-                if "system_prompt" in ex and not _is_null(ex.get("system_prompt")):
-                    raise ValueError("DataCollatorGemmaImage: compact example contains forbidden system_prompt")
-            else:
-                system_prompt = ex.get(self.system_prompt_column)
-                if self.system_prompt_column not in ex or _is_null(system_prompt) or not str(system_prompt):
-                    raise ValueError(f"DataCollatorGemmaImage: conditioned row id={row_id!r} has no system prompt")
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": [{"type": "text", "text": str(system_prompt)}],
-                    }
-                )
-            messages.extend(
-                [
-                    {"role": "user", "content": user_content},
-                    {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": str(text_val)}],
-                    },
-                ]
+            messages: List[Dict[str, Any]] = [] if plan31_messages is None else plan31_messages
+            if plan31_messages is None:
+                if self.system_prompt_column is None:
+                    if "system_prompt" in ex and not _is_null(ex.get("system_prompt")):
+                        raise ValueError("DataCollatorGemmaImage: compact example contains forbidden system_prompt")
+                else:
+                    system_prompt = ex.get(self.system_prompt_column)
+                    if self.system_prompt_column not in ex or _is_null(system_prompt) or not str(system_prompt):
+                        raise ValueError(f"DataCollatorGemmaImage: conditioned row id={row_id!r} has no system prompt")
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": [{"type": "text", "text": str(system_prompt)}],
+                        }
+                    )
+                messages.append({"role": "user", "content": user_content})
+            messages.append(
+                {"role": "assistant", "content": [{"type": "text", "text": str(text_val)}]}
             )
             messages_batch.append(messages)
 
@@ -654,7 +674,7 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
             )
         self._inject_mm_token_types_and_validate_bos(encoded)
         self._labels_with_prompt_mask_and_attention_padding(encoded)
-        if self.require_telepathic_contract:
+        if self.require_telepathic_contract or self.input_mode_column is not None:
             attention = encoded.get("attention_mask")
             if attention is None:
                 raise ValueError("DataCollatorGemmaImage: processor returned no attention_mask")

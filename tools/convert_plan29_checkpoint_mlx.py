@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Fuse a sealed Plan 29 PEFT checkpoint into an unquantized MLX BF16 base.
+"""Fuse a sealed Plan 29 or corrected Plan 30 PEFT checkpoint into MLX BF16.
 
 The conversion is deliberately streaming.  The pinned MLX snapshot is a
 bit-identical BF16 conversion of the pinned HF source for every
 cached-generation-active LoRA target.  Each source shard is loaded, its active
 targeted linear weights are replaced by the PEFT merge result, and the complete
-shard is written once.  The 36 final-layer K/V adapters that cached HF and MLX
-generation both bypass are accounted for explicitly.  This matches the HF
-cached-inference merge while avoiding a second 30-GB intermediate model on the
-target Mac.
+shard is written once. Plan 29's 36 final-layer K/V adapters that cached HF and
+MLX generation both bypass are accounted for explicitly; corrected Plan 30
+does not train those adapters. This matches the HF cached-inference merge while
+avoiding a second 30-GB intermediate model on the target Mac.
 """
 
 from __future__ import annotations
@@ -29,7 +29,10 @@ HF_REPO_ID = "google/gemma-4-E4B-it"
 HF_REVISION = "fee6332c1abaafb77f6f9624236c63aa2f1d0187"
 MLX_REPO_ID = "mlx-community/gemma-4-e4b-it-bf16"
 MLX_REVISION = "eec12d0899edea9b738ab1009af9159cdfd70d71"
-EXPECTED_TARGETS = {"language": 294, "vision": 112, "projection": 1}
+EXPECTED_TARGETS = {
+    "plan29": {"language": 294, "vision": 112, "projection": 1},
+    "plan30-corrected": {"language": 258, "vision": 112, "projection": 1},
+}
 SHARED_KV_PATTERN = re.compile(
     r"^base_model\.model\.model\.language_model\.layers\.(\d+)\.self_attn\.([kv]_proj)$"
 )
@@ -87,17 +90,17 @@ def mapped_weight_keys(module: str) -> tuple[str, str]:
 
 
 def inference_inactive_shared_kv_modules(
-    base_config: dict[str, Any], modules: list[str]
+    base_config: dict[str, Any], modules: list[str], *, profile: str = "plan29"
 ) -> set[str]:
-    """Return trained K/V modules omitted by Gemma 4 cached inference.
+    """Return adapted K/V modules omitted by Gemma 4 cached inference.
 
-    HF constructs these modules and uses them when training without a cache.
-    During generation, however, the final ``num_kv_shared_layers`` reuse K/V
-    states from earlier layers.  The official MLX conversion therefore omits
-    their duplicate K/V weights entirely.  They cannot affect the cached
-    generation path evaluated by Plan 29 and must be recorded, never silently
-    treated as merged targets.
+    Plan 29 trained the final ``num_kv_shared_layers`` K/V modules but cached
+    inference reuses earlier K/V states; those adapters are inference-inactive.
+    The corrected Plan 30 trainer never adapted these modules. Both exact
+    profiles are checked rather than silently dropping targets.
     """
+    if profile not in EXPECTED_TARGETS:
+        raise ValueError(f"unknown conversion profile: {profile}")
     text_config = base_config.get("text_config", {})
     layer_count = int(text_config.get("num_hidden_layers", 0))
     shared_count = int(text_config.get("num_kv_shared_layers", 0))
@@ -109,7 +112,7 @@ def inference_inactive_shared_kv_modules(
         match = SHARED_KV_PATTERN.fullmatch(module)
         if match and int(match.group(1)) >= first_shared:
             inactive.add(module)
-    expected = shared_count * 2
+    expected = shared_count * 2 if profile == "plan29" else 0
     if len(inactive) != expected:
         raise ValueError(
             f"shared-KV inactive target mismatch: {len(inactive)} != {expected}"
@@ -196,11 +199,13 @@ def copy_model_metadata(source: Path, destination: Path) -> None:
             shutil.copy2(path, destination / path.name)
 
 
-def conversion_identity(*, base: Path, hf_base: Path, adapter: Path) -> dict[str, Any]:
+def conversion_identity(*, base: Path, hf_base: Path, adapter: Path,
+                        profile: str = "plan29") -> dict[str, Any]:
     config = json.loads((adapter / "adapter_config.json").read_text(encoding="utf-8"))
     scale = validate_adapter_config(config)
     return {
-        "schema_version": "plan29_mlx_conversion_v1",
+        "schema_version": f"{profile}_mlx_conversion_v1",
+        "profile": profile,
         "converter_sha256": sha256_file(Path(__file__)),
         "source_hf": {"repo_id": HF_REPO_ID, "revision": HF_REVISION,
                       "weights_sha256": sha256_file(hf_base / "model.safetensors")},
@@ -219,8 +224,12 @@ def conversion_identity(*, base: Path, hf_base: Path, adapter: Path) -> dict[str
     }
 
 
-def convert(*, base: Path, hf_base: Path, adapter: Path, output: Path) -> dict[str, Any]:
+def convert(*, base: Path, hf_base: Path, adapter: Path, output: Path,
+            profile: str = "plan29") -> dict[str, Any]:
     import mlx.core as mx
+
+    if profile not in EXPECTED_TARGETS:
+        raise ValueError(f"unknown conversion profile: {profile}")
 
     for required in (base / "config.json", base / "model.safetensors.index.json",
                      hf_base / "model.safetensors", adapter / "adapter_config.json",
@@ -231,7 +240,8 @@ def convert(*, base: Path, hf_base: Path, adapter: Path, output: Path) -> dict[s
     if base_config.get("quantization") is not None:
         raise ValueError("Plan 29 requires an unquantized MLX base")
 
-    identity = conversion_identity(base=base, hf_base=hf_base, adapter=adapter)
+    identity = conversion_identity(base=base, hf_base=hf_base, adapter=adapter,
+                                   profile=profile)
     identity_sha = hashlib.sha256(canonical(identity).encode()).hexdigest()
     receipt_path = output / "conversion-receipt.json"
     if output.exists():
@@ -258,18 +268,19 @@ def convert(*, base: Path, hf_base: Path, adapter: Path, output: Path) -> dict[s
 
     adapter_weights = mx.load(str(adapter / "adapter_model.safetensors"))
     modules = adapter_module_names(list(adapter_weights))
-    counts = {kind: 0 for kind in EXPECTED_TARGETS}
+    counts = {kind: 0 for kind in EXPECTED_TARGETS[profile]}
     all_mappings: dict[str, dict[str, str]] = {}
     for module in modules:
         kind = classify_module(module)
         counts[kind] += 1
         hf_key, mlx_key = mapped_weight_keys(module)
         all_mappings[mlx_key] = {"module": module, "hf_key": hf_key}
-    if counts != EXPECTED_TARGETS or len(all_mappings) != sum(EXPECTED_TARGETS.values()):
+    if counts != EXPECTED_TARGETS[profile] or len(all_mappings) != sum(EXPECTED_TARGETS[profile].values()):
         raise ValueError(f"LoRA target coverage mismatch: {counts}")
 
     weight_map = read_index(base)
-    inactive_modules = inference_inactive_shared_kv_modules(base_config, modules)
+    inactive_modules = inference_inactive_shared_kv_modules(base_config, modules,
+                                                             profile=profile)
     missing_mlx = {key for key in all_mappings if key not in weight_map}
     expected_missing = {
         mapped_weight_keys(module)[1] for module in inactive_modules
@@ -395,6 +406,8 @@ def convert(*, base: Path, hf_base: Path, adapter: Path, output: Path) -> dict[s
             "inference_inactive_shared_kv_targets": len(inactive_modules),
             "inference_inactive_reason": (
                 "HF and MLX cached generation reuse earlier shared K/V states"
+                if profile == "plan29" else
+                "corrected trainer did not adapt shared K/V projections bypassed by cached inference"
             ),
         },
         "output": {"weight_count": output_weight_count, "dtype_counts": dtype_counts,
@@ -414,13 +427,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hf-base", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", choices=sorted(EXPECTED_TARGETS), default="plan29")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     receipt = convert(base=args.base.resolve(), hf_base=args.hf_base.resolve(),
-                      adapter=args.adapter.resolve(), output=args.output.resolve())
+                      adapter=args.adapter.resolve(), output=args.output.resolve(),
+                      profile=args.profile)
     print(canonical({"output": str(args.output.resolve()),
                      "conversion_identity_sha256": receipt["conversion_identity_sha256"],
                      "coverage": receipt["coverage"]}))

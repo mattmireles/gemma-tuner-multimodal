@@ -86,6 +86,29 @@ def test_shared_kv_target_count_is_fail_closed() -> None:
         conversion.inference_inactive_shared_kv_modules(config, [])
 
 
+def test_corrected_profile_requires_no_adapted_shared_kv_targets() -> None:
+    config = {"text_config": {"num_hidden_layers": 4, "num_kv_shared_layers": 2}}
+    prefix = "base_model.model.model.language_model.layers"
+    active = [f"{prefix}.0.self_attn.k_proj"]
+    assert conversion.inference_inactive_shared_kv_modules(
+        config, active, profile="plan30-corrected"
+    ) == set()
+    with pytest.raises(ValueError, match="inactive target mismatch"):
+        conversion.inference_inactive_shared_kv_modules(
+            config, active + [f"{prefix}.2.self_attn.v_proj"],
+            profile="plan30-corrected",
+        )
+
+
+def test_conversion_profiles_have_distinct_exact_target_counts() -> None:
+    assert conversion.EXPECTED_TARGETS["plan29"] == {
+        "language": 294, "vision": 112, "projection": 1,
+    }
+    assert conversion.EXPECTED_TARGETS["plan30-corrected"] == {
+        "language": 258, "vision": 112, "projection": 1,
+    }
+
+
 def test_safetensor_ranges_are_absolute_and_skip_metadata(tmp_path: Path) -> None:
     header = json.dumps(
         {
