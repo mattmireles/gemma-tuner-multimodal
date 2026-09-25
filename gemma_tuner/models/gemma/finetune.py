@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 import torch
 import torch.nn.functional as F
 from datasets import Dataset as HFDataset
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from torch.utils.data import Dataset
 from transformers import (
     AutoProcessor,
@@ -117,6 +117,7 @@ from gemma_tuner.utils.exposure_ledger import (
 )
 from gemma_tuner.utils.plan31_exposure_ledger import Plan31ExposureLedger
 from gemma_tuner.utils.plan31_projection import verify_projection
+from gemma_tuner.utils.plan32_projection import verify_projection as verify_plan32_projection
 from gemma_tuner.utils.gradient_receipt import (
     GradientSubsystemReceiptCallback,
     RedactedTrainingMetricsCallback,
@@ -468,11 +469,26 @@ def _validate_strict_telemetry_config(profile_config: "ProfileConfig") -> bool:
     if profile_config.get("input_mode_column"):
         start = int(profile_config.get("telemetry_start_step", -1))
         stop = int(profile_config["stop_after_step"])
-        if start < 352 or (start - 352) % 88 or stop <= start or stop - start > 88 or stop > 704:
-            raise ValueError("Plan 31 telemetry requires one sealed 88-step segment after checkpoint 352")
-        for key in ("plan31_schedule_path", "plan31_schedule_sha256", "plan31_projection_receipt_sha256"):
+        plan32_epoch = profile_config.get("plan32_epoch")
+        if plan32_epoch is not None:
+            epoch = int(plan32_epoch)
+            epoch_start, epoch_stop = ((0, 352) if epoch == 1 else (352, 704) if epoch == 2 else (-1, -1))
+            if (epoch_start < 0 or start < epoch_start or start >= epoch_stop
+                    or (start - epoch_start) % 88 or stop <= start
+                    or stop - start != 88 or stop > epoch_stop):
+                raise ValueError("Plan 32 telemetry requires a sealed 88-step segment within its frozen epoch")
+            schedule_keys = (
+                "plan32_schedule_path", "plan32_schedule_sha256", "plan32_projection_receipt_sha256"
+            )
+        else:
+            if start < 352 or (start - 352) % 88 or stop <= start or stop - start > 88 or stop > 704:
+                raise ValueError("Plan 31 telemetry requires one sealed 88-step segment after checkpoint 352")
+            schedule_keys = (
+                "plan31_schedule_path", "plan31_schedule_sha256", "plan31_projection_receipt_sha256"
+            )
+        for key in schedule_keys:
             if not profile_config.get(key):
-                raise ValueError(f"Plan 31 requires {key}")
+                raise ValueError(f"strict input-mode telemetry requires {key}")
     return True
 
 
@@ -493,10 +509,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     strict_telemetry = _validate_strict_telemetry_config(profile_config)
     _validate_conditioned_prompt_file(profile_config)
     if profile_config.get("input_mode_column"):
-        verify_projection(
-            resolve_data_datasets_dir(profile_config["dataset"]),
-            str(profile_config["plan31_projection_receipt_sha256"]),
-        )
+        dataset_dir = resolve_data_datasets_dir(profile_config["dataset"])
+        if profile_config.get("plan32_epoch") is not None:
+            verify_plan32_projection(
+                dataset_dir,
+                expected_receipt_sha256=str(profile_config["plan32_projection_receipt_sha256"]),
+                epoch=int(profile_config["plan32_epoch"]),
+            )
+        else:
+            verify_projection(dataset_dir, str(profile_config["plan31_projection_receipt_sha256"]))
     # Quiet down Hugging Face tokenizers dumping huge AddedToken lists
     try:
         hf_logging.set_verbosity_error()
@@ -707,7 +728,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     )
     if not target_regex:
         _raise_if_lora_targets_use_peft_incompatible_linears(model, validated_target_modules)
-    model = get_peft_model(model, lora_cfg)
+    initial_adapter_path = profile_config.get("initial_adapter_path")
+    if initial_adapter_path and not profile_config.get("resume_from_checkpoint"):
+        adapter_path = Path(str(initial_adapter_path)).expanduser().resolve(strict=True)
+        if not (adapter_path / "adapter_config.json").is_file():
+            raise FileNotFoundError(f"initial adapter config is missing: {adapter_path}")
+        model = PeftModel.from_pretrained(model, str(adapter_path), is_trainable=True)
+        logger.info("Loaded trainable warm-start adapter from %s", adapter_path)
+    else:
+        model = get_peft_model(model, lora_cfg)
     model = model.to(device)
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -848,16 +877,24 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     exposure_ledger = None
     if to_bool(profile_config.get("record_exposures", False)):
         if profile_config.get("input_mode_column"):
-            schedule_path = Path(str(profile_config["plan31_schedule_path"])).expanduser().resolve()
+            plan32_epoch = profile_config.get("plan32_epoch")
+            schedule_key = "plan32_schedule_path" if plan32_epoch is not None else "plan31_schedule_path"
+            schedule_hash_key = "plan32_schedule_sha256" if plan32_epoch is not None else "plan31_schedule_sha256"
+            schedule_path = Path(str(profile_config[schedule_key])).expanduser().resolve()
             schedule_sha = sha256_file(schedule_path)
-            if schedule_sha != str(profile_config["plan31_schedule_sha256"]):
-                raise ValueError("Plan 31 frozen schedule hash mismatch")
+            if schedule_sha != str(profile_config[schedule_hash_key]):
+                raise ValueError("frozen input-mode schedule hash mismatch")
             start_step = int(profile_config["telemetry_start_step"])
             stop_step = int(profile_config["stop_after_step"])
+            epoch = int(plan32_epoch) if plan32_epoch is not None else 1
+            epoch_base_step = 0 if epoch == 1 else 352
             exposure_ledger = Plan31ExposureLedger(
                 Path(output_dir) / "exposures.jsonl", schedule_path=schedule_path,
-                train_rows=train_ds, start_ordinal=(start_step - 352) * 8 + 1,
-                end_ordinal=min((stop_step - 352) * 8, len(train_ds)),
+                train_rows=train_ds, start_ordinal=(start_step - epoch_base_step) * 8 + 1,
+                end_ordinal=min((stop_step - epoch_base_step) * 8, len(train_ds)),
+                expected_epoch=epoch,
+                schema_version=("plan32_training_exposure_v1" if plan32_epoch is not None
+                                else "plan31_training_exposure_v1"),
             )
         else:
             exposure_ledger = ExposureLedger(Path(output_dir) / "exposures.jsonl")
@@ -1105,7 +1142,12 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     )
     if isinstance(exposure_ledger, Plan31ExposureLedger):
         receipt = exposure_ledger.verify_complete()
-        (Path(output_dir) / "plan31_exposure_verification.json").write_text(
+        receipt_name = (
+            "plan32_exposure_verification.json"
+            if profile_config.get("plan32_epoch") is not None
+            else "plan31_exposure_verification.json"
+        )
+        (Path(output_dir) / receipt_name).write_text(
             json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
     logger.info("Training complete. Saving adapter...")

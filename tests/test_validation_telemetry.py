@@ -156,6 +156,17 @@ def test_step_zero_and_interval_emit_finite_token_weighted_losses(tmp_path) -> N
             assert row["loss"] == pytest.approx(row["loss_sum"] / row["scored_tokens"])
 
 
+def test_train_begin_records_step_zero_losses_without_mode_panels(tmp_path) -> None:
+    telemetry = _telemetry(tmp_path)
+    telemetry.on_train_begin(
+        None, SimpleNamespace(global_step=0), SimpleNamespace(), model=ToyModel()
+    )
+    rows = [json.loads(line) for line in telemetry.path.read_text().splitlines()]
+    assert {(row["event"], row["step"]) for row in rows} == {
+        ("fixed_train_eval", 0), ("fixed_validation_eval", 0)
+    }
+
+
 def test_resume_requires_exact_step_metrics_and_unchanged_provenance(tmp_path) -> None:
     telemetry = _telemetry(tmp_path)
     telemetry.record_eval(ToyModel(), 0)

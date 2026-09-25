@@ -38,6 +38,8 @@ class Plan31ExposureLedger:
         train_rows: Iterable[dict[str, Any]],
         start_ordinal: int,
         end_ordinal: int,
+        expected_epoch: int = 1,
+        schema_version: str = "plan31_training_exposure_v1",
     ) -> None:
         self.path = Path(path)
         schedule_path = Path(schedule_path)
@@ -51,17 +53,27 @@ class Plan31ExposureLedger:
         self.schedule_sha256 = _sha(schedule_bytes)
         self.start_ordinal = start_ordinal
         self.end_ordinal = end_ordinal
+        self.expected_epoch = int(expected_epoch)
+        self.schema_version = str(schema_version)
+        if self.expected_epoch < 1 or not self.schema_version:
+            raise ValueError("exposure epoch and schema version must be valid")
         self.expected: list[dict[str, Any]] = []
         ids = set()
         for ordinal, (schedule_row, feature) in enumerate(zip(schedule, features), start=1):
             identifier = str(feature["id"])
             if (identifier in ids or schedule_row["id"] != identifier
-                    or schedule_row["source_ordinal"] != ordinal or int(schedule_row["epoch"]) != 1):
+                    or schedule_row["source_ordinal"] != ordinal
+                    or int(schedule_row["epoch"]) != self.expected_epoch):
                 raise ValueError("Plan 31 source order or identity conflicts with schedule")
             ids.add(identifier)
             mode = str(feature["input_mode"])
             if schedule_row["mode"] != mode:
                 raise ValueError("Plan 31 mode differs from frozen schedule")
+            for feature_key, schedule_key in (
+                ("prompt", "prompt_sha256"), ("system_prompt", "system_sha256")
+            ):
+                if schedule_key in schedule_row and _sha(str(feature[feature_key]).encode("utf-8")) != schedule_row[schedule_key]:
+                    raise ValueError(f"source {feature_key} differs from frozen schedule")
             image_path = Path(str(feature["image_path"]))
             if not image_path.is_file() or _file_sha(image_path) != schedule_row["image_sha256"]:
                 raise ValueError("Plan 31 screenshot differs from frozen schedule")
@@ -74,7 +86,7 @@ class Plan31ExposureLedger:
                 full_views=[f"view:{index}" for index in range(5)],
             )
             self.expected.append({
-                "schema_version": "plan31_training_exposure_v1",
+                "schema_version": self.schema_version,
                 "schedule_sha256": self.schedule_sha256,
                 "source_ordinal": ordinal,
                 "epoch": int(schedule_row["epoch"]),
@@ -143,6 +155,7 @@ class Plan31ExposureLedger:
         count = self.end_ordinal - self.start_ordinal + 1
         if self.pending or len(self.rows) != count:
             raise RuntimeError("Plan 31 segment has pending, missing, or extra exposures")
-        return {"schema_version": "plan31_exposure_verification_v1", "exposures": count,
+        return {"schema_version": f"{self.schema_version.removesuffix('_training_exposure_v1')}_exposure_verification_v1",
+                "exposures": count,
                 "start_ordinal": self.start_ordinal, "end_ordinal": self.end_ordinal,
                 "schedule_sha256": self.schedule_sha256, "ledger_sha256": _file_sha(self.path)}

@@ -86,3 +86,22 @@ def test_plan31_rejects_duplicate_reorder_conflict_and_missing(tmp_path: Path):
     with pytest.raises(ValueError, match="conflicts with frozen"):
         Plan31ExposureLedger(tmp_path / "exposures.jsonl", schedule_path=schedule_path,
                              train_rows=features, start_ordinal=2, end_ordinal=3)
+
+
+def test_plan32_epoch_two_schedule_is_bound_and_recorded(tmp_path: Path):
+    features, schedule_path = fixture(tmp_path)
+    schedule = [json.loads(line) for line in schedule_path.read_text().splitlines()]
+    for row in schedule:
+        row["epoch"] = 2
+    schedule_path.write_text("".join(json.dumps(row) + "\n" for row in schedule))
+
+    current = Plan31ExposureLedger(
+        tmp_path / "epoch-two.jsonl", schedule_path=schedule_path,
+        train_rows=features, start_ordinal=1, end_ordinal=3,
+        expected_epoch=2, schema_version="plan32_training_exposure_v1",
+    )
+    current.stage(features)
+    current.commit()
+    assert [row["epoch"] for row in current.rows] == [2, 2, 2]
+    assert all(row["schema_version"] == "plan32_training_exposure_v1" for row in current.rows)
+    assert current.verify_complete()["schema_version"] == "plan32_exposure_verification_v1"

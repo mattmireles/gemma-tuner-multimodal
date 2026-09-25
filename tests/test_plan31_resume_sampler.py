@@ -70,3 +70,42 @@ def test_sequential_resume_collator_skips_are_visible(tmp_path):
     # recorder receives exactly the next two source rows.
     assert second_collator.seen == ["row-2", "row-3"]
     assert ledger.verify_complete()["exposures"] == 2
+
+
+def test_resume_at_epoch_boundary_reads_only_second_epoch_mode_rows(tmp_path):
+    epoch_one = [{"id": f"row-{index}", "token": index + 1, "mode": "full"} for index in range(4)]
+    first_collator = TracingCollator()
+    first = Trainer(
+        model=TinyModel(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path / "epoch-one"), per_device_train_batch_size=1,
+            gradient_accumulation_steps=1, max_steps=4, num_train_epochs=2,
+            save_strategy="steps", save_steps=4, logging_steps=1,
+            train_sampling_strategy="sequential", report_to=[], remove_unused_columns=False,
+        ),
+        train_dataset=epoch_one, data_collator=first_collator,
+    )
+    first.train()
+    assert first.state.epoch == 1
+
+    class ModeTracingCollator(TracingCollator):
+        def __call__(self, rows):
+            self.seen.extend((row["id"], row["mode"]) for row in rows)
+            ids = torch.tensor([[row["token"] for row in rows]]).T
+            return {"input_ids": ids, "labels": ids.clone()}
+
+    epoch_two = [{**row, "mode": "image_only"} for row in epoch_one]
+    second_collator = ModeTracingCollator()
+    second = Trainer(
+        model=TinyModel(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path / "epoch-two"), per_device_train_batch_size=1,
+            gradient_accumulation_steps=1, max_steps=8, num_train_epochs=2,
+            save_strategy="no", logging_steps=1,
+            train_sampling_strategy="sequential", report_to=[], remove_unused_columns=False,
+        ),
+        train_dataset=epoch_two, data_collator=second_collator,
+    )
+    second.train(resume_from_checkpoint=str(tmp_path / "epoch-one" / "checkpoint-4"))
+    assert second.state.global_step == 8
+    assert second_collator.seen == [(f"row-{index}", "image_only") for index in range(4)]

@@ -120,6 +120,7 @@ class ConfigConstants:
         "seed",
         "stop_after_step",
         "telemetry_start_step",
+        "plan32_epoch",
     }
 
     FLOAT_COERCION_KEYS = {
@@ -678,6 +679,11 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
         "plan31_schedule_path",
         "plan31_schedule_sha256",
         "plan31_projection_receipt_sha256",
+        "plan32_schedule_path",
+        "plan32_schedule_sha256",
+        "plan32_projection_receipt_sha256",
+        "plan32_projection_receipt_path",
+        "initial_adapter_path",
         "conditioned_system_prompt_template",
         "conditioned_system_prompt_sha256",
         "resume_from_checkpoint",

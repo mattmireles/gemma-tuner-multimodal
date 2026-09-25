@@ -227,6 +227,7 @@ class ValidationTelemetry(TrainerCallback):
                     "event": "full_validation_eval",
                     "step": step,
                     "exposures": exposures,
+                    "examples": len(self.validation_ds),
                     "loss_sum": loss_sum,
                     "scored_tokens": tokens,
                     "loss": loss_sum / tokens,
@@ -271,7 +272,7 @@ class ValidationTelemetry(TrainerCallback):
             raise RuntimeError("strict telemetry missing full validation at stop step")
 
     def on_train_begin(self, args, state, control, **kwargs):  # noqa: ANN001, ARG002
-        if self.mode_panels and int(state.global_step) == self.start_step and (
+        if int(state.global_step) == self.start_step and (
             "fixed_validation_eval", self.start_step
         ) not in self.rows:
             model = kwargs.get("model")
