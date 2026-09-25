@@ -9,12 +9,22 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-
 MODES = ("full", "no_ocr", "no_quadrants", "no_system", "image_instruction", "image_only")
 COUNTS = {"full": 281, "no_system": 844, "no_ocr": 421,
           "no_quadrants": 422, "image_instruction": 422, "image_only": 422}
+# Plan 32 (E4B, two epochs) and Plan 33 (E2B, three epochs) share this projection ABI.
+PROJECTION_SCHEMAS = {"plan32_literal_projection_v1": 2, "plan33_literal_projection_v1": 3}
 FIELDS = ("id", "owner_id", "source_ordinal", "image_path", "prompt", "response",
           "image_view_policy", "system_prompt", "input_mode")
+
+
+def literal_projection_schema(profile_config) -> str:
+    """Map a profile's frozen literal epoch count to its projection receipt schema."""
+    epochs = int(profile_config.get("literal_epochs", 2))
+    for schema, count in PROJECTION_SCHEMAS.items():
+        if count == epochs:
+            return schema
+    raise ValueError("literal_epochs must be 2 (Plan 32) or 3 (Plan 33)")
 
 
 def sha(raw: bytes) -> str:
@@ -95,19 +105,26 @@ def _verify_validation_image_hashes(
             raise ValueError("Plan 32 validation screenshot differs from frozen source hash")
 
 
-def verify_projection(directory: str | Path, *, expected_receipt_sha256: str, epoch: int) -> dict:
+def verify_projection(
+    directory: str | Path, *, expected_receipt_sha256: str, epoch: int,
+    schema_version: str = "plan32_literal_projection_v1",
+) -> dict:
     root = Path(directory).resolve(strict=True)
     receipt_path = root / "projection.receipt.json"
     if sha_file(receipt_path) != expected_receipt_sha256:
         raise ValueError("Plan 32 projection receipt changed")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    if (receipt.get("schema_version") != "plan32_literal_projection_v1"
+    if schema_version not in PROJECTION_SCHEMAS:
+        raise ValueError("unknown literal projection schema")
+    if (receipt.get("schema_version") != schema_version
             or int(receipt.get("epoch", 0)) != epoch
             or receipt.get("train_rows") != 2812
             or receipt.get("validation_rows") != 252
             or receipt.get("fresh_panel_rows") != 60
             or receipt.get("test_rows_read") != 0):
         raise ValueError("Plan 32 projection receipt contract changed")
+    if not 1 <= epoch <= PROJECTION_SCHEMAS[schema_version]:
+        raise ValueError("literal projection epoch is outside its frozen lineage")
     outputs = receipt.get("outputs_sha256", {})
     expected_names = {
         "train.csv", "validation.csv", "validation-image-sha256.jsonl",

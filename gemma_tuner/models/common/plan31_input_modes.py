@@ -20,17 +20,27 @@ MODES = (
 INSTRUCTION = "Return valid JSON only."
 OCR_OPEN = "\n\n<first_pass_screenshot_ocr>\n"
 OCR_CLOSE = "\n</first_pass_screenshot_ocr>"
+# Literal v3 moves the instruction after OCR; these are its only legal tails.
+V3_SUFFIXES = ("\n\n" + INSTRUCTION, "\n\n" + INSTRUCTION + "\n")
 
 
 def without_ocr(full_prompt: str) -> str:
-    """Remove the sole trailing structured OCR block, failing on ABI drift."""
+    """Remove the sole structured OCR block, failing on ABI drift.
+
+    Two frozen layouts are accepted. Literal v1 places the instruction before a
+    trailing OCR block, which is simply cut off. Literal v3 places the OCR block
+    before a single trailing instruction; the block is excised and the
+    instruction suffix is kept byte-for-byte so it remains the last text.
+    """
     if full_prompt.count(OCR_OPEN) != 1 or full_prompt.count(OCR_CLOSE) != 1:
         raise ValueError("Plan 31 requires exactly one canonical OCR block")
     before, after_open = full_prompt.split(OCR_OPEN, 1)
     _, after_close = after_open.split(OCR_CLOSE, 1)
-    if after_close not in ("", "\n") or not before.rstrip().endswith(INSTRUCTION):
-        raise ValueError("Plan 31 OCR block or user instruction moved")
-    return before
+    if after_close in ("", "\n") and before.rstrip().endswith(INSTRUCTION):
+        return before
+    if after_close in V3_SUFFIXES and INSTRUCTION not in before:
+        return before + after_close
+    raise ValueError("Plan 31 OCR block or user instruction moved")
 
 
 def render_plan31_input(

@@ -115,14 +115,15 @@ from gemma_tuner.utils.exposure_ledger import (
     ExposureLedger,
     ExposureTrackingCollator,
 )
-from gemma_tuner.utils.plan31_exposure_ledger import Plan31ExposureLedger
-from gemma_tuner.utils.plan31_projection import verify_projection
-from gemma_tuner.utils.plan32_projection import verify_projection as verify_plan32_projection
 from gemma_tuner.utils.gradient_receipt import (
     GradientSubsystemReceiptCallback,
     RedactedTrainingMetricsCallback,
 )
 from gemma_tuner.utils.integrity import create_integrity_manifest
+from gemma_tuner.utils.plan31_exposure_ledger import Plan31ExposureLedger
+from gemma_tuner.utils.plan31_projection import verify_projection
+from gemma_tuner.utils.plan32_projection import literal_projection_schema
+from gemma_tuner.utils.plan32_projection import verify_projection as verify_plan32_projection
 from gemma_tuner.utils.validation_telemetry import ValidationTelemetry, validate_split_identity
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
@@ -472,8 +473,20 @@ def _validate_strict_telemetry_config(profile_config: "ProfileConfig") -> bool:
         plan32_epoch = profile_config.get("plan32_epoch")
         if plan32_epoch is not None:
             epoch = int(plan32_epoch)
-            epoch_start, epoch_stop = ((0, 352) if epoch == 1 else (352, 704) if epoch == 2 else (-1, -1))
-            if (epoch_start < 0 or start < epoch_start or start >= epoch_stop
+            # Plan 32 froze two literal epochs; Plan 33 (E2B) sets literal_epochs=3.
+            literal_epochs = int(profile_config.get("literal_epochs", 2))
+            if literal_epochs not in (2, 3):
+                raise ValueError("literal_epochs must be 2 (Plan 32) or 3 (Plan 33)")
+            epoch_start, epoch_stop = (
+                (352 * (epoch - 1), 352 * epoch) if 1 <= epoch <= literal_epochs else (-1, -1)
+            )
+            segment_steps = int(profile_config.get("segment_steps", 88))
+            if segment_steps in (1, 2):
+                # Disposable Plan 33 smoke: 0->1 then resumed 1->2, plus an uninterrupted 0->2 control.
+                if (literal_epochs != 3 or epoch != 1 or (start, stop) not in ((0, 1), (1, 2), (0, 2))
+                        or stop - start != segment_steps):
+                    raise ValueError("literal smoke is limited to epoch-one steps 0->1, 1->2, and 0->2")
+            elif (segment_steps != 88 or epoch_start < 0 or start < epoch_start or start >= epoch_stop
                     or (start - epoch_start) % 88 or stop <= start
                     or stop - start != 88 or stop > epoch_stop):
                 raise ValueError("Plan 32 telemetry requires a sealed 88-step segment within its frozen epoch")
@@ -515,6 +528,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
                 dataset_dir,
                 expected_receipt_sha256=str(profile_config["plan32_projection_receipt_sha256"]),
                 epoch=int(profile_config["plan32_epoch"]),
+                schema_version=literal_projection_schema(profile_config),
             )
         else:
             verify_projection(dataset_dir, str(profile_config["plan31_projection_receipt_sha256"]))
@@ -736,6 +750,9 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         model = PeftModel.from_pretrained(model, str(adapter_path), is_trainable=True)
         logger.info("Loaded trainable warm-start adapter from %s", adapter_path)
     else:
+        # Trainer seeds only after this point; without this, LoRA A is drawn from
+        # the unseeded process RNG and fresh runs cannot be reproduced or compared.
+        set_seed(int(profile_config.get("seed", 42)))
         model = get_peft_model(model, lora_cfg)
     model = model.to(device)
 
@@ -887,7 +904,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             start_step = int(profile_config["telemetry_start_step"])
             stop_step = int(profile_config["stop_after_step"])
             epoch = int(plan32_epoch) if plan32_epoch is not None else 1
-            epoch_base_step = 0 if epoch == 1 else 352
+            epoch_base_step = 352 * (epoch - 1)
             exposure_ledger = Plan31ExposureLedger(
                 Path(output_dir) / "exposures.jsonl", schedule_path=schedule_path,
                 train_rows=train_ds, start_ordinal=(start_step - epoch_base_step) * 8 + 1,
@@ -1077,6 +1094,7 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             exposure_ledger=exposure_ledger,
             mode_panels=mode_panels,
             start_step=int(profile_config.get("telemetry_start_step", 0) or 0),
+            token_counter=data_collator if isinstance(data_collator, ExposureTrackingCollator) else None,
             provenance={
                 **split_provenance,
                 "profile_sha256": profile_sha256,

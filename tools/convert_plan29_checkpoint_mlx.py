@@ -32,6 +32,15 @@ MLX_REVISION = "eec12d0899edea9b738ab1009af9159cdfd70d71"
 EXPECTED_TARGETS = {
     "plan29": {"language": 294, "vision": 112, "projection": 1},
     "plan30-corrected": {"language": 258, "vision": 112, "projection": 1},
+    # Plan 33 stock-E2B lineage: 35 layers, 20 shared-K/V layers own no K/V.
+    "plan33-e2b": {"language": 205, "vision": 112, "projection": 1},
+}
+# Pinned HF source and its bit-identical MLX BF16 conversion, per profile.
+SOURCES = {
+    "plan29": (HF_REPO_ID, HF_REVISION, MLX_REPO_ID, MLX_REVISION),
+    "plan30-corrected": (HF_REPO_ID, HF_REVISION, MLX_REPO_ID, MLX_REVISION),
+    "plan33-e2b": ("google/gemma-4-E2B-it", "3e22461f65e89153144f8adb70e3b8c2cc9845a7",
+                   "mlx-community/gemma-4-e2b-it-bf16", "fb0b166bbb9a0eb4b37915bfc515a197c9122f39"),
 }
 SHARED_KV_PATTERN = re.compile(
     r"^base_model\.model\.model\.language_model\.layers\.(\d+)\.self_attn\.([kv]_proj)$"
@@ -120,7 +129,7 @@ def inference_inactive_shared_kv_modules(
     return inactive
 
 
-def validate_adapter_config(config: dict[str, Any]) -> float:
+def validate_adapter_config(config: dict[str, Any], *, profile: str = "plan29") -> float:
     required = {
         "peft_type": "LORA",
         "r": 64,
@@ -128,7 +137,7 @@ def validate_adapter_config(config: dict[str, Any]) -> float:
         "bias": "none",
         "use_dora": False,
         "use_rslora": False,
-        "base_model_name_or_path": HF_REPO_ID,
+        "base_model_name_or_path": SOURCES[profile][0],
     }
     mismatches = {key: (config.get(key), value) for key, value in required.items()
                   if config.get(key) != value}
@@ -202,14 +211,15 @@ def copy_model_metadata(source: Path, destination: Path) -> None:
 def conversion_identity(*, base: Path, hf_base: Path, adapter: Path,
                         profile: str = "plan29") -> dict[str, Any]:
     config = json.loads((adapter / "adapter_config.json").read_text(encoding="utf-8"))
-    scale = validate_adapter_config(config)
+    scale = validate_adapter_config(config, profile=profile)
+    hf_repo, hf_revision, mlx_repo, mlx_revision = SOURCES[profile]
     return {
         "schema_version": f"{profile}_mlx_conversion_v1",
         "profile": profile,
         "converter_sha256": sha256_file(Path(__file__)),
-        "source_hf": {"repo_id": HF_REPO_ID, "revision": HF_REVISION,
+        "source_hf": {"repo_id": hf_repo, "revision": hf_revision,
                       "weights_sha256": sha256_file(hf_base / "model.safetensors")},
-        "source_mlx": {"repo_id": MLX_REPO_ID, "revision": MLX_REVISION,
+        "source_mlx": {"repo_id": mlx_repo, "revision": mlx_revision,
                        "config_sha256": sha256_file(base / "config.json"),
                        "index_sha256": sha256_file(base / "model.safetensors.index.json")},
         "adapter": {

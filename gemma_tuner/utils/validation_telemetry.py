@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +133,7 @@ class ValidationTelemetry(TrainerCallback):
         exposure_ledger: Any,
         mode_panels: dict[str, Any] | None = None,
         start_step: int = 0,
+        token_counter: Any = None,
     ) -> None:
         if min(interval_steps, save_steps, stop_after_step) < 1:
             raise ValueError("strict telemetry intervals and stop step must be positive")
@@ -148,6 +151,9 @@ class ValidationTelemetry(TrainerCallback):
         self.exposure_ledger = exposure_ledger
         self.mode_panels = dict(mode_panels or {})
         self.start_step = int(start_step)
+        self.token_counter = token_counter
+        self._logged_exposures = len(getattr(exposure_ledger, "rows", []))
+        self._last_log_time = time.time()
         if self.start_step < 0 or self.start_step >= self.stop_after_step:
             raise ValueError("strict telemetry start step must precede stop step")
         self.rows: dict[tuple[str, int], dict[str, Any]] = {}
@@ -309,10 +315,39 @@ class ValidationTelemetry(TrainerCallback):
         for key in ("learning_rate", "grad_norm", "epoch"):
             if key in logs:
                 row[key] = float(logs[key])
+        row.update(self._step_accounting(exposures))
         if not all(math.isfinite(value) for key, value in row.items() if isinstance(value, float)):
             raise RuntimeError("strict telemetry non-finite optimization metric")
         self._append(row)
         return control
+
+    def _step_accounting(self, exposures: int) -> dict[str, Any]:
+        """Describe the rows, tokens, time, and memory consumed since the previous optimizer step."""
+        committed = list(getattr(self.exposure_ledger, "rows", [])[self._logged_exposures:exposures])
+        now = time.time()
+        extra: dict[str, Any] = {
+            "step_exposures": len(committed),
+            "wall_time_unix": round(now, 3),
+            "step_seconds": round(now - self._last_log_time, 3),
+        }
+        ordinals = [int(row["source_ordinal"]) for row in committed if "source_ordinal" in row]
+        if ordinals:
+            extra["source_ordinal_range"] = [min(ordinals), max(ordinals)]
+        modes = [str(row["mode"]) for row in committed if "mode" in row]
+        if modes:
+            extra["mode_counts"] = dict(sorted(Counter(modes).items()))
+        tokens = getattr(self.token_counter, "scored_tokens", None)
+        if tokens is not None and len(tokens) >= exposures:
+            extra["scored_tokens"] = int(sum(tokens[self._logged_exposures:exposures]))
+        if torch.cuda.is_available():
+            extra["peak_accelerator_bytes"] = int(torch.cuda.max_memory_allocated())
+            extra["reserved_accelerator_bytes"] = int(torch.cuda.memory_reserved())
+            torch.cuda.reset_peak_memory_stats()
+        elif torch.backends.mps.is_available():
+            extra["peak_accelerator_bytes"] = int(torch.mps.driver_allocated_memory())
+        self._logged_exposures = exposures
+        self._last_log_time = now
+        return extra
 
     def on_save(self, args, state, control, **kwargs):  # noqa: ANN001, ARG002
         step = int(state.global_step)

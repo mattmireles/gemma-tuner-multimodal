@@ -66,3 +66,41 @@ def test_missing_original_or_unknown_mode_fails_closed():
         render_plan31_input(mode="image_only", full_prompt=PROMPT, system_prompt="system", full_views=[])
     with pytest.raises(ValueError):
         render_plan31_input(mode="wrong", full_prompt=PROMPT, system_prompt="system", full_views=VIEWS)
+
+
+V3_PROMPT = (
+    '{"context":{"application":"Chat"}}'
+    + '\n\n<first_pass_screenshot_ocr>\n{"spans":["private OCR"]}'
+    + '\n</first_pass_screenshot_ocr>\n\n'
+    + INSTRUCTION
+    + "\n"
+)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_v3_instruction_stays_single_and_last_in_every_mode(mode):
+    _, messages = render_plan31_input(
+        mode=mode, full_prompt=V3_PROMPT, system_prompt="full system", full_views=VIEWS
+    )
+    content = messages[-1]["content"]
+    if mode == "image_only":
+        assert all(item["type"] == "image" for item in content)
+        return
+    text = content[-1]["text"]
+    assert text.count(INSTRUCTION) == 1
+    assert text.rstrip().endswith(INSTRUCTION)
+    assert ("private OCR" in text) == (mode in {"full", "no_quadrants", "no_system"})
+    if mode == "no_ocr":
+        assert text == '{"context":{"application":"Chat"}}\n\n' + INSTRUCTION + "\n"
+    elif mode != "image_instruction":
+        assert text == V3_PROMPT
+
+
+@pytest.mark.parametrize("prompt", [
+    V3_PROMPT.replace(INSTRUCTION, INSTRUCTION + " extra"),
+    INSTRUCTION + "\n" + V3_PROMPT,
+    V3_PROMPT + INSTRUCTION,
+])
+def test_v3_instruction_drift_fails_closed(prompt):
+    with pytest.raises(ValueError):
+        render_plan31_input(mode="no_ocr", full_prompt=prompt, system_prompt="system", full_views=VIEWS)

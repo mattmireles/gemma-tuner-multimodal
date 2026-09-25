@@ -121,6 +121,8 @@ class ConfigConstants:
         "stop_after_step",
         "telemetry_start_step",
         "plan32_epoch",
+        "literal_epochs",
+        "segment_steps",
     }
 
     FLOAT_COERCION_KEYS = {

@@ -95,10 +95,15 @@ class ExposureTrackingCollator:
     def __init__(self, delegate: Any, ledger: ExposureLedger) -> None:
         self.delegate = delegate
         self.ledger = ledger
+        # Per-row supervised token counts, in exactly the order rows are staged.
+        self.scored_tokens: list[int] = []
 
     def __call__(self, features: list[dict[str, Any]]) -> Any:
         batch = self.delegate(features)
         self.ledger.stage(features)
+        labels = batch.get("labels") if hasattr(batch, "get") else None
+        if labels is not None and hasattr(labels, "shape") and labels.shape[0] == len(features):
+            self.scored_tokens.extend(int(count) for count in (labels[:, 1:] != -100).sum(dim=1).tolist())
         return batch
 
 
