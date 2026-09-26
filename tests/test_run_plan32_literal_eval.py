@@ -89,6 +89,14 @@ ${canonical_full_user_message}</instructions>
     assert "${" not in rendered
 
 
+def test_render_accepts_literal_dollar_brace_in_candidate_but_not_in_template():
+    row = {"system_prompt": "S", "prompt": "Return valid JSON only." + OCR_OPEN + "O" + OCR_CLOSE}
+    user = "${canonical_full_system_instruction}${canonical_full_user_message}${structured_ocr}${primary_analyst_output}"
+    assert "${HOME}" in render_judge("J", user, row, "echo ${HOME}")
+    with pytest.raises(ValueError, match="unfilled"):
+        render_judge("J", user + "${stray}", row, "x")
+
+
 def test_quantized_model_must_be_decoder_only_with_exact_recipe(tmp_path, monkeypatch):
     monkeypatch.setattr("importlib.metadata.version", lambda _name: {"mlx": "0.32.2", "mlx-vlm": "0.7.1"}[_name])
     model = tmp_path / "model"

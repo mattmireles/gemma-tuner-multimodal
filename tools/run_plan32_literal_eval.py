@@ -175,11 +175,17 @@ def render_judge(system: str, user: str, row: dict[str, str], candidate: str) ->
         "${structured_ocr}": ocr,
         "${primary_analyst_output}": candidate,
     }
+    # Check the template, not the rendered text: OCR or model output may contain "${" literally.
+    template = user
+    for marker in replacements:
+        if marker not in template:
+            raise ValueError(f"judge template lacks marker {marker}")
+        template = template.replace(marker, "", 1)
+    if "${" in template:
+        raise ValueError("unfilled judge template marker")
     rendered = user
     for marker, value in replacements.items():
         rendered = rendered.replace(marker, value, 1)
-    if "${" in rendered:
-        raise ValueError("unfilled judge template marker")
     return system + "\n\n" + rendered
 
 
