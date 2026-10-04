@@ -189,3 +189,22 @@ Claude.md
 # Commit config/config.ini.example instead; copy it to config/config.ini to get started.
 config/config.ini
 config.ini
+
+# Private development material belongs in the private working repository.
+/README/
+/docs/
+/.agents/
+/.claude/
+/.cursor/
+/COORD*.md
+/AGENTS.md
+/Claude.md
+/CLAUDE.md
+/DEVELOPMENT_NOTES.md
+/artifacts/
+/runtime/tuning/
+/config/plan*.ini
+/config/telepathic_context_sft_phase0.json
+/private/
+/.private-migration/
+*.profraw
