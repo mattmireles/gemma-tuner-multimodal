@@ -1,0 +1,6 @@
+interface:
+  display_name: "Write Notes"
+  short_description: "Capture repo notes without creating note sprawl"
+  default_prompt: "Use $write-notes to capture this investigation in the right README/Notes document."
+policy:
+  allow_implicit_invocation: true

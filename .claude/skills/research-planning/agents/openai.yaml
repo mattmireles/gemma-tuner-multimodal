@@ -1,0 +1,6 @@
+interface:
+  display_name: "Research Planning"
+  short_description: "Create external field guides with Gemini Deep Research"
+  default_prompt: "Use $research-planning to create or refresh a README/Guides field guide from external research before planning or implementation."
+policy:
+  allow_implicit_invocation: true

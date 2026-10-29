@@ -1,0 +1,6 @@
+interface:
+  display_name: "Documentation"
+  short_description: "Write or review inline code documentation"
+  default_prompt: "Use $documentation to add or review inline code documentation for this change."
+policy:
+  allow_implicit_invocation: true

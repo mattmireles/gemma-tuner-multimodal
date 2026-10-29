@@ -1,0 +1,6 @@
+interface:
+  display_name: "Research Debugging"
+  short_description: "Investigate external bugs with Gemini Deep Research"
+  default_prompt: "Use $research-debugging to research an external bug surface with Gemini Deep Research and turn it into a durable README/Guides debug guide."
+policy:
+  allow_implicit_invocation: true

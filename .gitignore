@@ -167,10 +167,12 @@ README/plans/
 
 # Agent / editor bundles (local only)
 .agents/
-.claude/
-# Explicit: david-ogilvy copywriting skill lives under .claude/skills/ (local; adapted from gist)
-.claude/skills/david-ogilvy/
 .cursor/
+
+# Claude app config stays local; project skills are versioned under .claude/skills/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 Claude.md
 
 # User-specific runtime config — may contain GCP project IDs written by the wizard.

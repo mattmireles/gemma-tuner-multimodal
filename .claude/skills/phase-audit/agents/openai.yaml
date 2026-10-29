@@ -1,0 +1,6 @@
+interface:
+  display_name: "Phase Audit"
+  short_description: "Review a completed plan phase before commit or push"
+  default_prompt: "Use $phase-audit to review the completed phase against the plan, changed files, and audit rubric."
+policy:
+  allow_implicit_invocation: true

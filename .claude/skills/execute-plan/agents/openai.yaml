@@ -1,0 +1,6 @@
+interface:
+  display_name: "Execute Plan"
+  short_description: "Execute a checked-in plan one phase at a time"
+  default_prompt: "Use $execute-plan to implement a checked-in plan phase by phase, audit each phase, and finish with push plus CI monitoring."
+policy:
+  allow_implicit_invocation: true

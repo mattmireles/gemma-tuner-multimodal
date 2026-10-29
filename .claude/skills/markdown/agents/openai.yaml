@@ -1,0 +1,6 @@
+interface:
+  display_name: "Markdown"
+  short_description: "Write or repair repo markdown docs"
+  default_prompt: "Use $markdown to write or clean up markdown for this repo."
+policy:
+  allow_implicit_invocation: true
