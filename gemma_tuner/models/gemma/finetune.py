@@ -54,17 +54,22 @@ References:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import re
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Union
 
 if TYPE_CHECKING:
     from gemma_tuner.core.profile_config import ProfileConfig
 
 import torch
+import torch.nn.functional as F
 from datasets import Dataset as HFDataset
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from torch.utils.data import Dataset
 from transformers import (
     AutoProcessor,
@@ -97,9 +102,29 @@ from gemma_tuner.models.gemma.family import (
     assert_family_supported,
     detect_family,
 )
+from gemma_tuner.utils.checkpoints import (
+    ImmutableCheckpointCallback,
+    StopAfterStepCallback,
+    sha256_file,
+    verify_complete_checkpoint,
+)
 from gemma_tuner.utils.dataset_utils import load_dataset_split, resolve_data_datasets_dir
 from gemma_tuner.utils.device import empty_cache, get_device, to_bool
+from gemma_tuner.utils.exposure_ledger import (
+    ExposureCommitCallback,
+    ExposureLedger,
+    ExposureTrackingCollator,
+)
+from gemma_tuner.utils.gradient_receipt import (
+    GradientSubsystemReceiptCallback,
+    RedactedTrainingMetricsCallback,
+)
 from gemma_tuner.utils.integrity import create_integrity_manifest
+from gemma_tuner.utils.plan31_exposure_ledger import Plan31ExposureLedger
+from gemma_tuner.utils.plan31_projection import verify_projection
+from gemma_tuner.utils.plan32_projection import literal_projection_schema
+from gemma_tuner.utils.plan32_projection import verify_projection as verify_plan32_projection
+from gemma_tuner.utils.validation_telemetry import ValidationTelemetry, validate_split_identity
 
 # Re-export DataCollatorGemmaAudio so existing imports from this module still work.
 # The canonical class lives in models/common/collators.py; the local duplicate was
@@ -107,6 +132,54 @@ from gemma_tuner.utils.integrity import create_integrity_manifest
 __all__ = ["DataCollatorGemmaAudio"]
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_dataset_image_paths(dataset: HFDataset, dataset_dir: str, column: str) -> HFDataset:
+    """Resolve CSV image paths identically for train, validation, and mode panels."""
+    def resolve_batch(batch: dict) -> dict:
+        batch[column] = [
+            os.path.join(dataset_dir, str(path)) if path and not os.path.isabs(str(path)) else path
+            for path in batch[column]
+        ]
+        return batch
+
+    return dataset.map(resolve_batch, batched=True)
+
+
+def completion_only_causal_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+) -> torch.Tensor:
+    """Compute causal CE when Gemma returns only the supervised suffix logits."""
+    if logits.ndim != 3 or labels.ndim != 2:
+        raise ValueError("completion-only loss expects [B,K,V] logits and [B,L] labels")
+    kept = int(logits.shape[1])
+    if kept < 2 or kept > labels.shape[1]:
+        raise ValueError("completion-only logits length is incompatible with labels")
+    shift_logits = logits[:, :-1, :]
+    shift_labels = labels[:, -(kept - 1) :]
+    if attention_mask is not None:
+        shift_attention = attention_mask[:, -(kept - 1) :].to(dtype=torch.bool)
+        shift_logits = shift_logits[shift_attention]
+        shift_labels = shift_labels[shift_attention]
+    return F.cross_entropy(
+        shift_logits.reshape(-1, shift_logits.shape[-1]).float(),
+        shift_labels.reshape(-1).to(shift_logits.device),
+        ignore_index=GemmaTrainingConstants.IGNORE_TOKEN_ID,
+    )
+
+
+class CompletionOnlyTrainer(Trainer):
+    """Avoid full-sequence 256k-vocabulary logits for suffix-only SFT loss."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        prepared = dict(inputs)
+        labels = prepared.pop("labels")
+        attention_mask = prepared.get("attention_mask")
+        outputs = model(**prepared)
+        loss = completion_only_causal_loss(outputs.logits, labels, attention_mask)
+        return (loss, outputs) if return_outputs else loss
 
 
 def _test_mps_bfloat16_support(device: torch.device) -> bool:
@@ -284,6 +357,154 @@ def _raise_if_lora_targets_use_peft_incompatible_linears(model: torch.nn.Module,
     )
 
 
+def _validate_lora_target_regex(model: torch.nn.Module, pattern: str) -> List[str]:
+    try:
+        compiled = re.compile(pattern)
+    except re.error as exc:
+        raise ValueError(f"invalid lora_target_modules_regex: {exc}") from exc
+    matched: List[str] = []
+    incompatible: List[str] = []
+    for name, module in model.named_modules():
+        if not compiled.fullmatch(name):
+            continue
+        if not isinstance(module, torch.nn.Linear):
+            incompatible.append(f"{name} ({module.__class__.__name__})")
+        else:
+            matched.append(name)
+    if incompatible:
+        raise RuntimeError("lora_target_modules_regex matched non-linear modules: " + ", ".join(incompatible[:8]))
+    if not matched:
+        raise ValueError("lora_target_modules_regex matched no torch.nn.Linear modules")
+    return matched
+
+
+def _trainable_parameter_receipt(model: torch.nn.Module) -> dict[str, Any]:
+    by_subsystem = {
+        "vision": 0,
+        "projector": 0,
+        "decoder": 0,
+        "output_head": 0,
+        "audio": 0,
+        "other": 0,
+    }
+    names: List[str] = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if ".lm_head." in f".{name}." or name.startswith("lm_head."):
+            subsystem = "output_head"
+        elif "vision_tower" in name:
+            subsystem = "vision"
+        elif "embed_vision" in name:
+            subsystem = "projector"
+        elif "language_model" in name:
+            subsystem = "decoder"
+        elif "audio_tower" in name:
+            subsystem = "audio"
+        else:
+            subsystem = "other"
+        by_subsystem[subsystem] += parameter.numel()
+        names.append(name)
+    return {
+        "schema_version": "gemma_trainable_parameters_v1",
+        "by_subsystem": by_subsystem,
+        "total": sum(by_subsystem.values()),
+        "parameter_name_sha256": hashlib.sha256(("\n".join(sorted(names)) + "\n").encode()).hexdigest(),
+        "parameter_tensors": len(names),
+    }
+
+
+def _validate_conditioned_prompt_file(profile_config: "ProfileConfig") -> None:
+    column = profile_config.get("system_prompt_column")
+    template = profile_config.get("conditioned_system_prompt_template")
+    expected = profile_config.get("conditioned_system_prompt_sha256")
+    if not column:
+        if template or expected:
+            raise ValueError("conditioned prompt template/hash require system_prompt_column")
+        return
+    if not template and not expected:
+        # Per-row system prompts are content-bound by the staged CSV and manifest.
+        return
+    if not template or not expected:
+        raise ValueError("conditioned system prompt template/hash pair is incomplete")
+    path = Path(str(template)).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError("conditioned system prompt template is missing")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != str(expected):
+        raise ValueError("conditioned system prompt template hash mismatch")
+    text = path.read_text(encoding="utf-8")
+    for placeholder in ("{USER_FULL_NAME}", "{APPLICATION_NAME}"):
+        if placeholder not in text:
+            raise ValueError(f"conditioned system prompt template lacks {placeholder}")
+
+
+def _validate_strict_telemetry_config(profile_config: "ProfileConfig") -> bool:
+    """Fail before loading weights if the opt-in corrected smoke cannot evaluate."""
+    enabled = to_bool(profile_config.get("require_validation_telemetry", False))
+    if not enabled:
+        return False
+    import transformers
+
+    required_version = str(profile_config.get("required_transformers_version", ""))
+    if not required_version or transformers.__version__ != required_version:
+        raise RuntimeError(
+            f"strict telemetry requires Transformers {required_version or '<pinned version>'}; "
+            f"found {transformers.__version__}"
+        )
+    if str(profile_config.get("modality", "")).lower() != "image":
+        raise ValueError("strict telemetry is implemented only for the image corrected smoke")
+    if not to_bool(profile_config.get("load_validation", False)):
+        raise ValueError("strict telemetry requires load_validation=true")
+    if not to_bool(profile_config.get("completion_only_logits", False)):
+        raise ValueError("strict telemetry requires completion_only_logits=true")
+    if not to_bool(profile_config.get("record_exposures", False)):
+        raise ValueError("strict telemetry requires record_exposures=true")
+    if str(profile_config.get("eval_strategy", "no")) != "steps":
+        raise ValueError("strict telemetry requires eval_strategy=steps")
+    if int(profile_config.get("logging_steps", 0)) != 1:
+        raise ValueError("strict telemetry requires logging_steps=1")
+    for key in ("telemetry_interval_steps", "telemetry_train_rows", "telemetry_validation_rows", "stop_after_step"):
+        if int(profile_config.get(key, 0)) < 1:
+            raise ValueError(f"strict telemetry requires positive {key}")
+    if profile_config.get("input_mode_column"):
+        start = int(profile_config.get("telemetry_start_step", -1))
+        stop = int(profile_config["stop_after_step"])
+        plan32_epoch = profile_config.get("plan32_epoch")
+        if plan32_epoch is not None:
+            epoch = int(plan32_epoch)
+            # Plan 32 froze two literal epochs; Plan 33 (E2B) sets literal_epochs=3.
+            literal_epochs = int(profile_config.get("literal_epochs", 2))
+            if literal_epochs not in (2, 3):
+                raise ValueError("literal_epochs must be 2 (Plan 32) or 3 (Plan 33)")
+            epoch_start, epoch_stop = (
+                (352 * (epoch - 1), 352 * epoch) if 1 <= epoch <= literal_epochs else (-1, -1)
+            )
+            segment_steps = int(profile_config.get("segment_steps", 88))
+            if segment_steps in (1, 2):
+                # Disposable Plan 33 smoke: 0->1 then resumed 1->2, plus an uninterrupted 0->2 control.
+                if (literal_epochs != 3 or epoch != 1 or (start, stop) not in ((0, 1), (1, 2), (0, 2))
+                        or stop - start != segment_steps):
+                    raise ValueError("literal smoke is limited to epoch-one steps 0->1, 1->2, and 0->2")
+            elif (segment_steps != 88 or epoch_start < 0 or start < epoch_start or start >= epoch_stop
+                    or (start - epoch_start) % 88 or stop <= start
+                    or stop - start != 88 or stop > epoch_stop):
+                raise ValueError("Plan 32 telemetry requires a sealed 88-step segment within its frozen epoch")
+            schedule_keys = (
+                "plan32_schedule_path", "plan32_schedule_sha256", "plan32_projection_receipt_sha256"
+            )
+        else:
+            if start < 352 or (start - 352) % 88 or stop <= start or stop - start > 88 or stop > 704:
+                raise ValueError("Plan 31 telemetry requires one sealed 88-step segment after checkpoint 352")
+            schedule_keys = (
+                "plan31_schedule_path", "plan31_schedule_sha256", "plan31_projection_receipt_sha256"
+            )
+        for key in schedule_keys:
+            if not profile_config.get(key):
+                raise ValueError(f"strict input-mode telemetry requires {key}")
+    return True
+
+
 def main(profile_config: "ProfileConfig", output_dir: str):
     """Main Gemma 3n LoRA training entry.
 
@@ -298,6 +519,19 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     logger.setLevel(logging.INFO)
+    strict_telemetry = _validate_strict_telemetry_config(profile_config)
+    _validate_conditioned_prompt_file(profile_config)
+    if profile_config.get("input_mode_column"):
+        dataset_dir = resolve_data_datasets_dir(profile_config["dataset"])
+        if profile_config.get("plan32_epoch") is not None:
+            verify_plan32_projection(
+                dataset_dir,
+                expected_receipt_sha256=str(profile_config["plan32_projection_receipt_sha256"]),
+                epoch=int(profile_config["plan32_epoch"]),
+                schema_version=literal_projection_schema(profile_config),
+            )
+        else:
+            verify_projection(dataset_dir, str(profile_config["plan31_projection_receipt_sha256"]))
     # Quiet down Hugging Face tokenizers dumping huge AddedToken lists
     try:
         hf_logging.set_verbosity_error()
@@ -361,27 +595,16 @@ def main(profile_config: "ProfileConfig", output_dir: str):
                 streaming_enabled=streaming_enabled,
             )
         except Exception as e:
+            if strict_telemetry:
+                raise RuntimeError("strict telemetry could not load validation split") from e
             logger.warning(f"Failed to load validation split; running without eval: {e}")
 
     image_path_column_resolved = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
     if modality in ("image", "audiovisual"):
         dataset_dir = resolve_data_datasets_dir(dataset_name)
-
-        def _resolve_image_paths(batch: dict) -> dict:
-            col = image_path_column_resolved
-            paths = batch[col]
-            out = []
-            for p in paths:
-                if p and not os.path.isabs(str(p)):
-                    out.append(os.path.join(dataset_dir, str(p)))
-                else:
-                    out.append(p)
-            batch[col] = out
-            return batch
-
-        train_dataset = train_dataset.map(_resolve_image_paths, batched=True)
+        train_dataset = _resolve_dataset_image_paths(train_dataset, dataset_dir, image_path_column_resolved)
         if eval_dataset is not None:
-            eval_dataset = eval_dataset.map(_resolve_image_paths, batched=True)
+            eval_dataset = _resolve_dataset_image_paths(eval_dataset, dataset_dir, image_path_column_resolved)
 
     # Initialize processor and model
     model_id = profile_config.get("base_model", GemmaTrainingConstants.DEFAULT_BASE_MODEL_ID)
@@ -454,6 +677,9 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     #
     # Called during LoRA configuration setup in main() function
     # Affects PEFT model creation via get_peft_model() later in this function
+    target_regex = profile_config.get("lora_target_modules_regex")
+    if target_regex and profile_config.get("lora_target_modules"):
+        raise ValueError("lora_target_modules_regex and lora_target_modules are mutually exclusive")
     target_modules_from_config = profile_config.get("lora_target_modules") or GemmaTrainingConstants.LORA_TARGET_MODULES
 
     if isinstance(target_modules_from_config, str):
@@ -485,7 +711,11 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     # Intersect: which of the requested names are actually present in the model?
     validated_target_modules = [m for m in target_modules_list if m in discovered_modules]
 
-    if not validated_target_modules:
+    if target_regex:
+        matched_target_modules = _validate_lora_target_regex(model, str(target_regex))
+        lora_target_spec: str | List[str] = str(target_regex)
+        logger.info("LoRA target regex matched %d linear modules", len(matched_target_modules))
+    elif not validated_target_modules:
         if user_specified_targets:
             # User explicitly asked for modules that don't exist → hard error.
             available = sorted({name.split(".")[-1] for name, _ in model.named_modules() if "." in name})
@@ -498,18 +728,40 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             # Defaults weren't found — use whatever _discover found (may be empty,
             # in which case PEFT will raise its own informative error).
             validated_target_modules = discovered_modules
+        lora_target_spec = validated_target_modules
+    else:
+        lora_target_spec = validated_target_modules
 
     lora_cfg = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
-        target_modules=validated_target_modules,
+        target_modules=lora_target_spec,
         bias="none",
         task_type="CAUSAL_LM",
     )
-    _raise_if_lora_targets_use_peft_incompatible_linears(model, validated_target_modules)
-    model = get_peft_model(model, lora_cfg)
+    if not target_regex:
+        _raise_if_lora_targets_use_peft_incompatible_linears(model, validated_target_modules)
+    initial_adapter_path = profile_config.get("initial_adapter_path")
+    if initial_adapter_path and not profile_config.get("resume_from_checkpoint"):
+        adapter_path = Path(str(initial_adapter_path)).expanduser().resolve(strict=True)
+        if not (adapter_path / "adapter_config.json").is_file():
+            raise FileNotFoundError(f"initial adapter config is missing: {adapter_path}")
+        model = PeftModel.from_pretrained(model, str(adapter_path), is_trainable=True)
+        logger.info("Loaded trainable warm-start adapter from %s", adapter_path)
+    else:
+        # Trainer seeds only after this point; without this, LoRA A is drawn from
+        # the unseeded process RNG and fresh runs cannot be reproduced or compared.
+        set_seed(int(profile_config.get("seed", 42)))
+        model = get_peft_model(model, lora_cfg)
     model = model.to(device)
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    trainable_receipt = _trainable_parameter_receipt(model)
+    (Path(output_dir) / "trainable_parameters.json").write_text(
+        json.dumps(trainable_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     # Install kwarg filter at all PEFT nesting levels.
     # Prevents TypeErrors when HuggingFace Trainer injects unexpected kwargs
@@ -548,6 +800,50 @@ def main(profile_config: "ProfileConfig", output_dir: str):
 
     train_ds = _hf_to_torch(train_dataset)
     eval_ds = _hf_to_torch(eval_dataset) if eval_dataset is not None else None
+    split_provenance = None
+    mode_panels = None
+    if strict_telemetry:
+        split_provenance = validate_split_identity(
+            train_ds,
+            eval_ds,
+            train_rows=int(profile_config["telemetry_train_rows"]),
+            validation_rows=int(profile_config["telemetry_validation_rows"]),
+        )
+        dataset_dir = Path(resolve_data_datasets_dir(dataset_name))
+        for split in ("train", "validation"):
+            csv_path = dataset_dir / f"{split}.csv"
+            if not csv_path.is_file():
+                raise ValueError(f"strict telemetry {split} CSV is missing")
+            split_provenance[f"{split}_csv_sha256"] = sha256_file(csv_path)
+        if profile_config.get("input_mode_column"):
+            from gemma_tuner.models.common.plan31_input_modes import MODES
+
+            validation_by_id = {str(row["id"]): row for row in eval_ds}
+            if len(validation_by_id) != len(eval_ds):
+                raise ValueError("Plan 31 validation IDs are not unique")
+            mode_panels = {}
+            expected_panel_ids = None
+            for mode in MODES:
+                panel_path = dataset_dir / f"validation-panel-{mode}.csv"
+                if not panel_path.is_file():
+                    raise FileNotFoundError(f"Plan 31 mode panel is missing: {mode}")
+                panel = HFDataset.from_csv(str(panel_path))
+                panel = _resolve_dataset_image_paths(panel, str(dataset_dir), image_path_column_resolved)
+                if len(panel) != 60:
+                    raise ValueError(f"Plan 31 mode panel {mode} must contain 60 rows")
+                panel_ids = [str(row["id"]) for row in panel]
+                if len(set(panel_ids)) != 60 or (expected_panel_ids is not None and panel_ids != expected_panel_ids):
+                    raise ValueError("Plan 31 mode panel IDs are duplicate or reordered")
+                expected_panel_ids = panel_ids
+                for row in panel:
+                    original = validation_by_id.get(str(row["id"]))
+                    if original is None or row["input_mode"] != mode:
+                        raise ValueError("Plan 31 panel contains an invalid held-out row or mode")
+                    for field in ("image_path", "prompt", "system_prompt", "response", "owner_id"):
+                        if str(row[field]) != str(original[field]):
+                            raise ValueError(f"Plan 31 mode panel changed {field}")
+                mode_panels[mode] = panel
+                split_provenance[f"mode_panel_{mode}_csv_sha256"] = sha256_file(panel_path)
 
     # Collator: multimodal processor (audio / image) or tokenizer-only (text)
     if modality == "text":
@@ -563,6 +859,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         image_sub_mode = str(profile_config.get("image_sub_mode", "caption")).strip().lower()
         image_path_col = str(profile_config.get("image_path_column") or "image_path").strip() or "image_path"
         image_token_budget = int(profile_config.get("image_token_budget", 280))
+        image_view_policy = str(profile_config.get("image_view_policy", "single"))
+        system_prompt_column = profile_config.get("system_prompt_column")
         data_collator = DataCollatorGemmaImage(
             processor=processor,
             text_column=text_column,
@@ -570,6 +868,12 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             image_path_column=image_path_col,
             prompt_column=prompt_column,
             image_token_budget=image_token_budget,
+            image_view_policy=image_view_policy,
+            system_prompt_column=system_prompt_column,
+            input_mode_column=profile_config.get("input_mode_column"),
+            require_telepathic_contract=to_bool(profile_config.get("require_telepathic_contract", False)),
+            completion_only_logits=to_bool(profile_config.get("completion_only_logits", False)),
+            max_length=max_seq_length,
             sub_mode=image_sub_mode,
         )
     elif modality == "audiovisual":
@@ -585,6 +889,33 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         data_collator = DataCollatorGemmaAudio(
             processor=processor, text_column=text_column, family=family, sampling_rate_hint=None
         )
+
+    telemetry_collator = data_collator
+    exposure_ledger = None
+    if to_bool(profile_config.get("record_exposures", False)):
+        if profile_config.get("input_mode_column"):
+            plan32_epoch = profile_config.get("plan32_epoch")
+            schedule_key = "plan32_schedule_path" if plan32_epoch is not None else "plan31_schedule_path"
+            schedule_hash_key = "plan32_schedule_sha256" if plan32_epoch is not None else "plan31_schedule_sha256"
+            schedule_path = Path(str(profile_config[schedule_key])).expanduser().resolve()
+            schedule_sha = sha256_file(schedule_path)
+            if schedule_sha != str(profile_config[schedule_hash_key]):
+                raise ValueError("frozen input-mode schedule hash mismatch")
+            start_step = int(profile_config["telemetry_start_step"])
+            stop_step = int(profile_config["stop_after_step"])
+            epoch = int(plan32_epoch) if plan32_epoch is not None else 1
+            epoch_base_step = 352 * (epoch - 1)
+            exposure_ledger = Plan31ExposureLedger(
+                Path(output_dir) / "exposures.jsonl", schedule_path=schedule_path,
+                train_rows=train_ds, start_ordinal=(start_step - epoch_base_step) * 8 + 1,
+                end_ordinal=min((stop_step - epoch_base_step) * 8, len(train_ds)),
+                expected_epoch=epoch,
+                schema_version=("plan32_training_exposure_v1" if plan32_epoch is not None
+                                else "plan31_training_exposure_v1"),
+            )
+        else:
+            exposure_ledger = ExposureLedger(Path(output_dir) / "exposures.jsonl")
+        data_collator = ExposureTrackingCollator(data_collator, exposure_ledger)
 
     # WER metrics for speech runs only; text/image use loss / optional perplexity in train_results.
     compute_metrics_fn = None
@@ -627,6 +958,8 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     # crashing the entire training run.
     requested_eval_strategy = str(profile_config.get("eval_strategy", GemmaTrainingConstants.DEFAULT_EVAL_STRATEGY))
     if eval_ds is None and requested_eval_strategy != "no":
+        if strict_telemetry:
+            raise RuntimeError("strict telemetry has no validation dataset")
         logger.warning(
             "eval_strategy=%r requested but no eval_dataset is available; overriding to 'no'.",
             requested_eval_strategy,
@@ -697,9 +1030,15 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         gradient_accumulation_steps=gradient_accumulation_steps,
         num_train_epochs=num_train_epochs,
         learning_rate=learning_rate,
+        weight_decay=float(profile_config.get("weight_decay", 0.0)),
+        warmup_steps=int(profile_config.get("warmup_steps", 0)),
+        warmup_ratio=float(profile_config.get("warmup_ratio", 0.0)),
+        lr_scheduler_type=str(profile_config.get("lr_scheduler_type", "linear")),
         bf16=use_bf16,
         gradient_checkpointing=gradient_checkpointing,
         logging_steps=_logging_steps,
+        save_steps=int(profile_config.get("save_steps", 1000)),
+        save_total_limit=int(profile_config.get("save_total_limit", 10)),
         save_strategy=str(profile_config.get("save_strategy", GemmaTrainingConstants.DEFAULT_SAVE_STRATEGY)),
         eval_strategy=effective_eval_strategy,
         report_to=[],
@@ -709,7 +1048,14 @@ def main(profile_config: "ProfileConfig", output_dir: str):
         # Avoid Trainer.evaluate() stalling on MPS (transformers#27181); matches gemma4-guide.md.
         skip_memory_metrics=True,
         torch_compile=resolve_training_torch_compile(device, profile_config),
+        seed=int(profile_config.get("seed", 42)),
+        data_seed=int(profile_config.get("seed", 42)),
+        full_determinism=to_bool(profile_config.get("full_determinism", False)),
     )
+    if strict_telemetry:
+        train_kw["eval_steps"] = int(profile_config.get("eval_steps", profile_config["stop_after_step"]))
+    if profile_config.get("input_mode_column"):
+        train_kw["train_sampling_strategy"] = "sequential"
     _ms = profile_config.get("max_steps")
     if _ms is not None and _ms != "":
         train_kw["max_steps"] = int(_ms)
@@ -719,10 +1065,62 @@ def main(profile_config: "ProfileConfig", output_dir: str):
     set_seed(args.seed)
 
     trainer_callbacks: List[Any] = []
+    if strict_telemetry:
+        trainer_callbacks.append(RedactedTrainingMetricsCallback(output_dir))
+        trainer_callbacks.append(ExposureCommitCallback(exposure_ledger))
+    telemetry = None
+    if strict_telemetry:
+        profile_identity = {
+            key: value
+            for key, value in dict(profile_config).items()
+            if key not in {"resume_from_checkpoint", "stop_after_step", "output_dir"}
+        }
+        profile_sha256 = hashlib.sha256(
+            json.dumps(profile_identity, sort_keys=True, default=str, separators=(",", ":")).encode()
+        ).hexdigest()
+        import transformers
+
+        telemetry = ValidationTelemetry(
+            output_dir,
+            train_ds=train_ds,
+            validation_ds=eval_ds,
+            collator=telemetry_collator,
+            train_rows=int(profile_config["telemetry_train_rows"]),
+            validation_rows=int(profile_config["telemetry_validation_rows"]),
+            interval_steps=int(profile_config["telemetry_interval_steps"]),
+            save_steps=int(profile_config.get("save_steps", 0)),
+            stop_after_step=int(profile_config["stop_after_step"]),
+            full_validation_at_stop=to_bool(profile_config.get("telemetry_full_validation_at_stop", False)),
+            exposure_ledger=exposure_ledger,
+            mode_panels=mode_panels,
+            start_step=int(profile_config.get("telemetry_start_step", 0) or 0),
+            token_counter=data_collator if isinstance(data_collator, ExposureTrackingCollator) else None,
+            provenance={
+                **split_provenance,
+                "profile_sha256": profile_sha256,
+                "model_revision": str(model_revision),
+                "transformers_version": transformers.__version__,
+            },
+        )
+        trainer_callbacks.append(telemetry)
+    trainer_callbacks.append(ImmutableCheckpointCallback())
+    if not strict_telemetry:
+        trainer_callbacks.append(RedactedTrainingMetricsCallback(output_dir))
+        if exposure_ledger is not None:
+            trainer_callbacks.append(ExposureCommitCallback(exposure_ledger))
+    stop_after_step = profile_config.get("stop_after_step")
+    if stop_after_step not in (None, ""):
+        trainer_callbacks.append(StopAfterStepCallback(int(stop_after_step)))
+    required_gradient_subsystems = str(profile_config.get("require_gradient_subsystems", "")).split(",")
+    if any(value.strip() for value in required_gradient_subsystems):
+        trainer_callbacks.append(GradientSubsystemReceiptCallback(output_dir, required_gradient_subsystems))
     if _do_viz:
         trainer_callbacks.append(VisualizerTrainerCallback(update_every_steps=max(1, _logging_steps)))
 
-    trainer_cls = GemmaVizTrainer if _do_viz else Trainer
+    completion_only_logits = to_bool(profile_config.get("completion_only_logits", False))
+    if _do_viz and completion_only_logits:
+        raise ValueError("completion_only_logits is not compatible with visualization")
+    trainer_cls = GemmaVizTrainer if _do_viz else (CompletionOnlyTrainer if completion_only_logits else Trainer)
     trainer_kwargs: dict[str, Any] = {}
     if _do_viz:
         trainer_kwargs["visualize"] = True
@@ -750,7 +1148,26 @@ def main(profile_config: "ProfileConfig", output_dir: str):
             )
 
     logger.info("Starting Gemma LoRA training...")
-    train_result = trainer.train()
+    resume_from_checkpoint = profile_config.get("resume_from_checkpoint")
+    if resume_from_checkpoint:
+        verify_complete_checkpoint(Path(str(resume_from_checkpoint)).expanduser().resolve())
+    elif telemetry is not None:
+        telemetry.record_eval(trainer.model, 0)
+    train_result = trainer.train(
+        resume_from_checkpoint=(
+            str(Path(str(resume_from_checkpoint)).expanduser().resolve()) if resume_from_checkpoint else None
+        )
+    )
+    if isinstance(exposure_ledger, Plan31ExposureLedger):
+        receipt = exposure_ledger.verify_complete()
+        receipt_name = (
+            "plan32_exposure_verification.json"
+            if profile_config.get("plan32_epoch") is not None
+            else "plan31_exposure_verification.json"
+        )
+        (Path(output_dir) / receipt_name).write_text(
+            json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
     logger.info("Training complete. Saving adapter...")
     trainer.save_model()
     if _do_viz:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional, Set
 
@@ -16,6 +17,7 @@ from gemma_tuner.models.gemma.constants import (
     resolve_processor_sampling_rate,
 )
 from gemma_tuner.models.gemma.family import GemmaFamily, family_capabilities
+from gemma_tuner.models.common.plan31_input_modes import render_plan31_input
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +376,52 @@ def _load_image_as_rgb(path: Any) -> Any:
         raise RuntimeError(f"Failed to load image {path!r}: {e}") from e
 
 
+IMAGE_VIEW_SINGLE = "single"
+IMAGE_VIEW_GLOBAL_PLUS_QUADRANTS = "global_plus_four_nonoverlapping_quadrants"
+TELEPATHIC_INSTRUCTION = (
+    "Use the screenshot, context, and OCR. Return valid JSON with exactly one top-level key: context_analysis."
+)
+
+
+def build_image_views(image: Any, policy: str) -> List[Any]:
+    """Return deterministic RGB views in the frozen train/serve order."""
+    rgb = image.convert("RGB")
+    if policy == IMAGE_VIEW_SINGLE:
+        return [rgb]
+    if policy != IMAGE_VIEW_GLOBAL_PLUS_QUADRANTS:
+        raise ValueError(f"unsupported image_view_policy: {policy!r}")
+    width, height = rgb.size
+    if width < 2 or height < 2:
+        raise ValueError("global_plus_four_nonoverlapping_quadrants requires width and height >= 2")
+    x_mid, y_mid = width // 2, height // 2
+    return [
+        rgb,
+        rgb.crop((0, 0, x_mid, y_mid)),
+        rgb.crop((x_mid, 0, width, y_mid)),
+        rgb.crop((0, y_mid, x_mid, height)),
+        rgb.crop((x_mid, y_mid, width, height)),
+    ]
+
+
+def completion_logits_to_keep(labels: torch.Tensor) -> int:
+    """Return the minimal suffix length whose shifted logits cover all labels."""
+    if labels.ndim != 2:
+        raise ValueError("labels must be a [batch, sequence] tensor")
+    ignore = GemmaTrainingConstants.IGNORE_TOKEN_ID
+    sequence_length = int(labels.shape[1])
+    required = 0
+    for row in labels:
+        supervised = (row != ignore).nonzero(as_tuple=True)[0]
+        if supervised.numel() == 0:
+            raise ValueError("completion-only logits require at least one supervised token")
+        first = int(supervised[0].item())
+        last = int(supervised[-1].item())
+        if not bool((row[first : last + 1] != ignore).all()):
+            raise ValueError("completion-only logits require a contiguous supervised suffix")
+        required = max(required, sequence_length - first + 1)
+    return min(sequence_length, required)
+
+
 class DataCollatorGemmaMultimodal:
     """Shared pipeline for Gemma multimodal collators that use ``processor(text=..., …)``.
 
@@ -461,6 +509,12 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
         image_path_column: str = "image_path",
         prompt_column: Optional[str] = None,
         image_token_budget: int = 280,
+        image_view_policy: str = IMAGE_VIEW_SINGLE,
+        system_prompt_column: Optional[str] = None,
+        input_mode_column: Optional[str] = None,
+        require_telepathic_contract: bool = False,
+        completion_only_logits: bool = False,
+        max_length: Optional[int] = None,
         sub_mode: str = "caption",
     ):
         if sub_mode not in ("caption", "vqa"):
@@ -472,6 +526,27 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
         self.image_path_column = image_path_column
         self.prompt_column = prompt_column
         self.image_token_budget = int(image_token_budget)
+        if image_view_policy not in (
+            IMAGE_VIEW_SINGLE,
+            IMAGE_VIEW_GLOBAL_PLUS_QUADRANTS,
+        ):
+            raise ValueError(
+                "DataCollatorGemmaImage: image_view_policy must be 'single' or "
+                "'global_plus_four_nonoverlapping_quadrants'"
+            )
+        self.image_view_policy = image_view_policy
+        self.system_prompt_column = system_prompt_column
+        self.input_mode_column = input_mode_column
+        if input_mode_column and (
+            sub_mode != "vqa"
+            or prompt_column is None
+            or system_prompt_column is None
+            or image_view_policy != IMAGE_VIEW_GLOBAL_PLUS_QUADRANTS
+        ):
+            raise ValueError("Plan 31 input modes require VQA, prompt/system columns, and five frozen views")
+        self.require_telepathic_contract = bool(require_telepathic_contract)
+        self.completion_only_logits = bool(completion_only_logits)
+        self.max_length = int(max_length) if max_length is not None else None
         self.sub_mode = sub_mode
         self._family = family
         self._caps = family_capabilities(family)
@@ -479,7 +554,7 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
         apply_image_token_budget_to_processor(self.processor, self.image_token_budget)
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        images: List[Any] = []
+        images: List[List[Any]] = []
         messages_batch: List[Any] = []
 
         for ex in features:
@@ -494,7 +569,13 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                 img = _load_image_as_rgb(path)
             except Exception as e:
                 raise RuntimeError(f"DataCollatorGemmaImage: row id={row_id!r}: {e}") from e
-            images.append(img)
+            try:
+                image_views = build_image_views(img, self.image_view_policy)
+            except Exception as e:
+                raise RuntimeError(
+                    f"DataCollatorGemmaImage: row id={row_id!r}: failed to build image views: {e}"
+                ) from e
+            images.append(image_views)
 
             text_val = ex.get(self.text_column)
             if self.text_column not in ex:
@@ -506,9 +587,23 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                     f"DataCollatorGemmaImage: text column {self.text_column!r} has a null value (row id={row_id!r})"
                 )
 
-            if self.sub_mode == "caption":
+            plan31_messages = None
+            if self.input_mode_column is not None:
+                mode = ex.get(self.input_mode_column)
+                prompt = ex.get(self.prompt_column)
+                system_prompt = ex.get(self.system_prompt_column)
+                if _is_null(mode) or _is_null(prompt) or _is_null(system_prompt):
+                    raise ValueError(f"DataCollatorGemmaImage: Plan 31 row id={row_id!r} is missing input fields")
+                image_views, plan31_messages = render_plan31_input(
+                    mode=str(mode),
+                    full_prompt=str(prompt),
+                    system_prompt=str(system_prompt),
+                    full_views=image_views,
+                )
+                images[-1] = image_views
+            elif self.sub_mode == "caption":
                 user_content: List[Dict[str, Any]] = [
-                    {"type": "image", "image": img},
+                    *({"type": "image", "image": view} for view in image_views),
                     {"type": "text", "text": self._CAPTION_INSTRUCTION},
                 ]
             else:
@@ -522,23 +617,86 @@ class DataCollatorGemmaImage(DataCollatorGemmaMultimodal):
                     raise ValueError(
                         f"DataCollatorGemmaImage: prompt column {self.prompt_column!r} has a null value (row id={row_id!r})"
                     )
+                if self.require_telepathic_contract:
+                    prompt = str(q)
+                    if not prompt.startswith(TELEPATHIC_INSTRUCTION + "\n\n"):
+                        raise ValueError("DataCollatorGemmaImage: telepathic prompt instruction changed")
+                    for tag in (
+                        "<context>",
+                        "</context>",
+                        "<first_pass_screenshot_ocr>",
+                        "</first_pass_screenshot_ocr>",
+                    ):
+                        if prompt.count(tag) != 1:
+                            raise ValueError(f"DataCollatorGemmaImage: telepathic prompt requires exactly one {tag}")
                 user_content = [
-                    {"type": "image", "image": img},
+                    *({"type": "image", "image": view} for view in image_views),
                     {"type": "text", "text": str(q)},
                 ]
 
-            messages_batch.append(
-                [
-                    {"role": "user", "content": user_content},
-                    {"role": "assistant", "content": [{"type": "text", "text": str(text_val)}]},
-                ]
+            if self.require_telepathic_contract or self.input_mode_column is not None:
+                try:
+                    target = json.loads(str(text_val))
+                except json.JSONDecodeError as exc:
+                    raise ValueError("DataCollatorGemmaImage: telepathic target is not valid JSON") from exc
+                if not isinstance(target, dict) or list(target) != ["context_analysis"]:
+                    raise ValueError(
+                        "DataCollatorGemmaImage: telepathic target must have exactly one context_analysis key"
+                    )
+
+            messages: List[Dict[str, Any]] = [] if plan31_messages is None else plan31_messages
+            if plan31_messages is None:
+                if self.system_prompt_column is None:
+                    if "system_prompt" in ex and not _is_null(ex.get("system_prompt")):
+                        raise ValueError("DataCollatorGemmaImage: compact example contains forbidden system_prompt")
+                else:
+                    system_prompt = ex.get(self.system_prompt_column)
+                    if self.system_prompt_column not in ex or _is_null(system_prompt) or not str(system_prompt):
+                        raise ValueError(f"DataCollatorGemmaImage: conditioned row id={row_id!r} has no system prompt")
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": [{"type": "text", "text": str(system_prompt)}],
+                        }
+                    )
+                messages.append({"role": "user", "content": user_content})
+            messages.append(
+                {"role": "assistant", "content": [{"type": "text", "text": str(text_val)}]}
             )
+            messages_batch.append(messages)
 
         # Gemma4 processor expects batched images as "list per sample" when text is batched.
-        batched_images = [[img] for img in images]
-        encoded = self._apply_chat_template_and_processor(messages_batch, images=batched_images)
+        encoded = self._apply_chat_template_and_processor(messages_batch, images=images, truncation=False)
+        if self.max_length is not None and encoded["input_ids"].shape[1] > self.max_length:
+            raise ValueError(
+                "DataCollatorGemmaImage: untruncated batch exceeds max_length="
+                f"{self.max_length} (observed {encoded['input_ids'].shape[1]})"
+            )
         self._inject_mm_token_types_and_validate_bos(encoded)
         self._labels_with_prompt_mask_and_attention_padding(encoded)
+        if self.require_telepathic_contract or self.input_mode_column is not None:
+            attention = encoded.get("attention_mask")
+            if attention is None:
+                raise ValueError("DataCollatorGemmaImage: processor returned no attention_mask")
+            end_ids = self.processor.tokenizer.encode(self._caps["assistant_end_token"], add_special_tokens=False)
+            if not end_ids:
+                raise ValueError("DataCollatorGemmaImage: assistant end token cannot be encoded")
+            for row_index in range(attention.shape[0]):
+                length = int(attention[row_index].sum().item())
+                row_ids = encoded["input_ids"][row_index, :length].tolist()
+                positions = [
+                    start
+                    for start in range(len(row_ids) - len(end_ids) + 1)
+                    if row_ids[start : start + len(end_ids)] == end_ids
+                ]
+                if not positions or positions[-1] < length - len(end_ids) - 2:
+                    raise ValueError("DataCollatorGemmaImage: assistant end-of-turn token is missing")
+                start = positions[-1]
+                actual_labels = encoded["labels"][row_index, start : start + len(end_ids)].tolist()
+                if actual_labels != end_ids:
+                    raise ValueError("DataCollatorGemmaImage: assistant end-of-turn token is masked")
+        if self.completion_only_logits:
+            encoded["logits_to_keep"] = completion_logits_to_keep(encoded["labels"])
         return encoded
 
 

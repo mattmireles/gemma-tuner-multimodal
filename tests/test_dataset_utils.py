@@ -17,6 +17,15 @@ def _write_csv(path, rows):
     df.to_csv(path, index=False)
 
 
+def test_explicit_dataset_config_matches_training_cli(monkeypatch, tmp_path):
+    explicit = tmp_path / "plan30.ini"
+    explicit.write_text("[dataset:plan30-only]\nsource = plan30-only\n", encoding="utf-8")
+    monkeypatch.setenv("GEMMA_TUNER_CONFIG", str(explicit))
+    monkeypatch.setattr(_du_mod, "_config", None)
+    assert _du_mod._get_config().has_section("dataset:plan30-only")
+    monkeypatch.setattr(_du_mod, "_config", None)
+
+
 def test_resolve_data_datasets_dir_prefers_cwd_when_config_ini_present(tmp_path):
     (tmp_path / "config.ini").write_text("[x]\na=1\n", encoding="utf-8")
     target = tmp_path / "data" / "datasets" / "myds"

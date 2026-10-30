@@ -208,6 +208,19 @@ class TestCreateIntegrityManifest:
             with open(manifest_path) as f:
                 json.load(f)  # Should not raise
 
+    def test_repeated_creation_does_not_hash_previous_manifest(self):
+        """Stop/resume finalization may replace the manifest in one directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").write_text("weights")
+            create_integrity_manifest(tmpdir, metadata={"phase": "stopped"})
+            create_integrity_manifest(tmpdir, metadata={"phase": "resumed"})
+
+            manifest = json.loads(Path(tmpdir, INTEGRITY_MANIFEST_FILENAME).read_text())
+            assert INTEGRITY_MANIFEST_FILENAME not in manifest["files"]
+            success, failures = verify_directory_integrity(tmpdir)
+            assert success is True
+            assert failures == []
+
 
 class TestVerifyDirectoryIntegrity:
     """Tests for verify_directory_integrity function."""

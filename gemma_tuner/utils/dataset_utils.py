@@ -166,15 +166,20 @@ _config: configparser.ConfigParser | None = None
 def _get_config() -> configparser.ConfigParser:
     """Return the module-level ConfigParser, reading config.ini on first access.
 
-    Checks CWD for config.ini first (so tests that chdir work), then falls back
-    to the anchored _CONFIG_INI path computed at import time.
+    Honor the same explicit GEMMA_TUNER_CONFIG path as the training CLI, then
+    check CWD for config.ini before the anchored project default.
     """
     global _config
     if _config is None:
         _config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+        explicit_ini = os.environ.get("GEMMA_TUNER_CONFIG")
         cwd_ini = Path("config.ini")
         cwd_nested = Path("config/config.ini")
-        if cwd_ini.exists():
+        if explicit_ini:
+            if not Path(explicit_ini).is_file():
+                raise FileNotFoundError(f"GEMMA_TUNER_CONFIG not found: {explicit_ini}")
+            _config.read(explicit_ini)
+        elif cwd_ini.exists():
             _config.read(cwd_ini)
         elif cwd_nested.exists():
             _config.read(cwd_nested)

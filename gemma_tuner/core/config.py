@@ -117,6 +117,12 @@ class ConfigConstants:
         "max_samples",
         "max_seq_length",
         "image_token_budget",
+        "seed",
+        "stop_after_step",
+        "telemetry_start_step",
+        "plan32_epoch",
+        "literal_epochs",
+        "segment_steps",
     }
 
     FLOAT_COERCION_KEYS = {
@@ -126,6 +132,7 @@ class ConfigConstants:
         "lora_dropout",
         "learning_rate",
         "weight_decay",
+        "warmup_ratio",
         "temperature",
         "distillation_temperature",
         "distillation_alpha",
@@ -146,6 +153,9 @@ class ConfigConstants:
         "concatenate_audio",
         "use_peft",
         "skip_audio_validation",
+        "full_determinism",
+        "require_telepathic_contract",
+        "completion_only_logits",
     }
 
     # List coercion mapping (key -> delimiter)
@@ -178,6 +188,12 @@ class ConfigConstants:
         "image_sub_mode": "caption",
         "image_path_column": "image_path",
         "image_token_budget": 280,
+        "image_view_policy": "single",
+        "system_prompt_column": None,
+        "input_mode_column": None,
+        "full_determinism": False,
+        "require_telepathic_contract": False,
+        "completion_only_logits": False,
     }
 
     # Granary Dataset Integration Constants
@@ -208,6 +224,7 @@ class ConfigConstants:
 
     # Image vision token budget (Gemma 3n/4); must match train/serve contract
     IMAGE_TOKEN_BUDGET_ALLOWED = frozenset({70, 140, 280, 560, 1120})
+    IMAGE_VIEW_POLICY_ALLOWED = frozenset({"single", "global_plus_four_nonoverlapping_quadrants"})
 
 
 def load_profile_config(cfg: configparser.ConfigParser, profile_name: str) -> "ProfileConfig":
@@ -658,11 +675,52 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
             conf["prompt_column"] = None
         elif isinstance(pc, str):
             conf["prompt_column"] = pc.strip()
+    for optional_string in (
+        "system_prompt_column",
+        "input_mode_column",
+        "plan31_schedule_path",
+        "plan31_schedule_sha256",
+        "plan31_projection_receipt_sha256",
+        "plan32_schedule_path",
+        "plan32_schedule_sha256",
+        "plan32_projection_receipt_sha256",
+        "plan32_projection_receipt_path",
+        "initial_adapter_path",
+        "conditioned_system_prompt_template",
+        "conditioned_system_prompt_sha256",
+        "resume_from_checkpoint",
+        "lora_target_modules_regex",
+    ):
+        if optional_string in conf:
+            value = conf[optional_string]
+            conf[optional_string] = str(value).strip() if value is not None and str(value).strip() else None
+    if conf.get("lora_target_modules_regex") and conf.get("lora_target_modules"):
+        raise ValueError("lora_target_modules_regex and lora_target_modules are mutually exclusive")
+    if conf.get("system_prompt_column") and (
+        conf.get("conditioned_system_prompt_template")
+        or conf.get("conditioned_system_prompt_sha256")
+    ):
+        if not conf.get("conditioned_system_prompt_template") or not conf.get("conditioned_system_prompt_sha256"):
+            raise ValueError("conditioned system prompt template/hash pair is incomplete")
+        digest = str(conf["conditioned_system_prompt_sha256"])
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ValueError("conditioned_system_prompt_sha256 must be lowercase SHA-256")
+    if conf.get("input_mode_column") and (
+        str(conf.get("modality", "")).strip().lower() != "image"
+        or str(conf.get("image_sub_mode", "")).strip().lower() != "vqa"
+        or not conf.get("prompt_column")
+        or not conf.get("system_prompt_column")
+        or str(conf.get("image_view_policy", "")) != "global_plus_four_nonoverlapping_quadrants"
+    ):
+        raise ValueError("input_mode_column requires image VQA with prompt/system columns and five views")
 
     if "max_seq_length" in conf and conf["max_seq_length"] is not None and conf["max_seq_length"] != "":
         msl = int(conf["max_seq_length"]) if not isinstance(conf["max_seq_length"], int) else conf["max_seq_length"]
         if msl < 1:
             raise ValueError(f"max_seq_length must be >= 1, got {msl}")
+    if "stop_after_step" in conf and conf["stop_after_step"] not in (None, ""):
+        if int(conf["stop_after_step"]) < 1:
+            raise ValueError("stop_after_step must be >= 1")
 
     # Image-bearing modalities (defaults applied via FALLBACK_DEFAULTS; validation only when needed)
     modality_val = str(conf.get("modality", "audio")).strip().lower()
@@ -692,6 +750,13 @@ def _validate_profile_config(conf: Dict, required_keys: list[str]) -> None:
             raise ValueError(
                 f"image_token_budget must be one of {sorted(ConfigConstants.IMAGE_TOKEN_BUDGET_ALLOWED)}, got {itb_int}"
             )
+        image_view_policy = str(conf.get("image_view_policy", "single")).strip()
+        if image_view_policy not in ConfigConstants.IMAGE_VIEW_POLICY_ALLOWED:
+            raise ValueError(
+                "image_view_policy must be one of "
+                f"{sorted(ConfigConstants.IMAGE_VIEW_POLICY_ALLOWED)}, got {image_view_policy!r}"
+            )
+        conf["image_view_policy"] = image_view_policy
         ims = str(conf.get("image_sub_mode", "caption")).strip().lower()
         if ims == "vqa" and modality_val == "image":
             pc = conf.get("prompt_column")
